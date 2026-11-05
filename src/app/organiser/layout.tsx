@@ -9,6 +9,7 @@ export default function OrganiserLayout({ children }: LayoutProps<"/organiser">)
         { href: "/organiser", label: "Events", exact: true },
         { href: "/organiser/events/ev_nairobi_summit", label: "Nairobi Brand & PR Summit" },
         { href: "/organiser/finance", label: "Finance and payouts" },
+        { href: "/organiser/team", label: "Team and roles" },
         { href: "/organiser/kyc", label: "KYC" },
       ]}
     >

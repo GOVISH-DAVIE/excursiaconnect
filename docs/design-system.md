@@ -53,7 +53,7 @@ A real logo keeps its own colours. The icon is never tinted or inverted.
 
 - **Buttons.** One pair: `.btn-primary` (filled accent, ink label) and `.btn-secondary` (tinted, no border; `.btn-ghost` and `.btn-dark` are kept as aliases). Exactly one filled button marks the main action in any view. The main action of a site carries `.btn-cta`, which adds the drawn chevron; `.btn--xl` is the close's one big button. `.btn-quiet` and `.btn-sm` are the 36px row actions inside tables.
 - **Links.** `.link` in running text: a faint hairline at rest, an ink line on hover, an arrow that moves.
-- **Surfaces.** `.surface` is a dashboard card (white, hairline, 12px). `.tile` is a feature tile on the site (20px). `.card-link` makes either lift on hover.
+- **Surfaces.** `.surface` is a dashboard card (white, hairline, 12px). `.card-link` makes a linked one lift on hover. The card is barely there and never repeats one layout four times: a dashboard's stats are one divided row of ink numbers (`.stat`, a tone shown as a dot by the label), speakers are open entries on hairlines (`.person`), tickets are ruled rows with the price set large and a text link (`.rows--tickets`), registration choices are ruled rows (`.choice`). Boxes go at most two deep.
 - **Forms.** `.input` fields are 48px with 16px text; `.label` is 13px at 500. Fields take the accent border and a soft ring on focus.
 - **Status.** `.pill` at 13px; `<EventPill>`, `<StatusPill>` and `<Tone>` map states to the status colours.
 - **Dashboards.** `<Rail>` (the dark persona rail with the light wordmark), `<PageHeader>`, `<Stat>` (a `--t-stat` number; with an `href` it is a linked card), `<Section>`, `<Tabs>`, `<KV>`, `<Bars>`, `<Meter>`; `.th` and `.td` for tables.

@@ -160,7 +160,56 @@ export interface Message {
   at: string;
 }
 
+export type Role = "Owner" | "Staff" | "Finance" | "Accreditation" | "Speaker";
+
+export type Capability =
+  | "event.edit"
+  | "event.submit"
+  | "event.programme"
+  | "delegates.view"
+  | "delegates.edit"
+  | "delegates.approve"
+  | "delegates.badge"
+  | "delegates.export"
+  | "delegates.campaign"
+  | "access.grant"
+  | "access.scan"
+  | "access.override"
+  | "money.view"
+  | "money.markPaid"
+  | "money.refund"
+  | "money.payout"
+  | "sessions.own"
+  | "sessions.all"
+  | "team.invite"
+  | "team.roles";
+
+export interface TeamMember {
+  id: string;
+  organiserId: string;
+  name: string;
+  email: string;
+  role: Role;
+  eventIds: string[]; // empty = every event of the organiser
+  responsibility?: string; // what they look after: Delegates, Exhibition, Programme, Sponsors
+  status: "Active" | "Invited";
+  lastActive?: string;
+}
+
+/** A scanning shift: one post (the desk, or a zone entrance or exit) on one day and slot. */
+export interface Shift {
+  id: string;
+  eventId: string;
+  day: number;
+  slot: "Morning" | "Afternoon";
+  post: string; // "desk" | "<zoneId>:in" | "<zoneId>:out"
+  memberId?: string;
+}
+
 export interface AppState {
+  team: TeamMember[];
+  shifts: Shift[];
+  grants: Record<Role, Capability[]>;
   organisers: Organiser[];
   events: EventRecord[];
   tiers: Tier[];

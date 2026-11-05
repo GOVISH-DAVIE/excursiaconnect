@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useReducer, type ReactNode } from "react";
 import { seed } from "./seed";
-import type { AppState, Category, Delegate, EventState, Order, PaymentMethod, Session } from "./types";
+import type { AppState, Capability, Category, Delegate, EventState, Order, PaymentMethod, Role, Session, TeamMember } from "./types";
 
 const STORAGE_KEY = "excursiaconnect-proto-v1";
 
@@ -24,7 +24,12 @@ type Action =
   | { type: "verifyKyc"; organiserId: string }
   | { type: "updateSession"; sessionId: string; patch: Partial<Session> }
   | { type: "grantZone"; delegateId: string; zoneId: string; on: boolean }
-  | { type: "refund"; delegateId: string };
+  | { type: "refund"; delegateId: string }
+  | { type: "setGrant"; role: Role; cap: Capability; on: boolean }
+  | { type: "inviteMember"; member: TeamMember }
+  | { type: "setMemberRole"; memberId: string; role: Role }
+  | { type: "removeMember"; memberId: string }
+  | { type: "assignShift"; eventId: string; day: number; slot: "Morning" | "Afternoon"; post: string; memberId?: string };
 
 function nowTime() {
   const d = new Date();
@@ -36,7 +41,8 @@ function reducer(state: AppState, action: Action): AppState {
     case "reset":
       return structuredClone(seed);
     case "hydrate":
-      return action.state;
+      // a state saved before a key existed takes the seed's value for it
+      return { ...structuredClone(seed), ...action.state };
     case "register": {
       const tiers = state.tiers.map((t) => (t.id === action.delegate.tierId && action.delegate.status === "Confirmed" ? { ...t, sold: t.sold + 1 } : t));
       return { ...state, tiers, delegates: [action.delegate, ...state.delegates], orders: action.order ? [action.order, ...state.orders] : state.orders, currentDelegateId: action.delegate.id };
@@ -109,6 +115,27 @@ function reducer(state: AppState, action: Action): AppState {
         delegates: state.delegates.map((d) => (d.id === action.delegateId ? { ...d, status: "Refunded", cancelled: true } : d)),
         orders: state.orders.map((o) => (o.delegateId === action.delegateId ? { ...o, status: "refunded" } : o)),
       };
+    case "setGrant": {
+      if (action.role === "Owner") return state;
+      const caps = new Set(state.grants[action.role] ?? []);
+      if (action.on) caps.add(action.cap); else caps.delete(action.cap);
+      return { ...state, grants: { ...state.grants, [action.role]: [...caps] } };
+    }
+    case "inviteMember":
+      return { ...state, team: [...state.team, action.member] };
+    case "setMemberRole":
+      return { ...state, team: state.team.map((m) => (m.id === action.memberId && m.role !== "Owner" ? { ...m, role: action.role } : m)) };
+    case "removeMember":
+      return {
+        ...state,
+        team: state.team.filter((m) => m.id !== action.memberId || m.role === "Owner"),
+        shifts: state.shifts.map((s) => (s.memberId === action.memberId ? { ...s, memberId: undefined } : s)),
+      };
+    case "assignShift": {
+      const same = (s: AppState["shifts"][number]) => s.eventId === action.eventId && s.day === action.day && s.slot === action.slot && s.post === action.post;
+      const rest = state.shifts.filter((s) => !same(s));
+      return { ...state, shifts: action.memberId ? [...rest, { id: `sh_${action.day}_${action.slot}_${action.post}`, eventId: action.eventId, day: action.day, slot: action.slot, post: action.post, memberId: action.memberId }] : rest };
+    }
     default:
       return state;
   }

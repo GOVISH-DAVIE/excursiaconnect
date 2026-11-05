@@ -33,6 +33,8 @@ Every number on a summary screen links to the page that explains it: stat tiles 
 | `/organiser/events/[id]/tiers/[tid]` | Organiser | Tier detail: sold vs cap, revenue, rules, every delegate on the tier |
 | `/organiser/finance`, `/organiser/finance/[pid]` | Organiser | Payout list and per-payout statement listing every settled order |
 | `/organiser/kyc` | Organiser | KYC pack status |
+| `/organiser/team` | Organiser | Staff with roles, responsibilities and event scope; the role matrix (capability by role, editable); the scanning rota (post by day and shift) |
+| `/admin/performance` | Algotech | Every event by state with registrations, fill against expected attendance, gross and commission; the same per organiser with the next payout |
 | `/speaker/[sid]` | Facilitator | The same session view with start/end, slides upload and feedback |
 | `/admin/organisers/[oid]` | Algotech | Organiser detail: KYC pack, rate card, payouts (held while KYC pending), events with approved terms |
 | `/admin` | Algotech | Approval queue, KYC pack review, per-event commission / fees / staffing form, approve / request changes / reject |

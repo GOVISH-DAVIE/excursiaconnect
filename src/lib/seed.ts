@@ -1,4 +1,32 @@
-import type { AppState, Delegate, Order, Session } from "./types";
+import type { AppState, Delegate, Order, Session, Shift, TeamMember } from "./types";
+import { DEFAULT_GRANTS } from "./roles";
+
+const team: TeamMember[] = [
+  { id: "u_owner", organiserId: "org_epic", name: "Njeri Kamande", email: "njeri@epicpr.example", role: "Owner", eventIds: [], status: "Active", lastActive: "Today, 09:12" },
+  { id: "u_staff1", organiserId: "org_epic", name: "Kevin Oduya", email: "kevin@epicpr.example", role: "Staff", eventIds: ["ev_nairobi_summit"], responsibility: "Delegates", status: "Active", lastActive: "Today, 08:40" },
+  { id: "u_staff2", organiserId: "org_epic", name: "Faith Wanjala", email: "faith@epicpr.example", role: "Staff", eventIds: ["ev_nairobi_summit", "ev_fintech_forum"], responsibility: "Exhibition and sponsors", status: "Active", lastActive: "Yesterday" },
+  { id: "u_staff3", organiserId: "org_epic", name: "Brian Kiptoo", email: "brian@epicpr.example", role: "Staff", eventIds: ["ev_nairobi_summit"], responsibility: "Programme and speakers", status: "Active", lastActive: "Today, 07:55" },
+  { id: "u_fin", organiserId: "org_epic", name: "Dennis Mburu", email: "dennis@epicpr.example", role: "Finance", eventIds: [], responsibility: "Ledger and payouts", status: "Active", lastActive: "Mon 3 Nov" },
+  { id: "u_desk1", organiserId: "org_epic", name: "Agnes Muthoni", email: "agnes@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:02" },
+  { id: "u_desk2", organiserId: "org_epic", name: "Collins Were", email: "collins@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:05" },
+  { id: "u_desk3", organiserId: "org_epic", name: "Mary Atieno", email: "mary@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:10" },
+  { id: "u_desk4", organiserId: "org_epic", name: "Joseph Kariuki", email: "joseph@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:11" },
+  { id: "u_desk5", organiserId: "org_epic", name: "Lucy Nekesa", email: "lucy@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Invited" },
+  { id: "u_desk6", organiserId: "org_epic", name: "Patrick Omolo", email: "patrick@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Invited" },
+  { id: "u_spk", organiserId: "org_epic", name: "Esther Njeri", email: "esther.njeri@company.co.ke", role: "Speaker", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 10:55" },
+];
+
+const shifts: Shift[] = [
+  { id: "sh1", eventId: "ev_nairobi_summit", day: 1, slot: "Morning", post: "desk", memberId: "u_desk1" },
+  { id: "sh2", eventId: "ev_nairobi_summit", day: 1, slot: "Afternoon", post: "desk", memberId: "u_desk2" },
+  { id: "sh3", eventId: "ev_nairobi_summit", day: 1, slot: "Morning", post: "z_main:in", memberId: "u_desk3" },
+  { id: "sh4", eventId: "ev_nairobi_summit", day: 1, slot: "Afternoon", post: "z_main:in", memberId: "u_desk3" },
+  { id: "sh5", eventId: "ev_nairobi_summit", day: 1, slot: "Morning", post: "z_exhib:in", memberId: "u_desk4" },
+  { id: "sh6", eventId: "ev_nairobi_summit", day: 1, slot: "Morning", post: "z_vip:in", memberId: "u_desk2" },
+  { id: "sh7", eventId: "ev_nairobi_summit", day: 1, slot: "Afternoon", post: "z_breakout:in", memberId: "u_desk4" },
+  { id: "sh8", eventId: "ev_nairobi_summit", day: 2, slot: "Morning", post: "desk", memberId: "u_desk1" },
+  { id: "sh9", eventId: "ev_nairobi_summit", day: 2, slot: "Morning", post: "z_main:in", memberId: "u_desk3" },
+];
 
 const EV = "ev_nairobi_summit";
 const EV2 = "ev_coastal_pr";
@@ -43,21 +71,21 @@ const rooms = [
 ];
 
 const sessions: Session[] = [
-  { id: "s1", eventId: EV, day: 1, start: "08:00", end: "09:00", title: "Accreditation and coffee", kind: "break", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
-  { id: "s2", eventId: EV, day: 1, start: "09:00", end: "10:30", title: "Opening plenary: The state of African brands", kind: "plenary", speakers: ["Wanjiru Kamau", "Hassan Abdalla"], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
-  { id: "s3", eventId: EV, day: 1, start: "11:00", end: "12:30", title: "Crisis communications in real time", track: "PR", roomId: "r_a", kind: "breakout", speakers: ["Esther Njeri"], capacity: 60, enrolled: 41, attended: 31, rating: 4.6, status: "ended", walkIns: false, comments: ["Clear, practical, wanted more time for questions.", "Best session of the day."] },
-  { id: "s4", eventId: EV, day: 1, start: "11:00", end: "12:30", title: "Measuring earned media", track: "Analytics", roomId: "r_b", kind: "breakout", speakers: ["Brian Otieno"], capacity: 50, enrolled: 50, attended: 39, rating: 4.2, status: "ended", walkIns: false, comments: ["Clear, practical, wanted more time for questions.", "Best session of the day."] },
-  { id: "s5", eventId: EV, day: 1, start: "11:00", end: "12:30", title: "Influencer contracts that hold up", track: "Legal", roomId: "r_c", kind: "breakout", speakers: ["Lydia Wambui"], capacity: 40, enrolled: 22, attended: 0, status: "scheduled", walkIns: false },
-  { id: "s6", eventId: EV, day: 1, start: "12:30", end: "14:00", title: "Lunch", kind: "break", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
-  { id: "s7", eventId: EV, day: 1, start: "14:00", end: "15:30", title: "Panel: Corporate events after the pandemic", kind: "plenary", speakers: ["Felix Mutua", "Grace Ndungu", "Peter Barasa"], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
-  { id: "s8", eventId: EV, day: 1, start: "19:00", end: "22:00", title: "Gala dinner (VIP and sponsors)", kind: "social", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
-  { id: "s9", eventId: EV, day: 2, start: "09:00", end: "10:30", title: "Keynote: Storytelling for East African audiences", kind: "plenary", speakers: ["Achieng Omondi"], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
-  { id: "s10", eventId: EV, day: 2, start: "11:00", end: "12:30", title: "Workshop: Building a media list", track: "PR", roomId: "r_a", kind: "breakout", speakers: ["Nelson Karanja"], capacity: 60, enrolled: 33, attended: 0, status: "scheduled", walkIns: false },
-  { id: "s11", eventId: EV, day: 2, start: "11:00", end: "12:30", title: "Sponsorship ROI, by the numbers", track: "Analytics", roomId: "r_b", kind: "breakout", speakers: ["Mercy Cheruiyot"], capacity: 50, enrolled: 29, attended: 0, status: "scheduled", walkIns: false },
-  { id: "s12", eventId: EV, day: 2, start: "12:30", end: "14:00", title: "Lunch", kind: "break", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
-  { id: "s13", eventId: EV, day: 2, start: "14:00", end: "15:30", title: "Agency showcase and exhibition hour", kind: "social", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
-  { id: "s14", eventId: EV, day: 3, start: "09:00", end: "10:30", title: "Closing plenary and awards", kind: "plenary", speakers: ["Wanjiru Kamau"], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
-  { id: "s15", eventId: EV, day: 3, start: "11:00", end: "12:30", title: "Roundtable: Working with government", track: "Policy", roomId: "r_c", kind: "breakout", speakers: ["Samuel Kiprop"], capacity: 40, enrolled: 18, attended: 0, status: "scheduled", walkIns: false },
+  { id: "s1", eventId: "ev_nairobi_summit", day: 1, start: "08:00", end: "09:00", title: "Accreditation and coffee", kind: "break", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
+  { id: "s2", eventId: "ev_nairobi_summit", day: 1, start: "09:00", end: "10:30", title: "Opening plenary: The state of African brands", kind: "plenary", speakers: ["Wanjiru Kamau", "Hassan Abdalla"], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
+  { id: "s3", eventId: "ev_nairobi_summit", day: 1, start: "11:00", end: "12:30", title: "Crisis communications in real time", track: "PR", roomId: "r_a", kind: "breakout", speakers: ["Esther Njeri"], capacity: 60, enrolled: 41, attended: 31, rating: 4.6, status: "ended", walkIns: false, comments: ["Clear, practical, wanted more time for questions.", "Best session of the day."] },
+  { id: "s4", eventId: "ev_nairobi_summit", day: 1, start: "11:00", end: "12:30", title: "Measuring earned media", track: "Analytics", roomId: "r_b", kind: "breakout", speakers: ["Brian Otieno"], capacity: 50, enrolled: 50, attended: 39, rating: 4.2, status: "ended", walkIns: false, comments: ["Clear, practical, wanted more time for questions.", "Best session of the day."] },
+  { id: "s5", eventId: "ev_nairobi_summit", day: 1, start: "11:00", end: "12:30", title: "Influencer contracts that hold up", track: "Legal", roomId: "r_c", kind: "breakout", speakers: ["Lydia Wambui"], capacity: 40, enrolled: 22, attended: 0, status: "scheduled", walkIns: false },
+  { id: "s6", eventId: "ev_nairobi_summit", day: 1, start: "12:30", end: "14:00", title: "Lunch", kind: "break", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
+  { id: "s7", eventId: "ev_nairobi_summit", day: 1, start: "14:00", end: "15:30", title: "Panel: Corporate events after the pandemic", kind: "plenary", speakers: ["Felix Mutua", "Grace Ndungu", "Peter Barasa"], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
+  { id: "s8", eventId: "ev_nairobi_summit", day: 1, start: "19:00", end: "22:00", title: "Gala dinner (VIP and sponsors)", kind: "social", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
+  { id: "s9", eventId: "ev_nairobi_summit", day: 2, start: "09:00", end: "10:30", title: "Keynote: Storytelling for East African audiences", kind: "plenary", speakers: ["Achieng Omondi"], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
+  { id: "s10", eventId: "ev_nairobi_summit", day: 2, start: "11:00", end: "12:30", title: "Workshop: Building a media list", track: "PR", roomId: "r_a", kind: "breakout", speakers: ["Nelson Karanja"], capacity: 60, enrolled: 33, attended: 0, status: "scheduled", walkIns: false },
+  { id: "s11", eventId: "ev_nairobi_summit", day: 2, start: "11:00", end: "12:30", title: "Sponsorship ROI, by the numbers", track: "Analytics", roomId: "r_b", kind: "breakout", speakers: ["Mercy Cheruiyot"], capacity: 50, enrolled: 29, attended: 0, status: "scheduled", walkIns: false },
+  { id: "s12", eventId: "ev_nairobi_summit", day: 2, start: "12:30", end: "14:00", title: "Lunch", kind: "break", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
+  { id: "s13", eventId: "ev_nairobi_summit", day: 2, start: "14:00", end: "15:30", title: "Agency showcase and exhibition hour", kind: "social", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
+  { id: "s14", eventId: "ev_nairobi_summit", day: 3, start: "09:00", end: "10:30", title: "Closing plenary and awards", kind: "plenary", speakers: ["Wanjiru Kamau"], enrolled: 0, attended: 0, status: "scheduled", walkIns: true },
+  { id: "s15", eventId: "ev_nairobi_summit", day: 3, start: "11:00", end: "12:30", title: "Roundtable: Working with government", track: "Policy", roomId: "r_c", kind: "breakout", speakers: ["Samuel Kiprop"], capacity: 40, enrolled: 18, attended: 0, status: "scheduled", walkIns: false },
 ];
 
 const delegates: Delegate[] = [];
@@ -151,6 +179,9 @@ const liveIds = new Set(delegates.map((d) => d.id));
 const cleanOrders = orders.filter((o) => liveIds.has(o.delegateId));
 
 export const seed: AppState = {
+  team,
+  shifts,
+  grants: DEFAULT_GRANTS,
   organisers: [
     { id: "org_epic", name: "Epic PR & Events Ltd", kycStatus: "Verified", kraPin: "P051234567X", registrationNo: "PVT-2019-44821", payoutAccount: "KCB ****4471", licenceFee: 85000, commissionPct: 5 },
     { id: "org_coast", name: "Coastal Communications", kycStatus: "Pending", kraPin: "P059876543Y", registrationNo: "PVT-2022-11930", payoutAccount: "M-Pesa till 5522118", licenceFee: 60000, commissionPct: 6 },
