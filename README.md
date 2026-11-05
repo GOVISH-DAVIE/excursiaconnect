@@ -11,7 +11,9 @@ npm run dev      # http://localhost:3000
 npm run build && npm start
 ```
 
-No environment variables, database or payment keys are needed. The Manrope font is bundled locally so it builds offline.
+No environment variables, database or payment keys are needed. The Rethink Sans font is bundled locally so it builds offline.
+
+One design language covers every screen: tokens, type, buttons and the public site's page rhythm are in [docs/design-system.md](docs/design-system.md).
 
 Every number on a summary screen links to the page that explains it: stat tiles open filtered lists, table rows open records.
 
@@ -20,7 +22,7 @@ Every number on a summary screen links to the page that explains it: stat tiles 
 | Route | Persona | What it shows |
 | --- | --- | --- |
 | `/` | — | Switchboard between personas, reset button |
-| `/e/[slug]` | Delegate | Organiser-branded public event page: day-by-day programme, ticket tiers, places left |
+| `/e/[slug]` | Delegate | Organiser-branded event website: hero with the Day 1 programme, three-day programme, speakers, tickets with places left, venue zones, questions, one close |
 | `/e/[slug]/register` | Delegate | Tier → details (fields vary by category) → payment (M-Pesa STK push, Paystack card, bank invoice; promo `EARLY10`) → confirmation. Sponsor pass goes to organiser approval. |
 | `/badge/[id]` | Delegate | Mobile badge with QR, access entitlements, My day, breakout enrolment with capacity, People directory with meeting-slot booking, brief chat. Try `/badge/d_demo`. |
 | `/organiser` | Organiser | Events by approval state; Submit for approval / Go live |

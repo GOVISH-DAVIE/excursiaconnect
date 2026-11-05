@@ -41,7 +41,7 @@ export default function AdminQueue() {
                 <li key={e.id}>
                   <button onClick={() => { setOpenId(e.id); setForm({}); setNote(""); }} className={`w-full text-left px-5 py-3 border-b border-line border-l-[3px] hover:bg-paper ${openId === e.id ? "border-l-coral bg-paper" : "border-l-transparent"}`}>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-sm leading-tight">{e.name}</span>
+                      <span className="font-medium text-sm leading-tight">{e.name}</span>
                       <EventPill state={e.state} />
                     </div>
                     <div className="mt-1 text-[13px] text-slate">
@@ -78,7 +78,7 @@ export default function AdminQueue() {
                 <div>
                   <div className="h2 mb-2 flex items-center justify-between">
                     <span>KYC pack</span>
-                    <Link href={`/admin/organisers/${org.id}`} className="text-[13px] font-semibold text-coral">
+                    <Link href={`/admin/organisers/${org.id}`} className="text-[13px] font-medium text-coral">
                       Open organiser
                     </Link>
                   </div>
@@ -102,7 +102,7 @@ export default function AdminQueue() {
                       {org.kycStatus !== "Verified" && " — verify before approving"}
                     </span>
                     {org.kycStatus !== "Verified" && (
-                      <button className="btn-dark py-1 px-2.5 text-[12px]" onClick={() => dispatch({ type: "verifyKyc", organiserId: org.id })}>
+                      <button className="btn-secondary py-1 px-2.5 text-[13px]" onClick={() => dispatch({ type: "verifyKyc", organiserId: org.id })}>
                         Mark KYC verified
                       </button>
                     )}
@@ -148,13 +148,13 @@ export default function AdminQueue() {
               <div className="mt-4 flex flex-wrap gap-2 justify-end">
                 {open.state !== "Live" && open.state !== "Closed" && (
                   <>
-                    <button className="btn-ghost text-bad" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Rejected", note })}>
+                    <button className="btn-secondary text-bad" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Rejected", note })}>
                       Reject
                     </button>
-                    <button className="btn-ghost" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Changes requested", note })}>
+                    <button className="btn-secondary" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Changes requested", note })}>
                       Request changes
                     </button>
-                    <button className="btn-ghost" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Under review" })}>
+                    <button className="btn-secondary" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Under review" })}>
                       Mark under review
                     </button>
                     <button className="btn-primary" disabled={org.kycStatus !== "Verified"} onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Approved", pricing: form })}>
@@ -163,7 +163,7 @@ export default function AdminQueue() {
                   </>
                 )}
                 {open.state === "Live" && (
-                  <button className="btn-ghost text-bad" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Rejected", note: "Suspended by Algotech" })}>
+                  <button className="btn-secondary text-bad" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Rejected", note: "Suspended by Algotech" })}>
                     Suspend event
                   </button>
                 )}

@@ -44,7 +44,7 @@ export function EventWorkspace({ id }: { id: string }) {
         kicker={`${event.venue}, ${event.city}. ${event.days} days, ${event.expectedAttendance} expected.`}
         actions={
           <>
-            <Link href={`/e/${event.slug}`} className="btn-ghost" target="_blank">
+            <Link href={`/e/${event.slug}`} className="btn-secondary" target="_blank">
               Public page
             </Link>
             {event.state === "Draft" && (
@@ -83,7 +83,7 @@ export function EventWorkspace({ id }: { id: string }) {
                     <Link href={`${base}/zones/${z.id}`} className="block px-5 py-3 border-b border-line last:border-0 hover:bg-paper">
                       <div className="flex justify-between text-sm">
                         <span className="font-medium">{z.name}</span>
-                        <span className={`num ${z.occupancy / z.capacity >= 0.9 ? "text-bad font-semibold" : "text-slate"}`}>
+                        <span className={`num ${z.occupancy / z.capacity >= 0.9 ? "text-bad font-medium" : "text-slate"}`}>
                           {z.occupancy} / {z.capacity}
                         </span>
                       </div>
@@ -151,7 +151,7 @@ export function EventWorkspace({ id }: { id: string }) {
 
       {tab === "Tickets and form" && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <Section title="Ticket tiers" action={<button className="btn-ghost">Add tier</button>} flush>
+          <Section title="Ticket tiers" action={<button className="btn-secondary">Add tier</button>} flush>
             <table className="w-full">
               <thead>
                 <tr>
@@ -189,7 +189,7 @@ export function EventWorkspace({ id }: { id: string }) {
             </table>
             <p className="px-5 py-3 text-[13px] text-slate">A price change on a live event goes back to Algotech for re-approval. Registration continues on the approved terms meanwhile.</p>
           </Section>
-          <Section title="Registration form" action={<button className="btn-ghost">Add field</button>} flush>
+          <Section title="Registration form" action={<button className="btn-secondary">Add field</button>} flush>
             <table className="w-full">
               <thead>
                 <tr>
@@ -222,7 +222,7 @@ export function EventWorkspace({ id }: { id: string }) {
             <div className="px-5 py-4 flex items-center gap-3 text-sm border-t border-line">
               <span className="h-8 w-8 rounded" style={{ background: event.brand.primary }} />
               <div>
-                <div className="font-semibold">Brand colour {event.brand.primary}</div>
+                <div className="font-medium">Brand colour {event.brand.primary}</div>
                 <div className="text-[13px] text-slate">Used on the public page, emails, badges and the post-event report.</div>
               </div>
             </div>
@@ -231,14 +231,14 @@ export function EventWorkspace({ id }: { id: string }) {
       )}
 
       {tab === "Programme" && (
-        <Section title="Programme" action={<button className="btn-ghost">Add session</button>}>
+        <Section title="Programme" action={<button className="btn-secondary">Add session</button>}>
           <Programme sessions={sessions} rooms={state.rooms} days={event.days} startDate={event.startDate} linkBase={`${base}/sessions`} />
         </Section>
       )}
 
       {tab === "Zones and rooms" && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <Section title="Zones" action={<button className="btn-ghost">Add zone</button>} flush>
+          <Section title="Zones" action={<button className="btn-secondary">Add zone</button>} flush>
             <table className="w-full">
               <thead>
                 <tr>
@@ -298,7 +298,7 @@ export function EventWorkspace({ id }: { id: string }) {
             <Stat label="Your net" value={money(net)} tone="ok" />
             <Stat label="Next payout" value="Fri 6 Nov" sub={`to ${state.organisers[0].payoutAccount}`} href="/organiser/finance" />
           </div>
-          <Section title="Ledger" action={<button className="btn-ghost">Export .xlsx</button>} flush>
+          <Section title="Ledger" action={<button className="btn-secondary">Export .xlsx</button>} flush>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -327,10 +327,10 @@ export function EventWorkspace({ id }: { id: string }) {
                         </td>
                         <td className="td text-slate">{tiers.find((t) => t.id === o.tierId)?.name}</td>
                         <td className="td">{o.method === "mpesa" ? "M-Pesa" : o.method === "card" ? "Card" : "Bank"}</td>
-                        <td className="td font-mono text-[12px]">{o.reference}</td>
+                        <td className="td font-mono text-[13px]">{o.reference}</td>
                         <td className="td-r">{o.gross.toLocaleString()}</td>
                         <td className="td-r text-slate">{o.commission.toLocaleString()}</td>
-                        <td className="td-r font-semibold">{o.net.toLocaleString()}</td>
+                        <td className="td-r font-medium">{o.net.toLocaleString()}</td>
                         <td className="td">
                           <span className={`pill ${o.status === "paid" ? "bg-ok-50 text-ok" : o.status === "refunded" ? "bg-bad-50 text-bad" : "bg-warn-50 text-warn"}`}>{o.status}</span>
                         </td>
@@ -377,11 +377,11 @@ function DelegatesTab({ delegates, base, tierName, initialStatus }: { delegates:
       flush
       action={
         <div className="flex gap-2">
-          <button className="btn-ghost" onClick={exportCsv}>
+          <button className="btn-secondary" onClick={exportCsv}>
             Export CSV
           </button>
-          <button className="btn-ghost">Import CSV</button>
-          <button className="btn-ghost">Send a message</button>
+          <button className="btn-secondary">Import CSV</button>
+          <button className="btn-secondary">Send a message</button>
         </div>
       }
     >
@@ -415,7 +415,7 @@ function DelegatesTab({ delegates, base, tierName, initialStatus }: { delegates:
             {rows.slice(0, 100).map((d) => (
               <tr key={d.id} className="hover:bg-paper">
                 <td className="td">
-                  <Link href={`${base}/delegates/${d.id}`} className="font-semibold hover:underline">
+                  <Link href={`${base}/delegates/${d.id}`} className="font-medium hover:underline">
                     {d.name}
                   </Link>
                   <div className="text-[13px] text-slate">{d.email}</div>

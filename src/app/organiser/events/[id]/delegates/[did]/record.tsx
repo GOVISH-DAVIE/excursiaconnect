@@ -43,10 +43,10 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
         kicker={`${d.jobTitle || d.category}, ${d.organisation}. ${tier.name} ticket, badge ${d.badgeCode}.`}
         actions={
           <>
-            <Link href={`/badge/${d.id}`} target="_blank" className="btn-ghost">
+            <Link href={`/badge/${d.id}`} target="_blank" className="btn-secondary">
               Open badge
             </Link>
-            <button className="btn-ghost" onClick={() => dispatch({ type: "updateDelegate", delegateId: d.id, patch: { badgeCode: `EXC-RE-${Math.floor(1000 + Math.random() * 8999)}` } })}>
+            <button className="btn-secondary" onClick={() => dispatch({ type: "updateDelegate", delegateId: d.id, patch: { badgeCode: `EXC-RE-${Math.floor(1000 + Math.random() * 8999)}` } })}>
               Reissue badge
             </button>
             {d.status === "Pending" && (
@@ -60,7 +60,7 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
               </button>
             )}
             {(d.status === "Confirmed" || d.status === "Checked in") && (
-              <button className="btn-ghost text-bad" onClick={() => dispatch({ type: "refund", delegateId: d.id })}>
+              <button className="btn-secondary text-bad" onClick={() => dispatch({ type: "refund", delegateId: d.id })}>
                 Refund and cancel
               </button>
             )}
@@ -84,7 +84,7 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
               </button>
             ) : (
               <button
-                className="btn-ghost"
+                className="btn-secondary"
                 onClick={() => {
                   setForm({ name: d.name, organisation: d.organisation, jobTitle: d.jobTitle, phone: d.phone, category: d.category });
                   setEditing(true);
@@ -142,8 +142,8 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
                     </tr>
                   ))}
                   <tr className="border-t-2 border-ink">
-                    <td className="py-1.5 text-sm font-semibold">Organiser net</td>
-                    <td className="py-1.5 text-sm text-right num font-semibold">{money(order.net, tier.currency)}</td>
+                    <td className="py-1.5 text-sm font-medium">Organiser net</td>
+                    <td className="py-1.5 text-sm text-right num font-medium">{money(order.net, tier.currency)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -162,7 +162,7 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
                 <li key={z.id} className="flex items-center justify-between px-5 py-2.5 border-b border-line last:border-0 text-sm">
                   <div>
                     <div className="font-medium">{z.name}</div>
-                    <div className="text-[12px] text-slate">{byTier ? "From ticket" : byGrant ? "Manual grant" : "No access"}</div>
+                    <div className="text-[13px] text-slate">{byTier ? "From ticket" : byGrant ? "Manual grant" : "No access"}</div>
                   </div>
                   {byTier ? (
                     <Tone tone="ok">Allowed</Tone>
@@ -175,7 +175,7 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
               );
             })}
           </ul>
-          <p className="px-5 py-3 text-[12px] text-slate">Grants take effect on the next scan.</p>
+          <p className="px-5 py-3 text-[13px] text-slate">Grants take effect on the next scan.</p>
         </Section>
 
         <Section title="Sessions" flush className="lg:col-span-2">

@@ -15,7 +15,7 @@ export default function OrganiserEvents() {
         title="Events"
         kicker={
           <>
-            KYC <span className={org.kycStatus === "Verified" ? "text-ok font-semibold" : "text-warn font-semibold"}>{org.kycStatus}</span>, payouts to {org.payoutAccount}
+            KYC <span className={org.kycStatus === "Verified" ? "text-ok font-medium" : "text-warn font-medium"}>{org.kycStatus}</span>, payouts to {org.payoutAccount}
           </>
         }
         actions={<button className="btn-primary">New event</button>}
@@ -44,11 +44,11 @@ export default function OrganiserEvents() {
                 <tr key={e.id} className="hover:bg-paper">
                   <td className="td">
                     <Link href={`/organiser/events/${e.id}`} className="flex items-center gap-3 group">
-                      <span className="h-9 w-9 rounded-md text-white grid place-items-center font-bold text-[11px] shrink-0" style={{ background: e.brand.primary }}>
+                      <span className="h-9 w-9 rounded-md text-white grid place-items-center font-medium text-[13px] shrink-0" style={{ background: e.brand.primary }}>
                         {e.brand.logoText.slice(0, 2)}
                       </span>
                       <span>
-                        <span className="font-semibold group-hover:underline">{e.name}</span>
+                        <span className="font-medium group-hover:underline">{e.name}</span>
                         <span className="block text-[13px] text-slate">
                           {e.venue}, {e.city}
                         </span>
@@ -67,7 +67,7 @@ export default function OrganiserEvents() {
                   <td className="td-r">{gross ? money(gross) : "–"}</td>
                   <td className="td text-right whitespace-nowrap">
                     {e.state === "Draft" && (
-                      <button className="btn-ghost" onClick={() => dispatch({ type: "setEventState", eventId: e.id, state: "Submitted" })}>
+                      <button className="btn-secondary" onClick={() => dispatch({ type: "setEventState", eventId: e.id, state: "Submitted" })}>
                         Submit for approval
                       </button>
                     )}
@@ -93,7 +93,7 @@ export default function OrganiserEvents() {
         {["Build the event in Draft", "Submit; KYC must be verified", "Algotech fixes commission and staffing", "Approved", "You open registration"].map((s, i) => (
           <div key={s} className="surface p-4">
             <div className="text-[13px] text-slate">Step {i + 1} of 5</div>
-            <div className="font-semibold mt-1">{s}</div>
+            <div className="font-medium mt-1">{s}</div>
           </div>
         ))}
       </div>

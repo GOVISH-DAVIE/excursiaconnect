@@ -67,7 +67,7 @@ export default function Scanner() {
       <div className="w-full max-w-sm min-h-screen sm:min-h-[760px] bg-ink text-white sm:rounded-[2rem] sm:border-8 sm:border-ink-700 flex flex-col overflow-hidden">
         <header className="px-5 pt-5 pb-3 flex items-center justify-between">
           <Logo variant="icon" className="h-7" />
-          <div className="text-[12px] text-white/60 truncate mx-3">{event.name}</div>
+          <div className="text-[13px] text-white/60 truncate mx-3">{event.name}</div>
           <button onClick={() => setOnline(!online)} className={`pill ${online ? "bg-ok text-white" : "bg-warn text-white"}`}>
             {online ? "Online" : "Offline, 3 queued"}
           </button>
@@ -99,9 +99,9 @@ export default function Scanner() {
             ])}
           </select>
           {zone && (
-            <div className="mt-2 flex items-center justify-between text-[12px] text-white/60">
+            <div className="mt-2 flex items-center justify-between text-[13px] text-white/60">
               <span>Occupancy</span>
-              <span className={`tabular-nums font-semibold ${zone.occupancy / zone.capacity >= 0.9 ? "text-coral" : "text-white"}`}>
+              <span className={`tabular-nums font-medium ${zone.occupancy / zone.capacity >= 0.9 ? "text-coral" : "text-white"}`}>
                 {zone.occupancy} / {zone.capacity}
               </span>
             </div>
@@ -110,7 +110,7 @@ export default function Scanner() {
 
         <div className="mt-4 mx-5 aspect-[4/3] rounded-2xl bg-black/50 border border-white/10 relative grid place-items-center">
           <div className="absolute inset-6 border-2 border-coral/70 rounded-xl" />
-          <div className="text-center text-white/50 text-[12px] px-10">Camera viewfinder. In the prototype, type or tap a badge code below.</div>
+          <div className="text-center text-white/50 text-[13px] px-10">Camera viewfinder. In the prototype, type or tap a badge code below.</div>
         </div>
 
         <form
@@ -125,7 +125,7 @@ export default function Scanner() {
         </form>
         <div className="px-5 mt-2 flex flex-wrap gap-1">
           {samples.filter(([c]) => c).map(([c, l]) => (
-            <button key={c} onClick={() => scan(c)} className="rounded-md bg-white/10 px-2 py-1 text-[11px] text-white/80 hover:bg-white/20">
+            <button key={c} onClick={() => scan(c)} className="rounded-md bg-white/10 px-2 py-1 text-[13px] text-white/80 hover:bg-white/20">
               {l}
             </button>
           ))}
@@ -134,21 +134,21 @@ export default function Scanner() {
         <div className="px-5 mt-4 flex-1">
           {result ? (
             <div className={`rounded-2xl p-5 ${result.verdict === "deny" ? "bg-bad" : result.verdict === "override" ? "bg-warn" : "bg-ok"}`}>
-              <div className="text-[44px] leading-none font-extrabold tracking-[-0.03em]">{result.verdict === "deny" ? "DENY" : result.verdict === "override" ? "OVERRIDE" : "ALLOW"}</div>
+              <div className="text-[44px] leading-none font-medium tracking-[-0.03em]">{result.verdict === "deny" ? "DENY" : result.verdict === "override" ? "OVERRIDE" : "ALLOW"}</div>
               {result.reason && <div className="text-sm text-white/90">{result.reason}</div>}
               {result.delegate && (
                 <div className="mt-3 border-t border-white/30 pt-3">
-                  <div className="text-lg font-semibold">{result.delegate.name}</div>
+                  <div className="text-lg font-medium">{result.delegate.name}</div>
                   <div className="text-sm text-white/90">
                     {result.delegate.organisation}, {result.delegate.category}
                   </div>
-                  <div className="text-[12px] text-white/70 mt-1">
+                  <div className="text-[13px] text-white/70 mt-1">
                     {tierOf(result.delegate)}, {result.delegate.badgeCode}, {result.at}
                   </div>
                 </div>
               )}
               {result.verdict === "deny" && result.delegate && post.kind === "zone" && !override && (
-                <button onClick={() => setOverride(true)} className="mt-3 w-full rounded-lg bg-white/20 py-2 text-sm font-semibold">
+                <button onClick={() => setOverride(true)} className="mt-3 w-full rounded-lg bg-white/20 py-2 text-sm font-medium">
                   Override with PIN
                 </button>
               )}
@@ -161,7 +161,7 @@ export default function Scanner() {
                     <option>Exit scan missed</option>
                     <option>Manual grant pending sync</option>
                   </select>
-                  <button onClick={doOverride} className="w-full rounded-lg bg-ink py-2 text-sm font-semibold">
+                  <button onClick={doOverride} className="w-full rounded-lg bg-ink py-2 text-sm font-medium">
                     Confirm override
                   </button>
                 </div>
@@ -172,7 +172,7 @@ export default function Scanner() {
           )}
 
           {log.length > 0 && (
-            <ul className="mt-4 space-y-1 text-[12px] text-white/60">
+            <ul className="mt-4 space-y-1 text-[13px] text-white/60">
               {log.map((l, i) => (
                 <li key={i} className="flex justify-between">
                   <span className="truncate">{l.name}</span>
@@ -183,7 +183,7 @@ export default function Scanner() {
             </ul>
           )}
         </div>
-        <footer className="px-5 py-3 text-[10px] text-white/40">Checks in order: valid badge → entitled here, now → anti-passback → zone capacity. Offline: cached list, capacity check skipped.</footer>
+        <footer className="px-5 py-3 text-[13px] text-white/40">Checks in order: valid badge → entitled here, now → anti-passback → zone capacity. Offline: cached list, capacity check skipped.</footer>
       </div>
     </div>
   );

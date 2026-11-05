@@ -28,7 +28,7 @@ export default function AdminOrganisers() {
               return (
                 <tr key={o.id} className="hover:bg-paper">
                   <td className="td">
-                    <Link href={`/admin/organisers/${o.id}`} className="font-semibold hover:underline">
+                    <Link href={`/admin/organisers/${o.id}`} className="font-medium hover:underline">
                       {o.name}
                     </Link>
                     <div className="text-[13px] text-slate font-mono">{o.registrationNo}</div>

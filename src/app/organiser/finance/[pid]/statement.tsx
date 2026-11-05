@@ -18,7 +18,7 @@ export function PayoutStatement({ payoutId }: { payoutId: string }) {
         title={`Payout statement, ${p.date}`}
         badge={<Tone tone={p.status === "Paid" ? "ok" : "warn"}>{p.status}</Tone>}
         kicker={`${p.orders.length} orders settled to ${org.payoutAccount}.`}
-        actions={<button className="btn-ghost">Download PDF</button>}
+        actions={<button className="btn-secondary">Download PDF</button>}
       />
       <div className="grid gap-4 sm:grid-cols-4 mb-4">
         <Stat label="Gross" value={money(p.gross)} />
@@ -54,22 +54,22 @@ export function PayoutStatement({ payoutId }: { payoutId: string }) {
                           {d?.name}
                         </Link>
                       </td>
-                      <td className="td font-mono text-[12px]">{o.reference}</td>
+                      <td className="td font-mono text-[13px]">{o.reference}</td>
                       <td className="td-r">{o.gross.toLocaleString()}</td>
                       <td className="td-r text-slate">{o.commission.toLocaleString()}</td>
-                      <td className="td-r font-semibold">{o.net.toLocaleString()}</td>
+                      <td className="td-r font-medium">{o.net.toLocaleString()}</td>
                     </tr>
                   );
                 })}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-ink">
-                  <td className="td font-semibold" colSpan={3}>
+                  <td className="td font-medium" colSpan={3}>
                     Total
                   </td>
-                  <td className="td-r font-semibold">{p.gross.toLocaleString()}</td>
-                  <td className="td-r font-semibold">{p.commission.toLocaleString()}</td>
-                  <td className="td-r font-semibold">{p.net.toLocaleString()}</td>
+                  <td className="td-r font-medium">{p.gross.toLocaleString()}</td>
+                  <td className="td-r font-medium">{p.commission.toLocaleString()}</td>
+                  <td className="td-r font-medium">{p.net.toLocaleString()}</td>
                 </tr>
               </tfoot>
             </table>

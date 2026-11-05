@@ -31,8 +31,8 @@ export function ZoneDetail({ eventId, zoneId }: { eventId: string; zoneId: strin
         kicker={`Capacity ${z.capacity}. ${z.window ? `Open ${z.window}.` : "Open all day."} ${entitledCount} delegates entitled.`}
         actions={
           <>
-            <button className="btn-ghost">Edit zone</button>
-            <Link href="/scan" className="btn-ghost" target="_blank">
+            <button className="btn-secondary">Edit zone</button>
+            <Link href="/scan" className="btn-secondary" target="_blank">
               Open scanner
             </Link>
           </>
@@ -49,7 +49,7 @@ export function ZoneDetail({ eventId, zoneId }: { eventId: string; zoneId: strin
           <Bars values={hourly} height={140} labels={["08:00", "18:00"]} />
           <div className="mt-3">
             <Meter value={z.occupancy} max={z.capacity} />
-            <div className="mt-1 text-[12px] text-slate">Warning at 90%, hard stop at 100% unless overridden.</div>
+            <div className="mt-1 text-[13px] text-slate">Warning at 90%, hard stop at 100% unless overridden.</div>
           </div>
         </Section>
         <Section title="Access rules">
@@ -63,7 +63,7 @@ export function ZoneDetail({ eventId, zoneId }: { eventId: string; zoneId: strin
               {byReason.map(([r, n]) => (
                 <li key={r} className="flex justify-between px-5 py-2.5 border-b border-line last:border-0 text-sm">
                   <span>{r}</span>
-                  <span className="num font-semibold">{n}</span>
+                  <span className="num font-medium">{n}</span>
                 </li>
               ))}
             </ul>

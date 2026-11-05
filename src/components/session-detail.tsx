@@ -25,7 +25,7 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
         </button>
       )}
       {s.status === "live" && (
-        <button className="btn-dark" onClick={() => dispatch({ type: "updateSession", sessionId: s.id, patch: { status: "ended", attended: Math.max(s.attended, scannedIn.length) } })}>
+        <button className="btn-secondary" onClick={() => dispatch({ type: "updateSession", sessionId: s.id, patch: { status: "ended", attended: Math.max(s.attended, scannedIn.length) } })}>
           End session
         </button>
       )}
@@ -42,9 +42,9 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
         kicker={`Day ${s.day}, ${s.start} to ${s.end}${room ? `, ${room.name}` : ""}${s.track ? `. ${s.track} track` : ""}. ${s.speakers.join(", ")}`}
         actions={
           <>
-            {mode === "organiser" && <button className="btn-ghost">Edit session</button>}
+            {mode === "organiser" && <button className="btn-secondary">Edit session</button>}
             {mode === "facilitator" && (
-              <button className="btn-ghost" onClick={() => dispatch({ type: "updateSession", sessionId: s.id, patch: { slidesUploaded: true } })}>
+              <button className="btn-secondary" onClick={() => dispatch({ type: "updateSession", sessionId: s.id, patch: { slidesUploaded: true } })}>
                 {s.slidesUploaded ? "Slides uploaded" : "Upload slides"}
               </button>
             )}
@@ -59,7 +59,7 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
             <Stat label="Enrolled" value={s.enrolled} sub={`of ${s.capacity} seats, ${fill}% full`} tone={fill >= 100 ? "bad" : undefined} />
             <Stat label={s.status === "ended" ? "Attended" : "Scanned in so far"} value={s.status === "ended" ? s.attended : scannedIn.length} sub={s.enrolled ? `${Math.round(((s.status === "ended" ? s.attended : scannedIn.length) / s.enrolled) * 100)}% of enrolled` : undefined} tone="ok" />
             <Stat label="Rating" value={s.rating ? s.rating.toFixed(1) : "–"} sub={s.rating ? `${s.comments?.length ?? 0} comments` : "Opens when the session ends"} />
-            <Stat label="Walk-ins" value={s.walkIns ? "Allowed" : "Enrolled only"} sub={<button className="text-coral font-semibold" onClick={() => dispatch({ type: "updateSession", sessionId: s.id, patch: { walkIns: !s.walkIns } })}>{s.walkIns ? "Restrict to enrolled" : "Allow walk-ins"}</button>} />
+            <Stat label="Walk-ins" value={s.walkIns ? "Allowed" : "Enrolled only"} sub={<button className="text-coral font-medium" onClick={() => dispatch({ type: "updateSession", sessionId: s.id, patch: { walkIns: !s.walkIns } })}>{s.walkIns ? "Restrict to enrolled" : "Allow walk-ins"}</button>} />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-3">

@@ -38,7 +38,7 @@ export function OrganiserDetail({ organiserId }: { organiserId: string }) {
               Mark KYC verified
             </button>
           ) : (
-            <button className="btn-ghost">Request KYC refresh</button>
+            <button className="btn-secondary">Request KYC refresh</button>
           )
         }
       />
@@ -62,7 +62,7 @@ export function OrganiserDetail({ organiserId }: { organiserId: string }) {
             ))}
           </ul>
         </Section>
-        <Section title="Rate card" action={<button className="btn-ghost">Save rate card</button>}>
+        <Section title="Rate card" action={<button className="btn-secondary">Save rate card</button>}>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Licence per event (KES)</label>

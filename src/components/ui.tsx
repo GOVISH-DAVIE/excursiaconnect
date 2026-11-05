@@ -5,18 +5,26 @@ import { usePathname } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 import type { DelegateStatus, EventState } from "@/lib/types";
 
+/* ---------- brand ----------
+   The files in public/brand: the dark lockup for light grounds, the light lockup for dark grounds
+   (white wordmark, coral icon and "Connect"), the icon alone where only a mark fits. */
+
 export function Logo({ variant = "dark", className = "h-10" }: { variant?: "dark" | "light" | "icon"; className?: string }) {
   const src = variant === "icon" ? "/brand/excursia-icon.svg" : variant === "light" ? "/brand/lightexcursia.svg" : "/brand/darkexcursia.svg";
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={src} alt="ExcursiaConnect" className={className} />;
 }
 
+/** The icon beside the name in the system face, for rails, bars and "Powered by" lines where the
+ *  stacked lockup would be too small to read. On a dark ground the name is white and "Connect" keeps
+ *  its coral, as the light lockup does. */
 export function Wordmark({ light = false, mono = false, size = "md" }: { light?: boolean; mono?: boolean; size?: "sm" | "md" }) {
+  const onDark = light || mono;
   return (
     <span className="inline-flex items-center gap-2">
-      <Logo variant="icon" className={`${size === "sm" ? "h-5" : "h-7"} ${mono ? "brightness-0 invert" : ""}`} />
-      <span className={`font-extrabold tracking-tight ${size === "sm" ? "text-[13px]" : ""} ${light || mono ? "text-white" : "text-ink"}`}>
-        Excursia<span className={`font-medium ${mono ? "text-white/70" : "text-coral"}`}>Connect</span>
+      <Logo variant="icon" className={size === "sm" ? "h-5" : "h-7"} />
+      <span className={`font-medium tracking-[-0.02em] ${size === "sm" ? "text-[14px]" : "text-[18px]"} ${onDark ? "text-white" : "text-ink"}`}>
+        Excursia<span className="text-coral">Connect</span>
       </span>
     </span>
   );
@@ -67,7 +75,7 @@ function RailNav({ nav }: { nav: NavItem[] }) {
       {nav.map((n) => {
         const active = n.exact ? path === n.href : path === n.href || path.startsWith(n.href + "/");
         return (
-          <Link key={n.href} href={n.href} className={`rounded-md px-3 py-2 text-sm whitespace-nowrap ${active ? "bg-white/15 text-white font-semibold" : "text-white/70 hover:text-white hover:bg-white/8"}`}>
+          <Link key={n.href} href={n.href} className={`rounded-md px-3 py-2 text-[14px] whitespace-nowrap transition-colors ${active ? "bg-white/12 text-white font-medium" : "text-white/70 hover:text-white hover:bg-white/8"}`}>
             {n.label}
           </Link>
         );
@@ -76,13 +84,13 @@ function RailNav({ nav }: { nav: NavItem[] }) {
   );
 }
 
+/** The persona rail: the dark ground, the light wordmark, the persona and who is signed in. */
 export function Rail({
   persona,
   who,
   nav,
   context,
   children,
-  accent = "ink",
 }: {
   persona: string;
   who: string;
@@ -93,13 +101,13 @@ export function Rail({
 }) {
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr]">
-      <aside className={`${accent === "coral" ? "bg-coral" : "bg-ink"} text-white lg:min-h-screen lg:sticky lg:top-0 lg:h-screen flex flex-col`}>
+      <aside className="bg-ink text-white lg:min-h-screen lg:sticky lg:top-0 lg:h-screen flex flex-col">
         <div className="px-5 py-5 border-b border-white/10">
           <Link href="/" className="block">
-            <Wordmark mono />
+            <Wordmark light />
           </Link>
           <div className="mt-3 text-[13px] text-white/60">{persona}</div>
-          <div className="text-sm font-semibold truncate">{who}</div>
+          <div className="text-[14px] font-medium truncate">{who}</div>
         </div>
         {context && <div className="px-5 py-4 border-b border-white/10">{context}</div>}
         <nav className="p-3 flex lg:flex-col gap-0.5 overflow-x-auto">
@@ -107,7 +115,7 @@ export function Rail({
             <RailNav nav={nav} />
           </Suspense>
         </nav>
-        <div className="mt-auto p-5 text-[12px] text-white/40 hidden lg:block">Prototype, mock data</div>
+        <div className="mt-auto p-5 text-[13px] text-white/40 hidden lg:block">Prototype, mock data</div>
       </aside>
       <main className="min-w-0">
         <div className="mx-auto max-w-[1200px] px-5 py-6 lg:px-8 lg:py-8">{children}</div>
@@ -149,17 +157,18 @@ export function PageHeader({ title, kicker, actions, crumbs, badge }: { title: R
   );
 }
 
+/** A number with its label. With an href it is a linked card: it lifts on hover and opens the list behind the number. */
 export function Stat({ label, value, sub, tone, href }: { label: string; value: ReactNode; sub?: ReactNode; tone?: "coral" | "ok" | "warn" | "bad"; href?: string }) {
   const color = tone === "coral" ? "text-coral" : tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : tone === "bad" ? "text-bad" : "text-ink";
   const body = (
     <>
-      <div className={`text-[30px] leading-none font-extrabold tracking-[-0.02em] num ${color}`}>{value}</div>
-      <div className="mt-2 text-sm font-semibold">{label}</div>
+      <div className={`t-stat ${color}`}>{value}</div>
+      <div className="mt-2 text-[14px] font-medium">{label}</div>
       {sub && <div className="text-[13px] text-slate mt-0.5">{sub}</div>}
     </>
   );
   return href ? (
-    <Link href={href} className="surface p-4 block hover:border-ink transition-colors">
+    <Link href={href} className="surface card-link p-4 block">
       {body}
     </Link>
   ) : (
@@ -180,7 +189,7 @@ export function Section({ title, action, children, className = "", flush = false
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <div className="rounded-md border border-dashed border-line-strong p-6 text-center text-sm text-slate">{children}</div>;
+  return <div className="rounded-lg border border-dashed border-line-strong p-6 text-center text-[14px] text-slate">{children}</div>;
 }
 
 export function Bars({ values, color = "bg-coral", height = 80, labels }: { values: number[]; color?: string; height?: number; labels?: [string, string] }) {
@@ -193,7 +202,7 @@ export function Bars({ values, color = "bg-coral", height = 80, labels }: { valu
         ))}
       </div>
       {labels && (
-        <div className="mt-1.5 flex justify-between text-[12px] text-mute">
+        <div className="mt-1.5 flex justify-between text-[13px] text-mute">
           <span>{labels[0]}</span>
           <span>{labels[1]}</span>
         </div>
@@ -214,7 +223,7 @@ export function Meter({ value, max, warnAt = 0.7, badAt = 0.9 }: { value: number
 
 export function KV({ rows }: { rows: [string, ReactNode][] }) {
   return (
-    <dl className="text-sm">
+    <dl className="text-[14px]">
       {rows.map(([k, v]) => (
         <div key={k} className="flex justify-between gap-4 py-1.5 border-b border-line last:border-0">
           <dt className="text-slate">{k}</dt>
@@ -229,9 +238,9 @@ export function Tabs<T extends string>({ tabs, value, onChange, counts }: { tabs
   return (
     <nav className="flex gap-1 border-b border-line overflow-x-auto mb-5">
       {tabs.map((t) => (
-        <button key={t} onClick={() => onChange(t)} className={`px-3 py-2.5 text-sm whitespace-nowrap border-b-2 -mb-px ${value === t ? "border-ink text-ink font-semibold" : "border-transparent text-slate hover:text-ink"}`}>
+        <button key={t} onClick={() => onChange(t)} className={`px-3 py-2.5 text-[14px] whitespace-nowrap border-b-2 -mb-px transition-colors ${value === t ? "border-ink text-ink font-medium" : "border-transparent text-slate hover:text-ink"}`}>
           {t}
-          {counts?.[t] ? <span className="ml-1.5 pill bg-coral text-white">{counts[t]}</span> : null}
+          {counts?.[t] ? <span className="ml-1.5 pill bg-coral text-[#111]">{counts[t]}</span> : null}
         </button>
       ))}
     </nav>

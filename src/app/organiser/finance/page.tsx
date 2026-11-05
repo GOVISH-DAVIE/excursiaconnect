@@ -18,7 +18,7 @@ export default function OrganiserFinance() {
 
   return (
     <>
-      <PageHeader title="Finance and payouts" kicker={`Weekly payouts to ${org.payoutAccount}. Commission ${org.commissionPct}% is deducted at the moment each delegate pays.`} actions={<button className="btn-ghost">Download statements</button>} />
+      <PageHeader title="Finance and payouts" kicker={`Weekly payouts to ${org.payoutAccount}. Commission ${org.commissionPct}% is deducted at the moment each delegate pays.`} actions={<button className="btn-secondary">Download statements</button>} />
       <div className="grid gap-4 sm:grid-cols-4 mb-4">
         <Stat label="Gross collected" value={money(gross)} />
         <Stat label="Commission to Algotech" value={money(commission)} />
@@ -42,14 +42,14 @@ export default function OrganiserFinance() {
               {[...payouts].reverse().filter((p) => p.orders.length > 0 || p.status === "Scheduled").map((p) => (
                 <tr key={p.id} className="hover:bg-paper">
                   <td className="td">
-                    <Link href={`/organiser/finance/${p.id}`} className="font-semibold hover:underline num">
+                    <Link href={`/organiser/finance/${p.id}`} className="font-medium hover:underline num">
                       {p.date}
                     </Link>
                   </td>
                   <td className="td-r">{p.orders.length}</td>
                   <td className="td-r">{p.gross.toLocaleString()}</td>
                   <td className="td-r text-slate">{p.commission.toLocaleString()}</td>
-                  <td className="td-r font-semibold">{money(p.net)}</td>
+                  <td className="td-r font-medium">{money(p.net)}</td>
                   <td className="td">
                     <Tone tone={p.status === "Paid" ? "ok" : "warn"}>{p.status}</Tone>
                   </td>

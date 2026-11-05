@@ -30,11 +30,11 @@ export default function AdminFinance() {
             {exceptions.map((e) => (
               <li key={e.ref} className="px-5 py-3 border-b border-line last:border-0 flex items-start justify-between gap-3 text-sm">
                 <div>
-                  <div className="font-mono text-[12px] text-slate">{e.ref}</div>
+                  <div className="font-mono text-[13px] text-slate">{e.ref}</div>
                   <div>{e.issue}</div>
                   <div className="text-[13px] text-slate mt-0.5">Open for {e.age}</div>
                 </div>
-                <button className="btn-ghost">Resolve</button>
+                <button className="btn-secondary">Resolve</button>
               </li>
             ))}
           </ul>
@@ -59,7 +59,7 @@ export default function AdminFinance() {
                       </Link>
                       <div className="text-[13px] text-slate">{o.payoutAccount}</div>
                     </td>
-                    <td className="td-r font-semibold">{money(due)}</td>
+                    <td className="td-r font-medium">{money(due)}</td>
                     <td className="td">
                       <Tone tone={o.kycStatus === "Verified" ? "warn" : "bad"}>{o.kycStatus === "Verified" ? "Scheduled" : "Held, KYC pending"}</Tone>
                     </td>

@@ -24,8 +24,8 @@ export function TierDetail({ eventId, tierId }: { eventId: string; tierId: strin
         kicker={t.description}
         actions={
           <>
-            <button className="btn-ghost">Edit tier</button>
-            <button className="btn-ghost">Pause sales</button>
+            <button className="btn-secondary">Edit tier</button>
+            <button className="btn-secondary">Pause sales</button>
           </>
         }
       />
