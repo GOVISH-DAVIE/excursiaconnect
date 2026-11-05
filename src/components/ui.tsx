@@ -52,6 +52,7 @@ const delegateTone: Record<DelegateStatus, string> = {
   Confirmed: "bg-ok-50 text-ok",
   "Checked in": "bg-ok text-white",
   Waitlisted: "bg-paper-200 text-slate",
+  "Refund requested": "bg-warn-50 text-warn",
   Cancelled: "bg-bad-50 text-bad",
   Refunded: "bg-bad-50 text-bad",
 };

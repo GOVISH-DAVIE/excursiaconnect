@@ -14,6 +14,7 @@ export type DelegateStatus =
   | "Confirmed"
   | "Checked in"
   | "Waitlisted"
+  | "Refund requested"
   | "Cancelled"
   | "Refunded";
 
@@ -50,6 +51,21 @@ export interface Tier {
   approval: "auto" | "organiser";
   entitlements: string[]; // zone ids, 'dinner', 'stream', 'all-days', 'day-1'
   description: string;
+  paused?: boolean; // sales stopped, the tier still shown
+  saleFrom?: string; // ISO dates; empty = open now / until the event
+  saleTo?: string;
+}
+
+/** A field on the registration form beyond the standard ones (OR-4). */
+export interface FormField {
+  id: string;
+  eventId: string;
+  label: string;
+  type: "text" | "textarea" | "select" | "file";
+  required: boolean;
+  showTo: "Everyone" | Category[];
+  options?: string[]; // for select
+  help?: string;
 }
 
 export interface Zone {
@@ -110,6 +126,7 @@ export interface Delegate {
   grants?: string[]; // manual zone grants
   badgeCode: string; // what the QR encodes
   cancelled?: boolean;
+  answers?: Record<string, string>; // custom form fields, by field id
 }
 
 export interface Order {
@@ -150,6 +167,30 @@ export interface EventRecord {
   expectedAttendance: number;
   brand: { primary: string; logoText: string };
   registrationsByDay: number[];
+  links?: SocialLinks;
+  hashtag?: string;
+  profileLocked?: boolean; // OS-10: delegates can no longer edit their profile
+  closedAt?: string; // OR-17
+  history?: { at: string; what: string }[]; // approval history
+}
+
+/** A reconciliation exception the nightly job raised (PA-6). */
+export interface Exception {
+  ref: string;
+  issue: string;
+  raised: string;
+  resolved?: { at: string; how: string };
+}
+
+/** A campaign the organiser sent to a segment (OS-5). */
+export interface Campaign {
+  id: string;
+  eventId: string;
+  at: string;
+  segment: string;
+  channel: "Email" | "SMS" | "Email and SMS";
+  subject: string;
+  recipients: number;
 }
 
 export interface Message {
@@ -206,7 +247,54 @@ export interface Shift {
   memberId?: string;
 }
 
+/** Website and social links, for the event, a speaker or a sponsor. Shown as text links in their names. */
+export interface SocialLinks {
+  website?: string;
+  linkedin?: string;
+  x?: string;
+  instagram?: string;
+  facebook?: string;
+  youtube?: string;
+}
+export const SOCIAL_KEYS: { key: keyof SocialLinks; label: string }[] = [
+  { key: "website", label: "Website" },
+  { key: "linkedin", label: "LinkedIn" },
+  { key: "x", label: "X" },
+  { key: "instagram", label: "Instagram" },
+  { key: "facebook", label: "Facebook" },
+  { key: "youtube", label: "YouTube" },
+];
+
+/** A sponsor or partner shown on the public page, grouped by tier. The logo is a data URL in the prototype. */
+export interface Sponsor {
+  id: string;
+  eventId: string;
+  name: string;
+  tier: "Headline" | "Gold" | "Silver" | "Partner";
+  url?: string; // the website; the logo links here
+  logo?: string;
+  links?: SocialLinks;
+}
+
+/** What the organiser adds to a speaker named in the programme: a photo, who they are, where to find them. */
+export interface SpeakerProfile {
+  eventId: string;
+  name: string;
+  photo?: string;
+  organisation?: string;
+  jobTitle?: string;
+  links?: SocialLinks;
+}
+
 export interface AppState {
+  formFields: FormField[];
+  exceptions: Exception[];
+  campaigns: Campaign[];
+  payoutsPaid: string[]; // payout ids the admin has run (PA-7)
+  banners: Record<string, string>; // eventId -> image data URL
+  floorPlans: Record<string, string>; // eventId -> the venue's own plan; replaces the drawn schematic
+  speakerProfiles: SpeakerProfile[];
+  sponsors: Sponsor[];
   team: TeamMember[];
   shifts: Shift[];
   grants: Record<Role, Capability[]>;

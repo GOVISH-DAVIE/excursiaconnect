@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import type { Room, Session } from "@/lib/types";
 
+/** The programme as a ruled schedule: a time rail, one row per slot, breakouts side by side as open
+ *  columns. No boxes, no coloured edges; a breakout's seats and the enrol action sit in its own lines. */
 export function Programme({
   sessions,
   rooms,
@@ -35,64 +37,61 @@ export function Programme({
   const slots = [...new Set(list.map((s) => s.start))].sort();
 
   return (
-    <div>
-      <div className="flex gap-1.5 mb-5 overflow-x-auto">
+    <div className="prog">
+      <div className="prog__days" role="tablist">
         {Array.from({ length: days }, (_, i) => i + 1).map((d) => (
-          <button key={d} onClick={() => setDay(d)} className={`rounded-md px-3.5 py-1.5 text-sm font-medium whitespace-nowrap ${day === d ? "bg-ink text-white" : "bg-paper-200 text-slate hover:bg-line"}`}>
+          <button key={d} role="tab" aria-selected={day === d} onClick={() => setDay(d)} className="prog__day">
             Day {d}, {dayLabel(d)}
           </button>
         ))}
       </div>
-      <div className="space-y-4">
-        {slots.map((slot) => {
-          const items = list.filter((s) => s.start === slot);
-          return (
-            <div key={slot} className="grid grid-cols-[56px_1fr] gap-3">
-              <div className="pt-2.5 text-[13px] font-medium num text-slate">{slot}</div>
-              <div className="grid gap-2 md:grid-cols-3">
-                {items.map((s) => {
-                  const room = rooms.find((r) => r.id === s.roomId);
-                  const isIn = enrolled.includes(s.id);
-                  const full = s.capacity !== undefined && s.enrolled >= s.capacity && !isIn;
-                  const span = s.kind === "breakout" ? "" : "md:col-span-3";
-                  const edge = s.kind === "plenary" ? "border-l-coral" : s.kind === "breakout" ? "border-l-ink" : "border-l-line-strong";
-                  const title = linkBase ? (
-                    <Link href={`${linkBase}/${s.id}`} className="font-medium leading-snug hover:underline">
-                      {s.title}
-                    </Link>
-                  ) : (
-                    <span className="font-medium leading-snug">{s.title}</span>
-                  );
-                  return (
-                    <div key={s.id} className={`surface border-l-[3px] ${edge} p-3 flex flex-col ${span} ${s.kind === "break" ? "bg-paper" : ""}`}>
-                      <div className="text-[13px] text-slate">
-                        {s.start}–{s.end}
-                        {room && `, ${room.name}`}
-                        {s.track && `, ${s.track}`}
-                      </div>
-                      <div className="mt-0.5">{title}</div>
-                      {s.speakers.length > 0 && <div className="text-[13px] text-slate mt-0.5">{s.speakers.join(", ")}</div>}
-                      {s.kind === "breakout" && (
-                        <div className="mt-auto pt-3 flex items-center justify-between">
-                          <span className={`text-[13px] num ${full ? "text-bad font-medium" : "text-slate"}`}>
-                            {s.enrolled} of {s.capacity} seats
-                          </span>
-                          {canEnrol && (
-                            <button onClick={() => onEnrol?.(s.id, !isIn)} disabled={full} className={`text-[13px] font-medium rounded px-2 py-1 ${isIn ? "bg-ok text-white" : full ? "bg-paper-200 text-mute" : "bg-coral text-white"}`}>
-                              {isIn ? "Enrolled" : full ? "Full" : "Enrol"}
-                            </button>
-                          )}
-                        </div>
-                      )}
+      {slots.map((slot) => {
+        const items = list.filter((s) => s.start === slot);
+        const breakouts = items.every((s) => s.kind === "breakout");
+        return (
+          <div key={slot} className="prog__slot">
+            <div className="prog__time">{slot}</div>
+            <div className={`prog__items ${breakouts ? "prog__items--cols" : ""}`}>
+              {items.map((s) => {
+                const room = rooms.find((r) => r.id === s.roomId);
+                const isIn = enrolled.includes(s.id);
+                const full = s.capacity !== undefined && s.enrolled >= s.capacity && !isIn;
+                const where = [room?.name ?? (s.kind === "plenary" ? "Main hall" : null), s.track].filter(Boolean).join(", ");
+                const title = linkBase ? (
+                  <Link href={`${linkBase}/${s.id}`} className="prog__title">
+                    {s.title}
+                  </Link>
+                ) : (
+                  <span className="prog__title">{s.title}</span>
+                );
+                return (
+                  <div key={s.id} className={`prog__item prog__item--${s.kind}`}>
+                    <div className="prog__meta">
+                      {s.start} to {s.end}
+                      {where && `, ${where}`}
                     </div>
-                  );
-                })}
-              </div>
+                    {title}
+                    {s.speakers.length > 0 && <div className="prog__speakers">{s.speakers.join(", ")}</div>}
+                    {s.kind === "breakout" && (
+                      <div className="prog__seats">
+                        <span className={full ? "text-bad" : ""}>
+                          {s.enrolled} of {s.capacity} seats{full ? ", full" : ""}
+                        </span>
+                        {canEnrol && (
+                          <button onClick={() => onEnrol?.(s.id, !isIn)} disabled={full} className={`prog__enrol ${isIn ? "is-in" : ""}`}>
+                            {isIn ? "Enrolled, leave" : full ? "Join waitlist" : "Enrol"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-        {slots.length === 0 && <div className="text-sm text-slate">Nothing on this day.</div>}
-      </div>
+          </div>
+        );
+      })}
+      {slots.length === 0 && <div className="prog__empty">Nothing on this day.</div>}
     </div>
   );
 }

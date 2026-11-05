@@ -2,22 +2,33 @@
 
 import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Programme } from "@/components/programme";
 import { StatusPill, Wordmark } from "@/components/ui";
 import { useStore } from "@/lib/store";
+import { useToday } from "@/lib/use-today";
 
 const tabs = ["Badge", "My day", "Programme", "People", "Messages"] as const;
 
 export function Badge({ id }: { id: string }) {
   const { state, dispatch, hydrated } = useStore();
-  const [tab, setTab] = useState<(typeof tabs)[number]>("Badge");
-  const [chatWith, setChatWith] = useState<string | null>(null);
+  // the public page links here: ?tab=People&q=<name> to book, ?tab=Messages&with=<delegate id> to chat
+  const search = useSearchParams();
+  const today = useToday();
+  const [tab, setTab] = useState<(typeof tabs)[number]>(() => tabs.find((t) => t === search.get("tab")) ?? "Badge");
+  const [chatWith, setChatWith] = useState<string | null>(() => search.get("with"));
   const [draft, setDraft] = useState("");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => search.get("q") ?? "");
+  const [editing, setEditing] = useState(false);
+  const [profile, setProfile] = useState({ name: "", organisation: "", jobTitle: "", phone: "" });
 
   const me = state.delegates.find((d) => d.id === id);
   if (!me) return <div className="p-10 text-slate">{hydrated ? "Badge not found." : "Loading…"}</div>;
   const event = state.events.find((e) => e.id === me.eventId)!;
+  const refundDeadline = new Date(event.startDate);
+  refundDeadline.setDate(refundDeadline.getDate() - 7);
+  const refundOpen = !today || today < refundDeadline.toISOString().slice(0, 10);
+  const refundBy = refundDeadline.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
   const tier = state.tiers.find((t) => t.id === me.tierId)!;
   const sessions = state.sessions.filter((s) => s.eventId === event.id);
   const zones = state.zones.filter((z) => tier.entitlements.includes(z.id) || (me.category === "VIP" && z.id === "z_vip"));
@@ -87,6 +98,52 @@ export function Badge({ id }: { id: string }) {
                 <button className="btn-secondary text-[13px]" onClick={() => dispatch({ type: "updateDelegate", delegateId: me.id, patch: { bookable: !me.bookable, slots: me.slots ?? [{ day: 1, time: "15:45", location: "Networking lounge" }, { day: 2, time: "10:30", location: "Networking lounge" }] } })}>
                   {me.bookable ? "Close my calendar" : "Open my calendar"}
                 </button>
+              </div>
+
+              {/* DE-10: edit own profile until the organiser locks edits; DE-15: ask for a refund within policy */}
+              <div className="mt-4 border-t border-line pt-4">
+                {editing ? (
+                  <form
+                    className="grid gap-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      dispatch({ type: "updateDelegate", delegateId: me.id, patch: profile });
+                      setEditing(false);
+                    }}
+                  >
+                    {(["name", "organisation", "jobTitle", "phone"] as const).map((k) => (
+                      <div key={k}>
+                        <label className="label" htmlFor={`p-${k}`}>{{ name: "Full name", organisation: "Organisation", jobTitle: "Job title", phone: "Phone" }[k]}</label>
+                        <input id={`p-${k}`} className="input" value={profile[k]} onChange={(e) => setProfile({ ...profile, [k]: e.target.value })} />
+                      </div>
+                    ))}
+                    <div className="flex gap-2 justify-end">
+                      <button type="button" className="btn-secondary" onClick={() => setEditing(false)}>Cancel</button>
+                      <button type="submit" className="btn btn-primary">Save</button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[14px]">
+                    {event.profileLocked ? (
+                      <span className="text-slate">Profile edits closed; badges print from these details. Ask the desk for a change.</span>
+                    ) : (
+                      <button className="link" onClick={() => { setProfile({ name: me.name, organisation: me.organisation, jobTitle: me.jobTitle, phone: me.phone }); setEditing(true); }}>
+                        Edit my details
+                      </button>
+                    )}
+                    {(me.status === "Confirmed" || me.status === "Checked in") && tier.price > 0 && (
+                      refundOpen ? (
+                        <button className="link" onClick={() => { if (confirm(`Refund ${tier.name} in full to the original payment method? Your badge is cancelled.`)) dispatch({ type: "requestRefund", delegateId: me.id }); }}>
+                          Request a refund
+                        </button>
+                      ) : (
+                        <span className="text-slate">Refunds closed since {refundBy}.</span>
+                      )
+                    )}
+                    {me.status === "Refund requested" && <span className="text-warn">Refund requested; the organiser is reviewing it.</span>}
+                    {me.status === "Waitlisted" && <span className="text-slate">You are on the waitlist for {tier.name}. We offer places in order, with 24 hours to pay.</span>}
+                  </div>
+                )}
               </div>
               {tier.entitlements.includes("stream") && (
                 <div className="mt-4 rounded-xl bg-ink text-white p-4">

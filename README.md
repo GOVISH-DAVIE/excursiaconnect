@@ -13,7 +13,7 @@ npm run build && npm start
 
 No environment variables, database or payment keys are needed. The Rethink Sans font is bundled locally so it builds offline.
 
-One design language covers every screen: tokens, type, buttons and the public site's page rhythm are in [docs/design-system.md](docs/design-system.md).
+One design language covers every screen: tokens, type, buttons and the public site's page rhythm are in [docs/design-system.md](docs/design-system.md). What the prototype covers of the use cases, and what is still missing, is in [docs/coverage.md](docs/coverage.md); a click-through of every screen, with the dead controls and the gaps, is in [docs/qa-findings.md](docs/qa-findings.md).
 
 Every number on a summary screen links to the page that explains it: stat tiles open filtered lists, table rows open records.
 
@@ -26,7 +26,7 @@ Every number on a summary screen links to the page that explains it: stat tiles 
 | `/e/[slug]/register` | Delegate | Tier → details (fields vary by category) → payment (M-Pesa STK push, Paystack card, bank invoice; promo `EARLY10`) → confirmation. Sponsor pass goes to organiser approval. |
 | `/badge/[id]` | Delegate | Mobile badge with QR, access entitlements, My day, breakout enrolment with capacity, People directory with meeting-slot booking, brief chat. Try `/badge/d_demo`. |
 | `/organiser` | Organiser | Events by approval state; Submit for approval / Go live |
-| `/organiser/events/[id]` | Organiser | Overview (live metrics, registrations by day, occupancy, tiers, session fill), Delegates (search, filter, CSV export, record panel: approve, mark paid, reissue badge, refund), Tickets & form, Programme, Zones & rooms, Finance ledger |
+| `/organiser/events/[id]` | Organiser | Overview (live metrics, registrations by day, occupancy, tiers, session fill), Delegates (search, filter, CSV export, record panel: approve, mark paid, reissue badge, refund), Tickets & form, Programme, Media (banner, speaker photos and profiles, sponsor and partner logos by tier; files are scaled in the browser and kept in the store), Zones & rooms, Finance ledger |
 | `/organiser/events/[id]/delegates/[did]` | Organiser | Full delegate record: profile (editable), payment split, zone access with manual grants, sessions, meetings, activity log |
 | `/organiser/events/[id]/sessions/[sid]` | Organiser | Session detail: roster with door scans, attended vs enrolled, rating and comments, walk-in rule, start/end |
 | `/organiser/events/[id]/zones/[zid]` | Organiser | Zone detail: occupancy by hour, access rules, denies by reason, scan log |

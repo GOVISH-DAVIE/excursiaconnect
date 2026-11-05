@@ -62,7 +62,7 @@ export function OrganiserDetail({ organiserId }: { organiserId: string }) {
             ))}
           </ul>
         </Section>
-        <Section title="Rate card" action={<button className="btn-secondary">Save rate card</button>}>
+        <Section title="Rate card" action={<button className="btn-secondary btn-sm" disabled={(rates.licenceFee ?? o.licenceFee) === o.licenceFee && (rates.commissionPct ?? o.commissionPct) === o.commissionPct} onClick={() => dispatch({ type: "setRateCard", organiserId: o.id, licenceFee: rates.licenceFee ?? o.licenceFee, commissionPct: rates.commissionPct ?? o.commissionPct })}>Save rate card</button>}>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Licence per event (KES)</label>

@@ -55,11 +55,11 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
               </button>
             )}
             {d.status === "Awaiting payment" && (
-              <button className="btn-primary" onClick={() => dispatch({ type: "updateDelegate", delegateId: d.id, patch: { status: "Confirmed" } })}>
+              <button className="btn-primary" onClick={() => dispatch({ type: "markPaid", delegateId: d.id })}>
                 Mark bank transfer paid
               </button>
             )}
-            {(d.status === "Confirmed" || d.status === "Checked in") && (
+            {(d.status === "Confirmed" || d.status === "Checked in" || d.status === "Refund requested") && (
               <button className="btn-secondary text-bad" onClick={() => dispatch({ type: "refund", delegateId: d.id })}>
                 Refund and cancel
               </button>

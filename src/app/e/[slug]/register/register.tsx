@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Wordmark } from "@/components/ui";
 import { CATEGORIES, makeOrder, money, useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
+import { useToday } from "@/lib/use-today";
 import type { Category, PaymentMethod } from "@/lib/types";
 
 const steps = ["Ticket", "Your details", "Payment", "Done"];
@@ -24,10 +25,17 @@ export function Register({ slug }: { slug: string }) {
   const [method, setMethod] = useState<PaymentMethod>("mpesa");
   const [paying, setPaying] = useState<"idle" | "pushed" | "confirmed">("idle");
   const [newId, setNewId] = useState("");
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const today = useToday();
+  const customFields = state.formFields.filter((f) => f.eventId === event.id && (f.showTo === "Everyone" || f.showTo.includes(form.category)));
+  // DE-2: up to nine colleagues in the same order, each with their own ticket and badge
+  const [extras, setExtras] = useState<{ name: string; email: string; tierId: string }[]>([]);
 
   const tier = tiers.find((t) => t.id === tierId);
+  const soldOut = !!tier && tier.cap - tier.sold <= 0;
   const discount = form.promo.trim().toUpperCase() === "EARLY10" && tier ? Math.round(tier.price * 0.1) : 0;
-  const total = tier ? tier.price - discount : 0;
+  const extrasTotal = extras.reduce((a, x) => a + (tiers.find((t) => t.id === x.tierId)?.price ?? 0), 0);
+  const total = tier ? tier.price - discount + extrasTotal : 0;
   const accent = event.brand.primary;
   const accentInk = readableOn(accent);
 
@@ -35,40 +43,50 @@ export function Register({ slug }: { slug: string }) {
 
   function finish() {
     if (!tier) return;
-    const id = `d_${Date.now().toString(36)}`;
+    const stamp = Date.now().toString(36);
     const needsApproval = tier.approval === "organiser";
-    const status = needsApproval ? "Pending" : tier.price === 0 || method !== "bank" ? "Confirmed" : "Awaiting payment";
-    const order = tier.price > 0 && !needsApproval ? makeOrder(tier.price, tier.currency, event.commissionPct, method, id, tier.id, event.id, discount) : undefined;
-    dispatch({
-      type: "register",
-      delegate: {
-        id,
-        eventId: event.id,
-        name: form.name,
-        email: form.email,
-        phone: form.phone,
-        organisation: form.organisation,
-        jobTitle: form.jobTitle,
-        country: form.country,
-        category: form.category,
-        tierId: tier.id,
-        status,
-        accredited: false,
-        checkIns: [],
-        zoneLog: [],
-        sessions: [],
-        bookable: false,
-        badgeCode: `EXC-${id.slice(2, 8).toUpperCase()}-${Math.floor(1000 + Math.random() * 8999)}`,
-      },
-      order,
-    });
-    setNewId(id);
+    const statusFor = (t: typeof tier): "Waitlisted" | "Pending" | "Confirmed" | "Awaiting payment" => (t.cap - t.sold <= 0 ? "Waitlisted" : t.approval === "organiser" ? "Pending" : t.price === 0 || method !== "bank" ? "Confirmed" : "Awaiting payment");
+    const people = [
+      { id: `d_${stamp}`, name: form.name, email: form.email, phone: form.phone, organisation: form.organisation, jobTitle: form.jobTitle, category: form.category, tier, disc: discount },
+      ...extras.filter((x) => x.name && x.email).map((x, i) => ({ id: `d_${stamp}${i + 1}`, name: x.name, email: x.email, phone: "", organisation: form.organisation, jobTitle: "", category: "General Delegate" as Category, tier: tiers.find((t) => t.id === x.tierId) ?? tier, disc: 0 })),
+    ];
+    // the payer first, so their badge opens on Done; colleagues each get their own badge and claim link (DE-16)
+    for (const p of [...people].reverse()) {
+      const status = statusFor(p.tier);
+      const order = p.tier.price > 0 && status !== "Pending" && status !== "Waitlisted" ? makeOrder(p.tier.price, p.tier.currency, event.commissionPct, method, p.id, p.tier.id, event.id, p.disc) : undefined;
+      dispatch({
+        type: "register",
+        delegate: {
+          id: p.id,
+          eventId: event.id,
+          name: p.name,
+          email: p.email,
+          phone: p.phone,
+          organisation: p.organisation,
+          jobTitle: p.jobTitle,
+          country: form.country,
+          category: p.category,
+          tierId: p.tier.id,
+          status,
+          accredited: false,
+          checkIns: [],
+          zoneLog: [],
+          sessions: [],
+          bookable: false,
+          badgeCode: `EXC-${p.id.slice(2, 8).toUpperCase()}-${Math.floor(1000 + Math.random() * 8999)}`,
+          answers: p.id === `d_${stamp}` ? answers : undefined,
+        },
+        order,
+      });
+    }
+    void needsApproval;
+    setNewId(`d_${stamp}`);
     setStep(3);
   }
 
   function pay() {
     if (!tier) return;
-    if (tier.price === 0 || tier.approval === "organiser" || method === "bank") return finish();
+    if (soldOut || tier.price === 0 || tier.approval === "organiser" || method === "bank") return finish();
     setPaying("pushed");
     setTimeout(() => {
       setPaying("confirmed");
@@ -76,7 +94,7 @@ export function Register({ slug }: { slug: string }) {
     }, 1800);
   }
 
-  const payLabel = !tier ? "" : tier.approval === "organiser" ? "Submit for approval" : tier.price === 0 ? "Confirm registration" : method === "bank" ? "Request an invoice" : `Pay ${money(total, tier.currency)}`;
+  const payLabel = !tier ? "" : soldOut ? "Join the waitlist" : tier.approval === "organiser" ? "Submit for approval" : total === 0 ? "Confirm registration" : method === "bank" ? "Request an invoice" : `Pay ${money(total, tier.currency)}`;
 
   return (
     <div className="min-h-screen bg-paper brand" style={{ "--accent": accent, "--accent-ink": accentInk } as React.CSSProperties}>
@@ -111,12 +129,12 @@ export function Register({ slug }: { slug: string }) {
             {tiers.map((t) => {
               const left = t.cap - t.sold;
               return (
-                <button key={t.id} type="button" disabled={left <= 0} aria-pressed={tierId === t.id} onClick={() => { setTierId(t.id); setStep(1); }} className="choice">
+                <button key={t.id} type="button" disabled={!!t.paused || (!!today && !!t.saleFrom && t.saleFrom > today)} aria-pressed={tierId === t.id} onClick={() => { setTierId(t.id); setStep(1); }} className="choice">
                   <h3>{t.name}</h3>
                   <span className="choice__price">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
                   <p>{t.description}</p>
                   <p className="tile__meta">
-                    {left <= 0 ? "Sold out" : `${left} of ${t.cap} places left`}
+                    {t.paused ? "Sales paused" : !!today && !!t.saleFrom && t.saleFrom > today ? `On sale from ${t.saleFrom}` : left <= 0 ? "Sold out, join the waitlist: places are offered in order with 24 hours to pay" : `${left} of ${t.cap} places left`}
                     {t.approval === "organiser" && ", organiser approval required"}
                   </p>
                 </button>
@@ -179,20 +197,55 @@ export function Register({ slug }: { slug: string }) {
                   ))}
                 </select>
               </div>
-              {form.category === "Speaker" && (
-                <div className="sm:col-span-2">
-                  <label className="label" htmlFor="bio">Short bio (speakers only)</label>
-                  <input id="bio" className="input" placeholder="Shown in the programme" />
+              {customFields.map((f) => (
+                <div key={f.id} className={f.type === "text" ? "" : "sm:col-span-2"}>
+                  <label className="label" htmlFor={f.id}>{f.label}{f.required ? "" : " (optional)"}</label>
+                  {f.type === "select" ? (
+                    <select id={f.id} className="input" required={f.required} value={answers[f.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [f.id]: e.target.value })}>
+                      <option value="">Choose</option>
+                      {(f.options ?? []).map((o) => <option key={o}>{o}</option>)}
+                    </select>
+                  ) : f.type === "textarea" ? (
+                    <textarea id={f.id} className="input" rows={3} required={f.required} value={answers[f.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [f.id]: e.target.value })} />
+                  ) : f.type === "file" ? (
+                    <input id={f.id} type="file" className="input py-2.5" required={f.required} onChange={(e) => setAnswers({ ...answers, [f.id]: e.target.files?.[0]?.name ?? "" })} />
+                  ) : (
+                    <input id={f.id} className="input" required={f.required} value={answers[f.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [f.id]: e.target.value })} />
+                  )}
+                  {f.help && <p className="mt-1 text-[13px] text-slate">{f.help}</p>}
                 </div>
-              )}
-              <div className="sm:col-span-2">
-                <label className="label" htmlFor="dietary">Dietary or accessibility needs</label>
-                <input id="dietary" className="input" value={form.dietary} onChange={set("dietary")} placeholder="Optional" />
-              </div>
+              ))}
             </div>
+            {!soldOut && tier.approval !== "organiser" && (
+              <div className="border-t border-line pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium">Colleagues in the same order</div>
+                    <div className="text-[13px] text-slate">Up to ten people in all. Each gets their own ticket and badge by email.</div>
+                  </div>
+                  {extras.length < 9 && (
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => setExtras([...extras, { name: "", email: "", tierId: tier.id }])}>
+                      Add a colleague
+                    </button>
+                  )}
+                </div>
+                {extras.map((x, i) => (
+                  <div key={i} className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_180px_auto] items-center">
+                    <input className="input" placeholder="Full name" aria-label="Colleague name" value={x.name} onChange={(e) => setExtras(extras.map((y, j) => (j === i ? { ...y, name: e.target.value } : y)))} />
+                    <input className="input" type="email" placeholder="Email" aria-label="Colleague email" value={x.email} onChange={(e) => setExtras(extras.map((y, j) => (j === i ? { ...y, email: e.target.value } : y)))} />
+                    <select className="input" aria-label="Colleague ticket" value={x.tierId} onChange={(e) => setExtras(extras.map((y, j) => (j === i ? { ...y, tierId: e.target.value } : y)))}>
+                      {tiers.filter((t) => t.approval !== "organiser" && t.cap - t.sold > 0).map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}, {t.price === 0 ? "free" : money(t.price, t.currency)}</option>
+                      ))}
+                    </select>
+                    <button type="button" className="btn-quiet text-bad" onClick={() => setExtras(extras.filter((_, j) => j !== i))}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex justify-end gap-2 pt-1">
               <button type="submit" className="btn btn-primary btn-cta">
-                Continue to payment
+                {soldOut ? "Continue" : "Continue to payment"}
               </button>
             </div>
           </form>
@@ -203,9 +256,18 @@ export function Register({ slug }: { slug: string }) {
             <h1 className="h1">Payment</h1>
             <div className="rounded-lg bg-paper-200 p-4 text-[15px] space-y-1">
               <div className="flex justify-between">
-                <span>{tier.name}</span>
-                <span className="tabular-nums">{tier.price === 0 ? "Free" : money(tier.price, tier.currency)}</span>
+                <span>{tier.name}{soldOut ? ", waitlist" : ""}</span>
+                <span className="tabular-nums">{soldOut ? "Nothing now" : tier.price === 0 ? "Free" : money(tier.price, tier.currency)}</span>
               </div>
+              {extras.filter((x) => x.name).map((x, i) => {
+                const t = tiers.find((y) => y.id === x.tierId) ?? tier;
+                return (
+                  <div key={i} className="flex justify-between text-slate">
+                    <span>{x.name}, {t.name}</span>
+                    <span className="tabular-nums">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
+                  </div>
+                );
+              })}
               {discount > 0 && (
                 <div className="flex justify-between text-ok">
                   <span>Promo EARLY10</span>
@@ -223,7 +285,9 @@ export function Register({ slug }: { slug: string }) {
                 <input id="promo" className="input" placeholder="Try EARLY10" value={form.promo} onChange={set("promo")} />
               </div>
             )}
-            {tier.approval === "organiser" ? (
+            {soldOut ? (
+              <p className="text-slate">{tier.name} is sold out. Join the waitlist and we offer places in order, by email and SMS, with 24 hours to pay; nothing is charged now.</p>
+            ) : tier.approval === "organiser" ? (
               <p className="text-slate">This ticket needs organiser approval. Submit your details now; you will be asked to pay, if anything is due, once approved.</p>
             ) : tier.price > 0 ? (
               <div>
@@ -283,9 +347,11 @@ export function Register({ slug }: { slug: string }) {
         {step === 3 && (
           <div className="surface p-8 text-center">
             <div className="mx-auto h-14 w-14 rounded-full bg-ok-50 text-ok grid place-items-center text-2xl">✓</div>
-            <h1 className="mt-4 text-[28px] font-medium tracking-[-0.02em]">{tier?.approval === "organiser" ? "Submitted for approval" : method === "bank" && tier && tier.price > 0 ? "Invoice on its way" : "You are registered"}</h1>
+            <h1 className="mt-4 text-[28px] font-medium tracking-[-0.02em]">{soldOut ? "You are on the waitlist" : tier?.approval === "organiser" ? "Submitted for approval" : method === "bank" && tier && tier.price > 0 ? "Invoice on its way" : extras.length ? `${extras.filter((x) => x.name).length + 1} of you are registered` : "You are registered"}</h1>
             <p className="mt-2 text-slate measure mx-auto">
-              {tier?.approval === "organiser"
+              {soldOut
+                ? "You will get an email and SMS the moment a place is released, with 24 hours to pay before it goes to the next person."
+                : tier?.approval === "organiser"
                 ? "The organiser will review your request. You will get an email and SMS when it is approved."
                 : method === "bank" && tier && tier.price > 0
                   ? "Check your email for the pro-forma invoice. Your badge is issued once payment is received."

@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { Empty, KV, Meter, PageHeader, Section, Stat, StatusPill } from "@/components/ui";
+import { useState } from "react";
 import { money, useStore } from "@/lib/store";
+import { TierEditor } from "../../editors";
 
 export function TierDetail({ eventId, tierId }: { eventId: string; tierId: string }) {
-  const { state, hydrated } = useStore();
+  const { state, dispatch, hydrated } = useStore();
+  const [editing, setEditing] = useState(false);
   const t = state.tiers.find((x) => x.id === tierId);
   const event = state.events.find((e) => e.id === eventId);
   if (!t || !event) return <Empty>{hydrated ? "Tier not found." : "Loading…"}</Empty>;
@@ -18,14 +21,15 @@ export function TierDetail({ eventId, tierId }: { eventId: string; tierId: strin
 
   return (
     <>
+      {editing && <TierEditor eventId={eventId} tier={t} onClose={() => setEditing(false)} />}
       <PageHeader
         crumbs={[{ href: "/organiser", label: "Events" }, { href: base, label: event.name }, { href: `${base}?tab=Tickets and form`, label: "Tickets" }, { label: t.name }]}
         title={t.name}
         kicker={t.description}
         actions={
           <>
-            <button className="btn-secondary">Edit tier</button>
-            <button className="btn-secondary">Pause sales</button>
+            <button className="btn-secondary" onClick={() => setEditing(true)}>Edit tier</button>
+            <button className="btn-secondary" onClick={() => dispatch({ type: "upsertTier", tier: { ...t, paused: !t.paused } })}>{t.paused ? "Resume sales" : "Pause sales"}</button>
           </>
         }
       />

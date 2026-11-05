@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { Empty, KV, Meter, PageHeader, Section, Stat, Tone } from "@/components/ui";
+import { useState } from "react";
 import { useStore } from "@/lib/store";
+import { SessionEditor } from "@/app/organiser/events/[id]/editors";
 
 export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "organiser" | "facilitator" }) {
   const { state, dispatch, hydrated } = useStore();
+  const [editing, setEditing] = useState(false);
   const s = state.sessions.find((x) => x.id === sessionId);
   if (!s) return <Empty>{hydrated ? "Session not found." : "Loading…"}</Empty>;
   const event = state.events.find((e) => e.id === s.eventId)!;
@@ -35,6 +38,7 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
 
   return (
     <>
+      {editing && <SessionEditor eventId={s.eventId} session={s} onClose={() => setEditing(false)} />}
       <PageHeader
         crumbs={mode === "organiser" ? [{ href: "/organiser", label: "Events" }, { href: base, label: event.name }, { href: `${base}?tab=Programme`, label: "Programme" }, { label: s.title }] : undefined}
         title={s.title}
@@ -42,7 +46,7 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
         kicker={`Day ${s.day}, ${s.start} to ${s.end}${room ? `, ${room.name}` : ""}${s.track ? `. ${s.track} track` : ""}. ${s.speakers.join(", ")}`}
         actions={
           <>
-            {mode === "organiser" && <button className="btn-secondary">Edit session</button>}
+            {mode === "organiser" && <button className="btn-secondary" onClick={() => setEditing(true)}>Edit session</button>}
             {mode === "facilitator" && (
               <button className="btn-secondary" onClick={() => dispatch({ type: "updateSession", sessionId: s.id, patch: { slidesUploaded: true } })}>
                 {s.slidesUploaded ? "Slides uploaded" : "Upload slides"}

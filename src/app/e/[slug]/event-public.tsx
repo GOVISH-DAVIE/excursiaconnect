@@ -5,7 +5,8 @@ import { useState } from "react";
 import { Wordmark, fmtDate } from "@/components/ui";
 import { money, useStore } from "@/lib/store";
 import { initials, numberWord, readableOn } from "@/lib/brand";
-import type { Room, Session, Tier, Zone } from "@/lib/types";
+import { useToday } from "@/lib/use-today";
+import { SOCIAL_KEYS, type Room, type Session, type Tier, type Zone } from "@/lib/types";
 
 /*
   The public event site. Kind: an event people buy tickets to (flat colour, type and the hover
@@ -60,6 +61,7 @@ function includes(t: Tier, zones: Zone[], days: number): [string, string][] {
 export function EventPublic({ slug }: { slug: string }) {
   const { state } = useStore();
   const [open, setOpen] = useState(false);
+  const today = useToday();
   const event = state.events.find((e) => e.slug === slug);
   if (!event) return <div className="p-10">Event not found.</div>;
 
@@ -74,8 +76,17 @@ export function EventPublic({ slug }: { slug: string }) {
 
   const speakers = [...new Set(sessions.flatMap((s) => s.speakers))].map((name) => {
     const s = sessions.find((x) => x.speakers.includes(name))!;
-    return { name, title: s.title, when: `Day ${s.day}, ${s.start}, ${whereIs(s, rooms)}` };
+    const p = state.speakerProfiles.find((x) => x.eventId === event.id && x.name === name);
+    const d = state.delegates.find((x) => x.eventId === event.id && x.name === name && x.status !== "Cancelled");
+    return { name, title: s.title, when: `Day ${s.day}, ${s.start}, ${whereIs(s, rooms)}`, photo: p?.photo, who: [p?.jobTitle, p?.organisation].filter(Boolean).join(", "), delegateId: d?.id, links: p?.links };
   });
+  // meetings and messages happen from a delegate's badge; the prototype has no sign-in, so the demo badge stands in
+  const badge = `/badge/${state.currentDelegateId ?? "d_demo"}`;
+  const hasPhotos = speakers.some((sp) => sp.photo);
+  const banner = state.banners[event.id];
+  const floorPlan = state.floorPlans[event.id];
+  const sponsors = state.sponsors.filter((s) => s.eventId === event.id);
+  const tiers_ = ["Headline", "Gold", "Silver", "Partner"] as const;
 
   const lead = tiers.find((t) => t.id === "t_full") ?? tiers[0];
   const kesPrices = tiers.filter((t) => t.price > 0 && t.currency === "KES").map((t) => t.price);
@@ -94,6 +105,18 @@ export function EventPublic({ slug }: { slug: string }) {
   const dateSpan = `${fmtDate(event.startDate, { day: "numeric" })} to ${fmtDate(event.endDate, { day: "numeric", month: "long", year: "numeric" })}`;
   const directions = `https://www.openstreetmap.org/search?query=${encodeURIComponent(`${event.venue} ${event.city}`)}`;
 
+  // the live fact: a block in the programme window's flow (never over a row); a float only over the banner photograph
+  const fact = lead ? (
+    <div className="ly-float">
+      <div className="ly-float__row">
+        <span className="ly-live">{live ? "Selling now" : "Not on sale yet"}</span>
+        <span>{lead.name}</span>
+      </div>
+      <div className="ly-float__title">
+        {Math.max(0, lead.cap - lead.sold)} of {lead.cap} places left
+      </div>
+    </div>
+  ) : null;
   const mark = (
     <span className="mark" style={{ background: accent, color: accentInk }} aria-hidden="true">
       {initials(organiser?.name ?? event.name)}
@@ -184,12 +207,20 @@ export function EventPublic({ slug }: { slug: string }) {
                   </div>
                 </dl>
               </div>
-              <div className="hero__media span-6 begin-7" aria-label={`Day 1 programme, ${dayDate(event.startDate, 1)}`}>
+              <div className="hero__media span-6 begin-7" aria-label={banner ? event.venue : `Day 1 programme, ${dayDate(event.startDate, 1)}`}>
+                {banner ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={banner} alt="" fetchPriority="high" />
+                    {fact}
+                  </>
+                ) : (
                 <div className="window">
                   <div className="window__head">
                     <span className="t-label">Programme, day 1</span>
                     <span className="t-label muted">{dayDate(event.startDate, 1)}</span>
                   </div>
+                  {fact}
                   <ul className="rows rows--programme">
                     {sessions
                       .filter((s) => s.day === 1)
@@ -202,16 +233,6 @@ export function EventPublic({ slug }: { slug: string }) {
                       ))}
                   </ul>
                 </div>
-                {lead && (
-                  <div className="ly-float">
-                    <div className="ly-float__row">
-                      <span className="ly-live">{live ? "Selling now" : "Not on sale yet"}</span>
-                      <span>{lead.name}</span>
-                    </div>
-                    <div className="ly-float__title">
-                      {Math.max(0, lead.cap - lead.sold)} of {lead.cap} places left
-                    </div>
-                  </div>
                 )}
               </div>
             </div>
@@ -253,7 +274,7 @@ export function EventPublic({ slug }: { slug: string }) {
         </section>
 
         {/* ---- speakers: the dark band. Names and sessions from the programme; no portraits exist. */}
-        <section className="section ground-inverse" id="speakers" aria-labelledby="speakers-h" style={{ "--h": 1, "--hm": 2 } as React.CSSProperties}>
+        <section className="section ground-inverse" id="speakers" aria-labelledby="speakers-h" style={{ "--h": hasPhotos ? 2 : 1, "--hm": 2 } as React.CSSProperties}>
           <div className="wrap">
             <div className="section-head">
               <h2 id="speakers-h">
@@ -265,15 +286,78 @@ export function EventPublic({ slug }: { slug: string }) {
             </div>
             <div className="grid">
               {speakers.map((sp) => (
-                <div key={sp.name} className="person span-3">
-                  <h3>{sp.name}</h3>
-                  <p>{sp.title}</p>
-                  <p className="person__when">{sp.when}</p>
+                <div key={sp.name} className={`person span-3 ${sp.photo ? "person--photo" : ""}`}>
+                  {sp.photo && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img className="person__photo" src={sp.photo} alt="" loading="lazy" />
+                  )}
+                  <div className="person__text">
+                    <h3>{sp.name}</h3>
+                    {sp.who && <p className="person__who">{sp.who}</p>}
+                    <p>{sp.title}</p>
+                    <p className="person__when">{sp.when}</p>
+                    <div className="person__actions">
+                      <a href={`${badge}?tab=People&q=${encodeURIComponent(sp.name)}`}>
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2" /><path d="M2 7h12M5.5 1.5v3M10.5 1.5v3" /></svg>
+                        Book a meeting
+                      </a>
+                      <a href={sp.delegateId ? `${badge}?tab=Messages&with=${sp.delegateId}` : `${badge}?tab=People&q=${encodeURIComponent(sp.name)}`}>
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6a1.5 1.5 0 0 1-1.5 1.5H6l-3.5 3v-3A1.5 1.5 0 0 1 2 9.5z" /></svg>
+                        Message
+                      </a>
+                      {SOCIAL_KEYS.filter((k) => sp.links?.[k.key]).map((k) => (
+                        <a key={k.key} href={sp.links![k.key]} target="_blank" rel="noreferrer">
+                          {k.label}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         </section>
+
+        {/* ---- sponsors and partners: real logos in their own colours, by tier; a name in type until a logo is uploaded. */}
+        {sponsors.length > 0 && (
+          <section className="section" id="sponsors" aria-labelledby="sponsors-h" style={{ "--h": 1, "--hm": 1 } as React.CSSProperties}>
+            <div className="wrap">
+              <div className="section-head">
+                <h2 id="sponsors-h">Sponsors and partners</h2>
+              </div>
+              <ul className="rows rows--sponsors">
+                {tiers_
+                  .filter((t) => sponsors.some((s) => s.tier === t))
+                  .map((t) => (
+                    <li key={t} className={`sponsors--${t.toLowerCase()}`}>
+                      <span className="rows__name">{t}</span>
+                      <div className="logos">
+                        {sponsors
+                          .filter((s) => s.tier === t)
+                          .map((s) => {
+                            const inner = s.logo ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={s.logo} alt={s.name} loading="lazy" />
+                            ) : (
+                              <span className="logos__name">{s.name}</span>
+                            );
+                            return s.url ? (
+                              <a key={s.id} href={s.url} target="_blank" rel="noreferrer" className="logos__item">
+                                {inner}
+                              </a>
+                            ) : (
+                              <span key={s.id} className="logos__item">
+                                {inner}
+                              </span>
+                            );
+                          })}
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </section>
+        )}
 
         {/* ---- tickets: the range, one tile per public tier, the secondary button on each. */}
         <section className="section" id="tickets" aria-labelledby="tickets-h" style={{ "--h": 1, "--hm": 2 } as React.CSSProperties}>
@@ -299,9 +383,9 @@ export function EventPublic({ slug }: { slug: string }) {
                     </div>
                     <div className="ticket__price">
                       <span className="t-stat">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
-                      <span className="ticket__left">{left <= 0 ? "Sold out, waitlist open" : `${left} of ${t.cap} places left`}</span>
+                      <span className="ticket__left">{t.paused ? "Sales paused" : !!today && !!t.saleFrom && t.saleFrom > today ? `On sale from ${fmtDate(t.saleFrom, { day: "numeric", month: "long" })}` : left <= 0 ? "Sold out, waitlist open" : `${left} of ${t.cap} places left`}</span>
                     </div>
-                    {live ? (
+                    {live && !t.paused && !(!!today && !!t.saleFrom && t.saleFrom > today) ? (
                       <Link href={`${register}?tier=${t.id}`} className="link">
                         {left <= 0 ? "Join the waitlist" : "Choose this ticket"}
                       </Link>
@@ -362,40 +446,53 @@ export function EventPublic({ slug }: { slug: string }) {
                 </ul>
               </div>
               <div className="span-6 begin-7">
-                <figure className="plan" role="img" aria-label={`Zones at ${event.venue}: ${zones.map((z) => `${z.name}, ${z.capacity}`).join("; ")}`}>
-                  {zones
-                    .filter((z) => z.id !== "z_breakout")
-                    .map((z, i) => {
-                      const place = [
-                        { gridColumn: "1 / span 4", gridRow: "1 / span 2" },
-                        { gridColumn: "5 / span 2", gridRow: "1 / span 2" },
-                        { gridColumn: "1 / span 2", gridRow: "3 / span 2" },
-                        { gridColumn: "3 / span 1", gridRow: "3 / span 2" },
-                      ][i] ?? { gridColumn: "span 2", gridRow: "span 1" };
-                      return (
-                        <div key={z.id} className="plan__zone" style={place}>
-                          <b>{z.name}</b>
-                          <small>{z.capacity} people{z.window ? `, ${z.window}` : ""}</small>
+                {floorPlan ? (
+                  <figure className="plan plan--image">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={floorPlan} alt={`Floor plan of ${event.venue}`} loading="lazy" />
+                  </figure>
+                ) : (
+                  /* no plan uploaded yet: the zones drawn to scale by capacity, the rooms inside their wing */
+                  <figure className="plan" role="img" aria-label={`Zones at ${event.venue}: ${zones.map((z) => `${z.name}, ${z.capacity}`).join("; ")}`}>
+                    {zones
+                      .filter((z) => z.id !== "z_breakout")
+                      .map((z, i) => {
+                        const place = [
+                          { gridColumn: "1 / span 8", gridRow: "1 / span 3" },
+                          { gridColumn: "9 / span 4", gridRow: "1 / span 3" },
+                          { gridColumn: "1 / span 5", gridRow: "4 / span 2" },
+                          { gridColumn: "6 / span 2", gridRow: "4 / span 2" },
+                        ][i] ?? { gridColumn: "span 3", gridRow: "span 1" };
+                        return (
+                          <div key={z.id} className="plan__zone" style={place}>
+                            <b>{z.name}</b>
+                            <small>
+                              {z.capacity}
+                              {z.window ? ` · ${z.window}` : ""}
+                            </small>
+                          </div>
+                        );
+                      })}
+                    {breakoutRooms.length > 0 && (
+                      <div className="plan__wing" style={{ gridColumn: "8 / span 5", gridRow: "4 / span 2" }}>
+                        <div className="plan__wing-head">
+                          <b>Breakout wing</b>
+                          <small>{zones.find((z) => z.id === "z_breakout")?.capacity}</small>
                         </div>
-                      );
-                    })}
-                  {breakoutRooms.length > 0 && (
-                    <div className="plan__zone plan__zone--wing" style={{ gridColumn: "4 / span 3", gridRow: "3 / span 2" }}>
-                      <b>Breakout wing</b>
-                      <small>{zones.find((z) => z.id === "z_breakout")?.capacity} people</small>
-                      {breakoutRooms.map((r) => (
-                        <div key={r.id} className="plan__room">
-                          <b>{r.name.replace(/\s*\(.*\)/, "")}</b>
-                          <small>{r.capacity} seats</small>
-                        </div>
-                      ))}
+                        {breakoutRooms.map((r) => (
+                          <div key={r.id} className="plan__zone plan__room">
+                            <b>{r.name.replace(/\s*\(.*\)/, "")}</b>
+                            <small>{r.capacity} seats</small>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="plan__zone plan__zone--desk" style={{ gridColumn: "1 / span 12", gridRow: "6" }}>
+                      <b>Foyer, accreditation desk</b>
+                      <small>Doors {doors}</small>
                     </div>
-                  )}
-                  <div className="plan__zone plan__zone--desk" style={{ gridColumn: "1 / span 6", gridRow: "5" }}>
-                    <b>Foyer and accreditation desk</b>
-                    <small>Doors from {doors}</small>
-                  </div>
-                </figure>
+                  </figure>
+                )}
               </div>
             </div>
           </div>
@@ -473,6 +570,18 @@ export function EventPublic({ slug }: { slug: string }) {
                 <p className="footer__lede" style={{ marginTop: "var(--s-5)" }}>
                   {event.name}
                 </p>
+                {(event.hashtag || SOCIAL_KEYS.some((k) => event.links?.[k.key])) && (
+                  <ul className="footer__social">
+                    {event.hashtag && <li>{event.hashtag}</li>}
+                    {SOCIAL_KEYS.filter((k) => event.links?.[k.key]).map((k) => (
+                      <li key={k.key}>
+                        <a href={event.links![k.key]} target="_blank" rel="noreferrer">
+                          {k.label}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="footer__col span-2">
                 <h4>Programme</h4>

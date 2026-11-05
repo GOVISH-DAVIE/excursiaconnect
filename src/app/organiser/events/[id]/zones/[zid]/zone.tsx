@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { Bars, Empty, KV, Meter, PageHeader, Section, Stat, Tone } from "@/components/ui";
+import { useState } from "react";
 import { useStore } from "@/lib/store";
+import { ZoneEditor } from "../../editors";
 
 export function ZoneDetail({ eventId, zoneId }: { eventId: string; zoneId: string }) {
   const { state, hydrated } = useStore();
+  const [editing, setEditing] = useState(false);
   const z = state.zones.find((x) => x.id === zoneId);
   const event = state.events.find((e) => e.id === eventId);
   if (!z || !event) return <Empty>{hydrated ? "Zone not found." : "Loading…"}</Empty>;
@@ -25,13 +28,14 @@ export function ZoneDetail({ eventId, zoneId }: { eventId: string; zoneId: strin
 
   return (
     <>
+      {editing && <ZoneEditor eventId={eventId} zone={z} onClose={() => setEditing(false)} />}
       <PageHeader
         crumbs={[{ href: "/organiser", label: "Events" }, { href: base, label: event.name }, { href: `${base}?tab=Zones and rooms`, label: "Zones" }, { label: z.name }]}
         title={z.name}
         kicker={`Capacity ${z.capacity}. ${z.window ? `Open ${z.window}.` : "Open all day."} ${entitledCount} delegates entitled.`}
         actions={
           <>
-            <button className="btn-secondary">Edit zone</button>
+            <button className="btn-secondary" onClick={() => setEditing(true)}>Edit zone</button>
             <Link href="/scan" className="btn-secondary" target="_blank">
               Open scanner
             </Link>

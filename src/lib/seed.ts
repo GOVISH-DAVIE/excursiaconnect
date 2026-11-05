@@ -179,6 +179,31 @@ const liveIds = new Set(delegates.map((d) => d.id));
 const cleanOrders = orders.filter((o) => liveIds.has(o.delegateId));
 
 export const seed: AppState = {
+  formFields: [
+    { id: "f_bio", eventId: "ev_nairobi_summit", label: "Short bio", type: "textarea", required: true, showTo: ["Speaker", "Panelist"], help: "Shown in the programme, 60 words at most" },
+    { id: "f_headshot", eventId: "ev_nairobi_summit", label: "Headshot (up to 5 MB)", type: "file", required: false, showTo: ["Speaker"] },
+    { id: "f_dietary", eventId: "ev_nairobi_summit", label: "Dietary or accessibility needs", type: "text", required: false, showTo: "Everyone" },
+    { id: "f_stand", eventId: "ev_nairobi_summit", label: "Stand number", type: "text", required: false, showTo: ["Exhibitor", "Sponsor"] },
+  ],
+  exceptions: [
+    { ref: "RKJ7Q2M1", issue: "M-Pesa callback received with no matching order, KES 12,000", raised: "2026-11-05 03:10" },
+    { ref: "PSK_8a1f30c2", issue: "Paystack settled KES 11,820 against a ledger line of 12,000. Fee variance.", raised: "2026-11-04 03:05" },
+  ],
+  campaigns: [{ id: "c1", eventId: "ev_nairobi_summit", at: "2026-11-03 09:00", segment: "Confirmed, all tiers", channel: "Email and SMS", subject: "Your badge and the day 1 programme", recipients: 160 }],
+  payoutsPaid: [],
+  banners: {},
+  floorPlans: {},
+  speakerProfiles: [
+    { eventId: "ev_nairobi_summit", name: "Hassan Abdalla", organisation: "Safaricom", jobTitle: "Chief Brand Officer" },
+    { eventId: "ev_nairobi_summit", name: "Esther Njeri", organisation: "Nation Media", jobTitle: "Head of Communications" },
+  ],
+  sponsors: [
+    { id: "sp1", eventId: "ev_nairobi_summit", name: "KCB Group", tier: "Headline" },
+    { id: "sp2", eventId: "ev_nairobi_summit", name: "Nation Media", tier: "Gold" },
+    { id: "sp3", eventId: "ev_nairobi_summit", name: "Britam", tier: "Gold" },
+    { id: "sp4", eventId: "ev_nairobi_summit", name: "iHub", tier: "Silver" },
+    { id: "sp5", eventId: "ev_nairobi_summit", name: "Strathmore University", tier: "Partner" },
+  ],
   team,
   shifts,
   grants: DEFAULT_GRANTS,
