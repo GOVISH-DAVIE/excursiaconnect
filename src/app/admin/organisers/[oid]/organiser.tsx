@@ -8,12 +8,13 @@ import { money, payoutsFor, useStore } from "@/lib/store";
 export function OrganiserDetail({ organiserId }: { organiserId: string }) {
   const { state, dispatch, hydrated } = useStore();
   const o = state.organisers.find((x) => x.id === organiserId);
+  // Only the edited values; unset fields fall back to the organiser's stored rate card.
+  const [rates, setRates] = useState<{ licenceFee?: number; commissionPct?: number }>({});
   if (!o) return <Empty>{hydrated ? "Organiser not found." : "Loading…"}</Empty>;
   const events = state.events.filter((e) => e.organiserId === o.id);
   const payouts = payoutsFor(state, o.id);
   const gross = payouts.reduce((a, p) => a + p.gross, 0);
   const commission = payouts.reduce((a, p) => a + p.commission, 0);
-  const [rates, setRates] = useState({ licenceFee: o.licenceFee, commissionPct: o.commissionPct });
   const kyc = [
     ["Registered business name", o.name, true],
     ["Registration number", o.registrationNo, true],
@@ -65,11 +66,11 @@ export function OrganiserDetail({ organiserId }: { organiserId: string }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Licence per event (KES)</label>
-              <input type="number" className="input" value={rates.licenceFee} onChange={(e) => setRates({ ...rates, licenceFee: Number(e.target.value) })} />
+              <input type="number" className="input" value={rates.licenceFee ?? o.licenceFee} onChange={(e) => setRates({ ...rates, licenceFee: Number(e.target.value) })} />
             </div>
             <div>
               <label className="label">Commission %</label>
-              <input type="number" className="input" value={rates.commissionPct} onChange={(e) => setRates({ ...rates, commissionPct: Number(e.target.value) })} />
+              <input type="number" className="input" value={rates.commissionPct ?? o.commissionPct} onChange={(e) => setRates({ ...rates, commissionPct: Number(e.target.value) })} />
             </div>
           </div>
           <KV rows={[["Extra attendees", "KES 15,000 per 100 above 500"], ["Multi-day uplift", "KES 20,000 per extra day"], ["Accreditation kit", "KES 8,000 per station per day"], ["On-site staff", "KES 6,000 per person per day"], ["SMS", "KES 1,200 per 1,000"]]} />

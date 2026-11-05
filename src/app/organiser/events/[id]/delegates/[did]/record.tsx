@@ -4,11 +4,14 @@ import Link from "next/link";
 import { useState } from "react";
 import { Empty, KV, PageHeader, Section, StatusPill, Tone } from "@/components/ui";
 import { money, useStore } from "@/lib/store";
+import type { Category } from "@/lib/types";
 
 export function DelegateRecord({ eventId, delegateId }: { eventId: string; delegateId: string }) {
   const { state, dispatch, hydrated } = useStore();
   const [editing, setEditing] = useState(false);
-  const d = state.delegates.find((x) => x.id === delegateId);
+  // Filled from the delegate when Edit is clicked; declared here so hooks run before the early return.
+  const [form, setForm] = useState({ name: "", organisation: "", jobTitle: "", phone: "", category: "General Delegate" as Category });
+  const d =state.delegates.find((x) => x.id === delegateId);
   const event = state.events.find((e) => e.id === eventId);
   if (!d || !event) return <Empty>{hydrated ? "Delegate not found." : "Loading…"}</Empty>;
   const tier = state.tiers.find((t) => t.id === d.tierId)!;
@@ -18,7 +21,6 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
   const base = `/organiser/events/${eventId}`;
   const entitled = (zid: string) => tier.entitlements.includes(zid) || (d.grants ?? []).includes(zid) || (d.category === "VIP" && zid === "z_vip");
   const meetings = state.delegates.flatMap((h) => (h.slots ?? []).filter((s) => s.bookedBy === d.id).map((s) => ({ with: h.name, ...s }))).concat((d.slots ?? []).filter((s) => s.bookedBy).map((s) => ({ with: state.delegates.find((x) => x.id === s.bookedBy)?.name ?? "", ...s })));
-  const [form, setForm] = useState({ name: d.name, organisation: d.organisation, jobTitle: d.jobTitle, phone: d.phone, category: d.category });
 
   const audit = [
     ...(d.status !== "Pending" ? [{ at: order?.at ?? "2026-10-02", who: "System", what: `Registered via public page, tier ${tier.name}` }] : []),
@@ -81,7 +83,13 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
                 Save changes
               </button>
             ) : (
-              <button className="btn-ghost" onClick={() => setEditing(true)}>
+              <button
+                className="btn-ghost"
+                onClick={() => {
+                  setForm({ name: d.name, organisation: d.organisation, jobTitle: d.jobTitle, phone: d.phone, category: d.category });
+                  setEditing(true);
+                }}
+              >
                 Edit
               </button>
             )
@@ -97,7 +105,7 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
               ))}
               <div>
                 <label className="label">Category</label>
-                <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as typeof form.category })}>
+                <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as Category })}>
                   {["General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP"].map((c) => (
                     <option key={c}>{c}</option>
                   ))}
