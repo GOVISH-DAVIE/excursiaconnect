@@ -106,16 +106,14 @@ export function Register({ slug }: { slug: string }) {
         </ol>
 
         {step === 0 && (
-          <div className="space-y-3">
-            <h1 className="h1 mb-5">Choose a ticket</h1>
+          <div>
+            <h1 className="h1 mb-6">Choose a ticket</h1>
             {tiers.map((t) => {
               const left = t.cap - t.sold;
               return (
-                <button key={t.id} type="button" disabled={left <= 0} aria-pressed={tierId === t.id} onClick={() => { setTierId(t.id); setStep(1); }} className="tile tile--choice disabled:opacity-50">
-                  <div className="flex items-baseline justify-between gap-4">
-                    <h3>{t.name}</h3>
-                    <span className="font-medium tabular-nums">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
-                  </div>
+                <button key={t.id} type="button" disabled={left <= 0} aria-pressed={tierId === t.id} onClick={() => { setTierId(t.id); setStep(1); }} className="choice">
+                  <h3>{t.name}</h3>
+                  <span className="choice__price">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
                   <p>{t.description}</p>
                   <p className="tile__meta">
                     {left <= 0 ? "Sold out" : `${left} of ${t.cap} places left`}

@@ -159,27 +159,31 @@ export function PageHeader({ title, kicker, actions, crumbs, badge }: { title: R
 
 /** A number with its label. With an href it is a linked card: it lifts on hover and opens the list behind the number. */
 export function Stat({ label, value, sub, tone, href }: { label: string; value: ReactNode; sub?: ReactNode; tone?: "coral" | "ok" | "warn" | "bad"; href?: string }) {
-  const color = tone === "coral" ? "text-coral" : tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : tone === "bad" ? "text-bad" : "text-ink";
+  // the number stays ink; a tone is a small dot by the label, so a row of stats reads as one row
+  const dot = tone === "coral" ? "bg-coral" : tone === "ok" ? "bg-ok" : tone === "warn" ? "bg-warn" : tone === "bad" ? "bg-bad" : null;
   const body = (
     <>
-      <div className={`t-stat ${color}`}>{value}</div>
-      <div className="mt-2 text-[14px] font-medium">{label}</div>
-      {sub && <div className="text-[13px] text-slate mt-0.5">{sub}</div>}
+      <div className="stat__value">{value}</div>
+      <div className="stat__label">
+        {dot && <span className={`stat__dot ${dot}`} aria-hidden="true" />}
+        {label}
+      </div>
+      {sub && <div className="stat__sub">{sub}</div>}
     </>
   );
   return href ? (
-    <Link href={href} className="surface card-link p-4 block">
+    <Link href={href} className="stat stat--link">
       {body}
     </Link>
   ) : (
-    <div className="surface p-4">{body}</div>
+    <div className="stat">{body}</div>
   );
 }
 
 export function Section({ title, action, children, className = "", flush = false }: { title: ReactNode; action?: ReactNode; children: ReactNode; className?: string; flush?: boolean }) {
   return (
     <section className={`surface ${className}`}>
-      <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-line">
+      <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3">
         <h2 className="h2">{title}</h2>
         {action}
       </div>

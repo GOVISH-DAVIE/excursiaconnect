@@ -265,10 +265,10 @@ export function EventPublic({ slug }: { slug: string }) {
             </div>
             <div className="grid">
               {speakers.map((sp) => (
-                <div key={sp.name} className="tile span-3">
+                <div key={sp.name} className="person span-3">
                   <h3>{sp.name}</h3>
                   <p>{sp.title}</p>
-                  <p className="tile__meta">{sp.when}</p>
+                  <p className="person__when">{sp.when}</p>
                 </div>
               ))}
             </div>
@@ -284,32 +284,32 @@ export function EventPublic({ slug }: { slug: string }) {
               </div>
               <div className="section-head__aside">Pay by M-Pesa, Visa or Mastercard, or ask for a bank invoice. Your badge arrives by email and SMS when payment confirms.</div>
             </div>
-            <div className="grid">
+            <ul className="rows rows--tickets">
               {tiers.map((t) => {
                 const left = t.cap - t.sold;
+                const inc = includes(t, zones, event.days)
+                  .map(([, v]) => v)
+                  .filter((v) => v !== "None")
+                  .join(" · ");
                 return (
-                  <div key={t.id} className="tile span-3 tile--wide">
-                    <h3>{t.name}</h3>
-                    <p className="t-stat">{t.price === 0 ? "Free" : money(t.price, t.currency)}</p>
-                    <dl className="tile__spec">
-                      {includes(t, zones, event.days).map(([k, v]) => (
-                        <div key={k}>
-                          <dt>{k}</dt>
-                          <dd>{v}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                    <p className="sm:hidden">{t.description}</p>
-                    <p className="tile__meta">{left <= 0 ? "Sold out, waitlist open" : `${left} of ${t.cap} places left`}</p>
+                  <li key={t.id}>
+                    <div className="ticket__what">
+                      <h3>{t.name}</h3>
+                      <p>{inc}</p>
+                    </div>
+                    <div className="ticket__price">
+                      <span className="t-stat">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
+                      <span className="ticket__left">{left <= 0 ? "Sold out, waitlist open" : `${left} of ${t.cap} places left`}</span>
+                    </div>
                     {live ? (
-                      <Link href={`${register}?tier=${t.id}`} className="btn btn-secondary">
+                      <Link href={`${register}?tier=${t.id}`} className="link">
                         {left <= 0 ? "Join the waitlist" : "Choose this ticket"}
                       </Link>
                     ) : null}
-                  </div>
+                  </li>
                 );
               })}
-            </div>
+            </ul>
           </div>
         </section>
 

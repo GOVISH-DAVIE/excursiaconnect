@@ -356,3 +356,53 @@ nav.actionbar { display: none; }
   .closing__links .grid > .span-4 { grid-column: 1 / -1; }
   .footer__legal { flex-direction: column; align-items: flex-start; }
 }
+
+/* ============================================================================
+   Cards, second pass: the card is barely there. Open entries on hairlines, ruled
+   rows, one level of box at most, numbers in ink. No layout repeated four times.
+   ========================================================================== */
+
+/* a person: an open entry on a hairline, no box */
+.person { display: grid; gap: var(--s-2); align-content: start; padding-top: var(--s-4); border-top: 1px solid var(--line-strong); color: var(--ink); }
+.person h3 { font-size: 22px; line-height: 1.2; letter-spacing: -0.02em; }
+.person p { color: var(--ink); }
+.person .person__when { font-size: var(--t-small); color: var(--muted); }
+@media (max-width: 639px) { .site .grid > .person.span-3 { grid-column: span 6; } }
+
+/* tickets: ruled rows, the price set large, a text link */
+.rows--tickets > li { grid-template-columns: minmax(0, 6fr) minmax(0, 4fr) auto; align-items: start; gap: var(--s-3) var(--s-6); padding-block: var(--s-6); }
+.rows--tickets > li:first-child { padding-top: 0; }
+.ticket__what { grid-column: 1; }
+.ticket__what h3 { font-size: 22px; line-height: 1.2; letter-spacing: -0.02em; margin-bottom: var(--s-2); }
+.ticket__what p { color: var(--ink); max-width: 46ch; }
+.ticket__price { grid-column: 2; grid-row: 1; display: grid; gap: var(--s-2); }
+.ticket__left { font-size: var(--t-small); color: var(--muted); }
+.rows--tickets > li > .link { grid-column: 3; grid-row: 1; justify-self: end; margin-top: 4px; }
+@media (max-width: 639px) {
+  .rows--tickets > li { grid-template-columns: minmax(0, 1fr); padding-block: var(--s-5); }
+  .ticket__price, .rows--tickets > li > .link { grid-column: 1; grid-row: auto; justify-self: start; margin-top: 0; }
+}
+
+/* the venue plan: flat blocks on the one ground, never a box in a box in a box */
+.plan__zone, .plan__room { border: 0; }
+.plan__zone--wing { padding: 0; background: transparent; }
+
+/* a choice row (registration): the whole row is the control */
+.choice { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-1) var(--s-5); width: 100%; text-align: left; padding: var(--s-5) 0; border-top: 1px solid var(--line); color: var(--ink); cursor: pointer; }
+.choice:first-of-type { border-top: 0; padding-top: 0; }
+.choice h3 { grid-column: 1; font-size: 20px; font-weight: 500; letter-spacing: -0.01em; }
+.choice:hover h3, .choice:focus-visible h3 { text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--line-strong); }
+.choice__price { grid-column: 2; grid-row: 1; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.choice p { grid-column: 1; }
+.choice .tile__meta { font-size: var(--t-small); color: var(--muted); }
+.choice:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* dashboard stats: one divided row on the page ground, every number in ink */
+.stat { display: block; min-width: 0; padding: var(--s-1) 0 var(--s-1) var(--s-5); border-left: 1px solid var(--line-strong); color: var(--ink); }
+.stat:first-child { padding-left: 0; border-left: 0; }
+.stat__value { font-size: var(--t-stat); line-height: 1; font-weight: var(--display-weight); letter-spacing: var(--display-tracking); font-variant-numeric: tabular-nums; }
+.stat__label { display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-3); font-size: var(--t-small); font-weight: 500; }
+.stat__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.stat__sub { margin-top: 2px; font-size: var(--t-label); color: var(--muted); }
+.stat--link:hover .stat__label, .stat--link:focus-visible .stat__label { text-decoration: underline; text-underline-offset: 4px; }
+@media (max-width: 639px) { .stat:nth-child(odd) { padding-left: 0; border-left: 0; } }

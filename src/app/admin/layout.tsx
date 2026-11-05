@@ -8,6 +8,7 @@ export default function AdminLayout({ children }: LayoutProps<"/admin">) {
       accent="coral"
       nav={[
         { href: "/admin", label: "Approval queue", exact: true },
+        { href: "/admin/performance", label: "Performance" },
         { href: "/admin/organisers", label: "Organisers" },
         { href: "/admin/finance", label: "Commission and payouts" },
       ]}
