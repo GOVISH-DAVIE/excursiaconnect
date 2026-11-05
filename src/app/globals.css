@@ -1,0 +1,62 @@
+@import "tailwindcss";
+@import "@fontsource-variable/manrope";
+
+@theme {
+  --color-coral: #ff664c;
+  --color-coral-600: #e2533a;
+  --color-coral-50: #fff1ed;
+  --color-ink: #1c1c1e;
+  --color-ink-800: #2a2b2f;
+  --color-ink-700: #3a3c42;
+  --color-slate: #5b6470;
+  --color-mute: #8a919b;
+  --color-line: #e3e6ea;
+  --color-line-strong: #c9ced5;
+  --color-paper: #f5f6f8;
+  --color-paper-200: #eceef1;
+  --color-ok: #1e8e5a;
+  --color-ok-50: #e6f5ed;
+  --color-warn: #c77800;
+  --color-warn-50: #fdf2dd;
+  --color-bad: #d23b2d;
+  --color-bad-50: #fdebe9;
+  --font-sans: "Manrope Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html { color-scheme: light; }
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1, "cv11" 1;
+}
+
+:focus-visible { outline: 2px solid var(--color-coral); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+@layer components {
+  .btn, .btn-primary, .btn-dark, .btn-ghost, .btn-quiet {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap;
+  }
+  .btn-primary { @apply bg-coral text-white hover:bg-coral-600; }
+  .btn-dark { @apply bg-ink text-white hover:bg-ink-700; }
+  .btn-ghost { @apply bg-white text-ink border border-line-strong hover:bg-paper; }
+  .btn-quiet { @apply bg-transparent text-slate hover:bg-paper-200 hover:text-ink; }
+  .surface { @apply rounded-lg border border-line bg-white; }
+  .input { @apply w-full rounded-md border border-line-strong bg-white px-3 py-2 text-sm outline-none focus:border-coral focus:ring-2 focus:ring-coral/15 placeholder:text-mute; }
+  .label { @apply block text-[13px] font-semibold text-slate mb-1; }
+  .pill { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[12px] font-semibold leading-5; }
+  .th, .th-r { @apply text-left text-[12px] font-semibold text-slate px-3 py-2 border-b-2 border-ink whitespace-nowrap; }
+  .th-r { @apply text-right; }
+  .td, .td-r { @apply px-3 py-2.5 text-sm border-b border-line align-top; }
+  .td-r { @apply text-right tabular-nums; }
+  .num { @apply tabular-nums; }
+  .h1 { @apply text-[26px] font-extrabold tracking-[-0.02em] leading-tight; }
+  .h2 { @apply text-[17px] font-bold tracking-[-0.01em]; }
+  .kicker { @apply text-[13px] text-slate; }
+}
