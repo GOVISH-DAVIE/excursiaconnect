@@ -93,7 +93,7 @@ export function StackedColumns({ series, columns, height = 180 }: { series: { ke
           {/* the axis: three clean ticks, hairline grid, recessive */}
           <div className="relative text-[11px] text-mute">
             {ticks.map((t) => (
-              <span key={t} className="num absolute right-2 -translate-y-1/2" style={{ bottom: `${(t / top) * 100}%`, transform: "translateY(50%)" }}>
+              <span key={t} className="num absolute right-2" style={{ bottom: `${(t / top) * 100}%`, transform: "translateY(50%)" }}>
                 {t}
               </span>
             ))}
@@ -137,7 +137,7 @@ export function StackedColumns({ series, columns, height = 180 }: { series: { ke
           <span />
           <div className="mt-1.5 flex justify-around text-[12px] text-slate">
             {columns.map((c) => (
-              <span key={c.label} className="w-0 whitespace-nowrap text-center flex justify-center">
+              <span key={c.label} className="flex w-6 justify-center whitespace-nowrap">
                 {c.label}
               </span>
             ))}
@@ -154,8 +154,9 @@ export function StackedColumns({ series, columns, height = 180 }: { series: { ke
   );
 }
 
-/** A clean top for an axis: 5, 10, 20, 25, 50… above the largest value. */
+/** A clean top for an axis above the largest value. */
 function niceMax(n: number) {
-  const steps = [2, 4, 5, 10, 20, 25, 40, 50, 100, 200, 250, 500, 1000];
+  // even steps, so the middle tick is a whole number
+  const steps = [2, 4, 6, 8, 10, 20, 30, 40, 50, 60, 80, 100, 120, 160, 200, 300, 400, 500, 1000];
   return steps.find((s) => s >= n) ?? Math.ceil(n / 1000) * 1000;
 }

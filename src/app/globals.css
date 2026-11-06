@@ -603,3 +603,12 @@ a.prog__title:hover { text-decoration: underline; text-underline-offset: 4px; }
 @media (min-width: 640px) {
   .dr-track { grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
 }
+
+/* charts: the validated categorical slots 1 to 3 (light; the app has no dark theme) and recessive chrome */
+:root {
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-grid: #e1e0d9;
+  --viz-axis: #c3c2b7;
+}
