@@ -176,10 +176,16 @@ export function EventPublic({ slug }: { slug: string }) {
 
       <main>
         {/* ---- hero: split. The words on five columns, the Day 1 programme as the live window on six. */}
-        <section className="hero" id="top" aria-labelledby="hero-h">
+        <section className={`hero ${banner ? "hero--band" : ""}`} id="top" aria-labelledby="hero-h">
           <div className="wrap">
+            {banner && (
+              <div className="hero__band">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={banner} alt="" fetchPriority="high" />
+              </div>
+            )}
             <div className="hero-text grid hero__grid">
-              <div className="hero__text span-5">
+              <div className={`hero__text ${banner ? "span-6" : "span-5"}`}>
                 <h1 id="hero-h">Brand and PR conference in {event.city}</h1>
                 <p className="hero__lead">
                   {numberWord(event.days)[0].toUpperCase() + numberWord(event.days).slice(1)} days of plenaries, breakouts and an exhibition at {event.venue}, {dateSpan}.{from ? ` Tickets from ${from}.` : ""}
@@ -205,16 +211,38 @@ export function EventPublic({ slug }: { slug: string }) {
                       {confirmed} registered, {speakers.length} speakers
                     </dd>
                   </div>
+                  {banner && lead && (
+                    <div>
+                      <dt>{lead.name}</dt>
+                      <dd>{Math.max(0, lead.cap - lead.sold)} of {lead.cap} places left</dd>
+                    </div>
+                  )}
                 </dl>
               </div>
-              <div className="hero__media span-6 begin-7" aria-label={banner ? event.venue : `Day 1 programme, ${dayDate(event.startDate, 1)}`}>
-                {banner ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={banner} alt="" fetchPriority="high" />
-                    {fact}
-                  </>
-                ) : (
+              {banner && (
+                <div className="hero__tickets span-5 begin-8">
+                  <div className="hero__tickets-head"><span className="t-label">Tickets</span><a className="link" href="#tickets">What each includes</a></div>
+                  <ul className="rows rows--quick">
+                    {tiers.map((t) => {
+                      const left = t.cap - t.sold;
+                      const off = !!t.paused || (!!today && !!t.saleFrom && t.saleFrom > today);
+                      return (
+                        <li key={t.id}>
+                          <span className="rows__name">
+                            {t.name}
+                            <small>{t.paused ? "Sales paused" : off ? `On sale from ${t.saleFrom}` : left <= 0 ? "Sold out, waitlist open" : `${left} left`}</small>
+                          </span>
+                          <span className="rows__value">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
+                          {live && !off ? <Link href={`${register}?tier=${t.id}`} className="rows__act">{left <= 0 ? "Waitlist" : "Choose"}</Link> : <span className="rows__act rows__act--off">–</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              {!banner && (
+              <div className="hero__media span-6 begin-7" aria-label={`Day 1 programme, ${dayDate(event.startDate, 1)}`}>
+                {(
                 <div className="window">
                   <div className="window__head">
                     <span className="t-label">Programme, day 1</span>
@@ -235,6 +263,7 @@ export function EventPublic({ slug }: { slug: string }) {
                 </div>
                 )}
               </div>
+              )}
             </div>
           </div>
         </section>

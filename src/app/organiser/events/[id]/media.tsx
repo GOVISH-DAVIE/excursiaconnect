@@ -86,7 +86,7 @@ export function MediaTab({ eventId }: { eventId: string }) {
           </div>
           <div className="space-y-3 text-[14px]">
             <Upload label={banner ? "Replace banner" : "Upload banner"} kind="banner" onDone={(img) => dispatch({ type: "setBanner", eventId, image: img })} />
-            <p className="text-slate">Shown on the first screen of the public page beside the headline, and as the share image. A landscape photograph of the venue, the stage or last year&apos;s room, 1800 px or wider; the subject in the middle, since the phone crops the sides.</p>
+            <p className="text-slate">Fills the whole first screen of the public page behind the headline, and is the share image. A landscape photograph of the venue, the stage or last year&apos;s room, 1800 px or wider. The words sit on its left half, so that side must be dark and calm; the subject goes right of centre. Nothing is laid over the picture.</p>
             {banner && <p className="text-slate">Stored at {sizeOf(banner)}.</p>}
           </div>
         </div>
