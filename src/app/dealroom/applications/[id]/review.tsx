@@ -27,10 +27,11 @@ import {
 } from "@/lib/dealroom/logic";
 import type { Decision, DocKind, DrApplication, Layer, Readiness } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
+import { Activity } from "./activity";
 import { DecisionPill, DocLine, Labeled, Pill, ReadinessPill, Refusal, StatusPill, When, typeLabel, useDr } from "../../bits";
 
-const tabsSeeker = ["Assessment", "Application", "Requests", "Decision", "Teaser", "History"] as const;
-const tabsProvider = ["Verification", "Application", "Requests", "History"] as const;
+const tabsSeeker = ["Assessment", "Application", "Requests", "Decision", "Teaser", "In the Deal Room", "History"] as const;
+const tabsProvider = ["Verification", "Application", "Requests", "In the Deal Room", "History"] as const;
 type Tab = (typeof tabsSeeker)[number] | (typeof tabsProvider)[number];
 
 export function Review({ id }: { id: string }) {
@@ -116,6 +117,7 @@ export function Review({ id }: { id: string }) {
       {tab === "Requests" && <Requests app={app} />}
       {tab === "Decision" && <DecisionTab app={app} />}
       {tab === "Teaser" && <TeaserTab app={app} />}
+      {tab === "In the Deal Room" && <Activity app={app} />}
       {tab === "History" && <History app={app} />}
 
       {can("grantSupport") && <SupportGrant app={app} />}

@@ -28,7 +28,20 @@ export function OpportunityDetail({ id }: { id: string }) {
         crumbs={[{ href: "/dealroom/opportunities", label: "Opportunities" }, { label: oppTitle(dr, o) }]}
         title={oppTitle(dr, o)}
         badge={<OppStagePill stage={o.stage} />}
-        kicker={`From the meeting of ${meeting ? fmtStamp(meeting.start) : "the summit"}${room ? `, ${room.name}` : ""}. Owned by ${staffName(dr, o.owner)}.`}
+        kicker={
+          <>
+            From the meeting of{" "}
+            {meeting ? (
+              <Link className="link" href={drCan(me, "schedule") ? `/dealroom/meetings?meeting=${meeting.id}` : `/dealroom/matches/${o.matchId}`}>
+                {fmtStamp(meeting.start)}
+                {room ? `, ${room.name}` : ""}
+              </Link>
+            ) : (
+              "the summit"
+            )}
+            . Owned by {staffName(dr, o.owner)}.
+          </>
+        }
       />
       {dr.archivedAt && <p className="mb-4 rounded-lg bg-paper-200 px-4 py-3 text-[14px]">Archived {fmtStamp(dr.archivedAt, false)}: read-only.</p>}
       {!dr.archivedAt && oppOpen(o) && (oppOverdue(o, now) || oppStalled(o, now)) && (

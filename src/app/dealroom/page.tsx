@@ -16,7 +16,7 @@ export default function DealRoomDashboard() {
 
   const targets = [
     { label: "Qualified counterparties", value: f.qualified, target: 150, due: "2027-01-31", href: q("qualified"), sub: `${f.qualifiedSeekers} seekers approved, ${f.verified} providers verified` },
-    { label: "Deal Room Ready, both sides", value: dr.matches.filter(bothAccepted).length, target: 60, due: "2027-02-20", href: "/dealroom/matching", sub: `${f.ready} seekers ready; pairs counted once both accept` },
+    { label: "Deal Room Ready, both sides", value: dr.matches.filter(bothAccepted).length, target: 60, due: "2027-02-20", href: "/dealroom/matching?tab=By%20mission&mission=All&stage=Accepted", sub: `${f.ready} seekers ready; pairs counted once both accept` },
     { label: "Booked meetings", value: dr.meetings.filter((m) => occupies(m, cfg, now) || m.status === "Held").length, target: 200, due: "2027-03-18", href: "/dealroom/meetings", sub: `${dr.meetings.filter((m) => m.status === "Held").length} held so far, summit week 15 to 18 March` },
   ];
 
@@ -100,10 +100,10 @@ export default function DealRoomDashboard() {
             ))}
           </ul>
           <div className="mt-5 grid gap-4 sm:grid-cols-4 border-t border-line pt-4">
-            <Stat label="Approved" value={f.approved} href={q("qualified")} />
-            <Stat label="Conditional" value={f.conditional} tone="warn" />
-            <Stat label="Waitlisted" value={f.waitlisted} />
-            <Stat label="Declined" value={f.declined} tone="bad" />
+            <Stat label="Approved" value={f.approved} href="/dealroom/applications?decision=Approved" />
+            <Stat label="Conditional" value={f.conditional} tone="warn" href="/dealroom/applications?decision=Conditional" />
+            <Stat label="Waitlisted" value={f.waitlisted} href="/dealroom/applications?decision=Waitlisted" />
+            <Stat label="Declined" value={f.declined} tone="bad" href="/dealroom/applications?decision=Declined" />
           </div>
         </Section>
 
@@ -150,11 +150,11 @@ export default function DealRoomDashboard() {
                       {m.code} {missionName(cfg, m.id)}
                     </Link>
                   </td>
-                  <td className="td-r">{mine.filter((a) => a.type === "seeker").length}</td>
-                  <td className="td-r">{mine.filter((a) => a.type === "provider").length}</td>
-                  <td className="td-r">{mine.filter((a) => ["Submitted", "In review", "Information requested"].includes(a.status)).length}</td>
-                  <td className="td-r">{mine.filter(qualified).length}</td>
-                  <td className="td-r">{mine.filter((a) => a.type === "seeker" && qualified(a) && a.readiness === "Deal Room Ready").length}</td>
+                  <Num n={mine.filter((a) => a.type === "seeker").length} href={`/dealroom/applications?mission=${m.id}&type=seeker`} />
+                  <Num n={mine.filter((a) => a.type === "provider").length} href={`/dealroom/applications?mission=${m.id}&type=provider`} />
+                  <Num n={mine.filter((a) => ["Submitted", "In review", "Information requested"].includes(a.status)).length} href={`/dealroom/applications?mission=${m.id}&status=${encodeURIComponent("Submitted,In review,Information requested")}`} />
+                  <Num n={mine.filter(qualified).length} href={`/dealroom/applications?mission=${m.id}&flag=qualified`} />
+                  <Num n={mine.filter((a) => a.type === "seeker" && qualified(a) && a.readiness === "Deal Room Ready").length} href={`/dealroom/applications?mission=${m.id}&flag=ready`} />
                 </tr>
               );
             })}
@@ -164,4 +164,9 @@ export default function DealRoomDashboard() {
       {me?.role === "Operations" && <p className="mt-4 text-[13px] text-slate">Operations sees meetings and the live board; qualification is the reviewers&apos; work.</p>}
     </>
   );
+}
+
+/** A table count that opens the records behind it; a zero stays plain. */
+function Num({ n, href }: { n: number; href: string }) {
+  return <td className="td-r">{n > 0 ? <Link href={href} className="hover:underline underline-offset-4">{n}</Link> : <span className="text-slate">0</span>}</td>;
 }

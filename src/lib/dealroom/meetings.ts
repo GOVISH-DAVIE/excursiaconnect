@@ -356,7 +356,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       const outcome: DrOutcome | undefined = action.outcome ? { ...action.outcome, by: me!.id, at } : undefined;
       if (recorded) {
         const was = mt.outcome ? `${mt.outcome.category} by ${staffName(dr, mt.outcome.by)}` : mt.status;
-        dr = exception(dr, mt.eventId, me!.id, "Paper entry over an outcome", `${action.paper!.trim()} (replaced ${was})`, `Meeting ${fmtStamp(mt.start)}`);
+        dr = exception(dr, mt.eventId, me!.id, "Paper entry over an outcome", `${action.paper!.trim()} (replaced ${was})`, mt.id);
         dr = patchMeeting(dr, mt.id, (m) => ({ ...m, history: [...m.history, { at, by: me!.id, what: `Entered from the paper sheet over ${was}: ${action.paper!.trim()}` }] }));
         return withDr(state, applyOutcome(dr, dr.meetings.find((m) => m.id === mt.id)!, action.attendance, action.noShow, outcome, me!.id));
       }

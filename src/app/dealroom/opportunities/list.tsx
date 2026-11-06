@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Empty, PageHeader, Section, Stat, Tabs } from "@/components/ui";
 import { canSeeInternal, drCan, evidenceDate, lastActivity, missionName, oppOpen, oppOverdue, oppParties, oppStalled, reviewedThisMonth, STALL_DAYS, staffName } from "@/lib/dealroom/logic";
-import type { DrOpportunity } from "@/lib/dealroom/types";
+import type { DealRoomState, DrOpportunity } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
 import { Pill, Refusal, When, useDr } from "../bits";
 import { OppStagePill, exportPack, headline, oppTitle } from "./parts";
@@ -15,13 +15,32 @@ type Tab = (typeof allTabs)[number];
 
 /** DL-10 and the owner's list: every opportunity with its next action, overdue and stalled ones flagged. */
 export default function Opportunities() {
+  // a link to this page with other filters starts the view afresh
+  const q = useSearchParams();
+  return <OpportunitiesBody key={q.toString()} />;
+}
+
+/** Filters a drill-down from a report or a graph can add: stage, mission, sector, month opened, an outcome on record. */
+const DRILL: { key: string; label: string; test: (o: DrOpportunity, v: string, dr: DealRoomState) => boolean }[] = [
+  { key: "stage", label: "Stage", test: (o, v) => o.stage === v },
+  { key: "mission", label: "Mission", test: (o, v, dr) => oppParties(dr, o).seeker?.mission === v },
+  { key: "sector", label: "Sector", test: (o, v, dr) => oppParties(dr, o).seeker?.org.sector === v },
+  { key: "month", label: "Opened", test: (o, v) => (o.stageDates["Follow-up"] ?? "").startsWith(v) },
+  { key: "has", label: "With", test: (o, v) => o.outcomes.some((x) => x.kind === v) },
+  { key: "reason", label: "Lost to", test: (o, v) => o.closed?.reason === v },
+];
+
+function OpportunitiesBody() {
   const { dr, cfg, me, now } = useDr();
   const q = useSearchParams();
   const lead = drCan(me, "conversion");
   const tabs = allTabs.filter((t) => lead || t === "Open" || t === "Closed");
   const asked = allTabs.find((t) => t === q.get("tab"));
   const [picked, setTab] = useState<Tab | null>(null);
-  const tab = picked ?? (asked && tabs.includes(asked) ? asked : "Open");
+  const [drill, setDrill] = useState(() => DRILL.map((d) => ({ ...d, value: q.get(d.key) ?? "" })).filter((d) => d.value));
+  // a drill-down to a closed stage or a close reason lands on the Closed tab
+  const closedOnly = drill.some((d) => (d.key === "stage" && d.value.startsWith("Closed")) || d.key === "reason");
+  const tab = picked ?? (asked && tabs.includes(asked) ? asked : closedOnly ? "Closed" : "Open");
   const [owner, setOwner] = useState(q.get("owner") ?? "");
   const [flag, setFlag] = useState(q.get("flag") ?? "");
   if (!cfg) return null;
@@ -29,7 +48,9 @@ export default function Opportunities() {
   // a reviewer sees the opportunities they own; the lead sees all (PRD Reporting req. 5)
   const mine = dr.opportunities.filter((o) => o.eventId === cfg.eventId && (lead || o.owner === me.id));
   const open = mine.filter(oppOpen);
-  const shown = (tab === "Closed" ? mine.filter((o) => !oppOpen(o)) : open).filter((o) => (!owner || o.owner === owner) && (flag !== "overdue" || oppOverdue(o, now)) && (flag !== "stalled" || oppStalled(o, now)));
+  const base = tab === "Closed" ? mine.filter((o) => !oppOpen(o)) : drill.some((d) => d.key === "stage" || d.key === "has") ? mine : open;
+  const shown = base.filter((o) => (!owner || o.owner === owner) && (flag !== "overdue" || oppOverdue(o, now)) && (flag !== "stalled" || oppStalled(o, now)) && drill.every((d) => d.test(o, d.value, dr)));
+  const label = (d: (typeof drill)[number]) => (d.key === "mission" ? missionName(cfg!, d.value) : d.key === "month" ? new Date(d.value + "-15T12:00:00Z").toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }) : d.value);
   const owners = dr.staff.filter((s) => s.active && s.role !== "Operations");
 
   return (
@@ -40,10 +61,10 @@ export default function Opportunities() {
       />
       {dr.archivedAt && <p className="mb-4 rounded-lg bg-paper-200 px-4 py-3 text-[14px]">Archived {fmtStamp(dr.archivedAt, false)}: tracking has ended and every record is read-only. The post-summit pack stays exportable.</p>}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-5">
-        <Stat label="Open" value={open.length} />
-        <Stat label="Next action overdue" value={open.filter((o) => oppOverdue(o, now)).length} tone={open.some((o) => oppOverdue(o, now)) ? "bad" : undefined} />
-        <Stat label={`Quiet for ${STALL_DAYS}+ days`} value={open.filter((o) => oppStalled(o, now)).length} tone={open.some((o) => oppStalled(o, now)) ? "warn" : undefined} />
-        <Stat label="Won" value={mine.filter((o) => o.stage === "Closed – won").length} tone="ok" />
+        <Stat label="Open" value={open.length} href="/dealroom/opportunities" />
+        <Stat label="Next action overdue" value={open.filter((o) => oppOverdue(o, now)).length} tone={open.some((o) => oppOverdue(o, now)) ? "bad" : undefined} href="/dealroom/opportunities?flag=overdue" />
+        <Stat label={`Quiet for ${STALL_DAYS}+ days`} value={open.filter((o) => oppStalled(o, now)).length} tone={open.some((o) => oppStalled(o, now)) ? "warn" : undefined} href="/dealroom/opportunities?flag=stalled" />
+        <Stat label="Won" value={mine.filter((o) => o.stage === "Closed – won").length} tone="ok" href={`/dealroom/opportunities?stage=${encodeURIComponent("Closed – won")}`} />
       </div>
       <Tabs tabs={tabs} value={tab} onChange={setTab} counts={lead && !dr.archivedAt ? { "Monthly review": open.filter((o) => !reviewedThisMonth(o, now)).length } : undefined} />
 
@@ -68,6 +89,19 @@ export default function Opportunities() {
               </select>
             )}
           </div>
+          {drill.length > 0 && (
+            <p className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+              <span className="text-slate">Showing</span>
+              {drill.map((d) => (
+                <span key={d.key} className="pill bg-paper-200 text-ink">
+                  {d.label}: {label(d)}
+                  <button className="ml-1 text-slate hover:text-ink" aria-label={`Clear ${d.label}`} onClick={() => setDrill(drill.filter((x) => x.key !== d.key))}>
+                    ×
+                  </button>
+                </span>
+              ))}
+            </p>
+          )}
           <OppTable opps={shown} />
         </>
       )}

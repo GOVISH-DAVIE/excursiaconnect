@@ -705,3 +705,6 @@ export function fitDetail(seeker: DrApplication, provider: DrApplication, cfg: D
     return { field, label: MATCH_LABEL[field], mandatory, ok: f.met.includes(field), has, wants };
   });
 }
+
+/** The ticket bands reports group by; a drill-down passes the band's name back. */
+export const ticketBand = (amount: number) => (amount < 1e6 ? "Under USD 1m" : amount < 5e6 ? "USD 1m to 5m" : "USD 5m and over");

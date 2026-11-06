@@ -57,8 +57,8 @@ export function MatchDetail({ id }: { id: string }) {
         <Section title="Meeting" className="mt-4">
           <p className="text-[14px]">
             {fmtStamp(meeting.start)} to {meeting.end.slice(11)}, {meeting.status}.{" "}
-            <Link className="link" href="/dealroom/meetings">
-              Meetings
+            <Link className="link" href={`/dealroom/meetings?meeting=${meeting.id}`}>
+              Open it on the schedule
             </Link>
           </p>
         </Section>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { DR_ZONE, compact, drCan, lapsed, occupies, readyToSchedule, slotTimes } from "@/lib/dealroom/logic";
@@ -15,8 +16,17 @@ const tabs = ["Ready to schedule", "Schedule", "Changes", "Caps", "Rooms and tab
 
 /** DO-1 to DO-6: operations turns accepted introductions into a schedule that holds. */
 export default function Meetings() {
+  // a link to this page with other filters starts the view afresh
+  const q = useSearchParams();
+  return <MeetingsBody key={q.toString()} />;
+}
+
+function MeetingsBody() {
   const { dr, cfg, me, now } = useDr();
-  const [tab, setTab] = useState<(typeof tabs)[number]>("Ready to schedule");
+  const q = useSearchParams();
+  // a drill-down lands on the schedule for a day, a participant, a status or one meeting
+  const asked = tabs.find((t) => t === q.get("tab")) ?? (q.get("day") || q.get("meeting") || q.get("who") ? "Schedule" : undefined);
+  const [tab, setTab] = useState<(typeof tabs)[number]>(asked ?? "Ready to schedule");
   if (!cfg) return null;
   if (!drCan(me, "schedule")) return <Refusal title="Scheduling is for operations and the lead">Reviewers see each match&apos;s meeting on its page.</Refusal>;
   const ready = readyToSchedule(dr, cfg).length;
@@ -26,7 +36,7 @@ export default function Meetings() {
       <PageHeader title="Meetings" kicker={`${dr.meetings.filter((m) => occupies(m, cfg, now) || m.status === "Held").length} booked. A slot is ${cfg.rules.meetingMin} minutes with ${cfg.rules.bufferMin} between; a room, a table or a person is never booked twice.`} />
       <Tabs tabs={tabs} value={tab} onChange={setTab} counts={{ "Ready to schedule": ready, Changes: changes }} />
       {tab === "Ready to schedule" && <Ready />}
-      {tab === "Schedule" && <Grid />}
+      {tab === "Schedule" && <Grid day={q.get("day") ?? undefined} meeting={q.get("meeting") ?? undefined} who={q.get("who") ?? undefined} status={q.get("status") ?? undefined} />}
       {tab === "Changes" && <Changes />}
       {tab === "Caps" && <Caps />}
       {tab === "Rooms and tables" && <Rooms />}
@@ -97,12 +107,23 @@ function Ready() {
   );
 }
 
-function Grid() {
+/** The day grid. A drill-down can open it on a day, on one meeting, or with one participant's meetings or one status picked out. */
+function Grid(props: { day?: string; meeting?: string; who?: string; status?: string }) {
   const { state } = useStore();
   const { dr, cfg, event, now } = useDr();
   const days = Array.from({ length: event.days }, (_, i) => addMinutes(`${event.startDate} 00:00`, i * 1440).slice(0, 10));
-  const [day, setDay] = useState(days.find((d) => d === now.slice(0, 10)) ?? days[0]);
-  const [pick, setPick] = useState<string | null>(null);
+  const opened = dr.meetings.find((m) => m.id === props.meeting);
+  const [day, setDay] = useState(opened?.start.slice(0, 10) ?? days.find((d) => d === props.day) ?? days.find((d) => d === now.slice(0, 10)) ?? days[0]);
+  const [pick, setPick] = useState<string | null>(opened?.id ?? null);
+  const [who, setWho] = useState(props.who ?? "");
+  const [status, setStatus] = useState(props.status ?? "");
+  const whoApp = dr.apps.find((a) => a.id === who);
+  const statuses = status ? status.split(",") : [];
+  const lit = (m: DrMeeting) => {
+    const mm = dr.matches.find((x) => x.id === m.matchId);
+    return (!who || mm?.seekerId === who || mm?.providerId === who) && (!statuses.length || statuses.includes(m.status));
+  };
+  const focus = !!who || statuses.length > 0;
   const rows = state.rooms.filter((r) => r.zoneId === DR_ZONE && cfg!.rooms[r.id]).flatMap((r) => Array.from({ length: cfg!.rooms[r.id].tables }, (_, i) => ({ r, table: i + 1 })));
   const times = slotTimes(cfg!);
   const todays = dr.meetings.filter((m) => m.start.slice(0, 10) === day && m.status !== "Cancelled");
@@ -116,10 +137,34 @@ function Grid() {
       <div className="mb-3 flex flex-wrap gap-1">
         {days.map((d) => (
           <button key={d} className={d === day ? "btn-primary btn-sm" : "btn-secondary btn-sm"} onClick={() => setDay(d)}>
-            {fmtStamp(d, false)} ({dr.meetings.filter((m) => m.start.slice(0, 10) === d && m.status !== "Cancelled").length})
+            {fmtStamp(d, false)} ({dr.meetings.filter((m) => m.start.slice(0, 10) === d && m.status !== "Cancelled" && (!focus || lit(m))).length})
           </button>
         ))}
       </div>
+      {focus && (
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+          <span className="text-slate">Picked out:</span>
+          {whoApp && (
+            <span className="pill bg-paper-200 text-ink">
+              <Link className="hover:underline" href={`/dealroom/applications/${whoApp.id}`}>
+                {whoApp.org.name}
+              </Link>
+              <button className="ml-1 text-slate hover:text-ink" aria-label="Clear the participant" onClick={() => setWho("")}>
+                ×
+              </button>
+            </span>
+          )}
+          {statuses.length > 0 && (
+            <span className="pill bg-paper-200 text-ink">
+              {statuses.join(" or ")}
+              <button className="ml-1 text-slate hover:text-ink" aria-label="Clear the status" onClick={() => setStatus("")}>
+                ×
+              </button>
+            </span>
+          )}
+          <span className="text-slate">Other meetings are faded.</span>
+        </p>
+      )}
       <div className="surface">
         <table className="text-[12px] border-collapse">
           <thead>
@@ -145,7 +190,7 @@ function Grid() {
                   return (
                     <td key={t} className={`border border-line p-0.5 min-w-[92px] align-top ${busy ? "bg-paper-200" : ""}`}>
                       {m && (
-                        <button className={`w-full text-left rounded px-1.5 py-1 ${m.status === "Held" ? "bg-ink text-white" : m.status === "In progress" ? "bg-ok text-white" : m.status === "No-show" ? "bg-bad-50 text-bad" : m.status === "Confirmed" ? "bg-ok-50 text-ok" : "bg-warn-50 text-warn"}`} onClick={() => setPick(m.id)}>
+                        <button className={`w-full text-left rounded px-1.5 py-1 ${focus && !lit(m) ? "opacity-25" : ""} ${m.status === "Held" ? "bg-ink text-white" : m.status === "In progress" ? "bg-ok text-white" : m.status === "No-show" ? "bg-bad-50 text-bad" : m.status === "Confirmed" ? "bg-ok-50 text-ok" : "bg-warn-50 text-warn"}`} onClick={() => setPick(m.id)}>
                           <span className="block truncate font-medium">{name(m)}</span>
                           <span className="block opacity-80">{lapsed(m, cfg!, now) ? "Lapsed" : m.status}</span>
                         </button>
@@ -232,7 +277,11 @@ function Caps() {
               const mine = of(p.id);
               return (
                 <tr key={p.id}>
-                  <td className="td text-[13px]">{p.org.name}</td>
+                  <td className="td text-[13px]">
+                    <Link className="hover:underline" href={`/dealroom/meetings?tab=Schedule&who=${p.id}`}>
+                      {p.org.name}
+                    </Link>
+                  </td>
                   {days.map((d) => {
                     const n = mine.filter((m) => m.start.slice(0, 10) === d).length;
                     return (
@@ -255,7 +304,11 @@ function Caps() {
           <tbody>
             {seekers.map((s) => (
               <tr key={s.id}>
-                <td className="td text-[13px]">{s.org.name}</td>
+                <td className="td text-[13px]">
+                  <Link className="hover:underline" href={`/dealroom/meetings?tab=Schedule&who=${s.id}`}>
+                    {s.org.name}
+                  </Link>
+                </td>
                 <td className={`td-r text-[13px] ${of(s.id).length >= cfg!.rules.seekerCap ? "text-bad font-medium" : ""}`}>
                   {of(s.id).length}/{cfg!.rules.seekerCap}
                 </td>

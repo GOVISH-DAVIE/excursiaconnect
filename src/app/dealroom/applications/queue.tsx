@@ -2,15 +2,37 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
-import { FLAGS, drCan, missionName, pendingSecond, staffName, type FlagKey } from "@/lib/dealroom/logic";
-import type { AppStatus, DrApplication } from "@/lib/dealroom/types";
+import { FLAGS, decisionOf, drCan, missionName, pendingSecond, staffName, type FlagKey } from "@/lib/dealroom/logic";
+import type { AppStatus, DealRoomState, DrApplication } from "@/lib/dealroom/types";
 import { splitCsv } from "@/lib/csv";
 import { DecisionPill, ReadinessPill, Refusal, StatusPill, When, typeLabel, useDr } from "../bits";
 
 const STATUSES: AppStatus[] = ["Lead", "Invited", "Draft", "Submitted", "In review", "Information requested", "Decided"];
 const tabs = ["Queue", "Import leads", "Duplicates"] as const;
+
+/** Filters a drill-down can add on top of the bar's own: a decision, a provider type, a verification state, a source, a sector. */
+const DRILL: { key: string; label: string; test: (a: DrApplication, v: string) => boolean; show?: (v: string, dr: DealRoomState) => string }[] = [
+  { key: "decision", label: "Decision", test: (a, v) => decisionOf(a)?.decision === v },
+  { key: "kind", label: "Provider type", test: (a, v) => a.providerKind === v },
+  { key: "verification", label: "Verification", test: (a, v) => a.verification?.state === v },
+  { key: "nda", label: "NDA", test: (a) => !!a.verification?.nda, show: () => "signed" },
+  { key: "source", label: "Source", test: (a, v) => a.source === v },
+  { key: "sector", label: "Sector", test: (a, v) => a.org.sector === v },
+  { key: "owner", label: "Owner", test: (a, v) => a.owner === v, show: (v, dr) => staffName(dr, v) },
+];
+
+function Chip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <span className="pill bg-paper-200 text-ink">
+      {label}
+      <button className="ml-1 text-slate hover:text-ink" aria-label={`Clear ${label}`} onClick={onClear}>
+        ×
+      </button>
+    </span>
+  );
+}
 
 export function Queue() {
   const { dr, cfg, me, now, can, dispatch } = useDr();
@@ -24,9 +46,13 @@ export function Queue() {
     type: search.get("type") ?? "All",
     mission: search.get("mission") ?? "All",
     status: search.get("status") ?? "All",
-    assignee: search.get("assignee") ?? (me?.role === "Reviewer" ? me.id : "All"),
+    // a reviewer opens on their own queue, but a drill-down shows every record behind the number clicked
+    assignee: search.get("assignee") ?? (me?.role === "Reviewer" && ![...search.keys()].length ? me.id : "All"),
     flag: (search.get("flag") ?? "") as FlagKey | "",
   };
+  // drill-downs from the dashboard and reports narrow the list further; each shows as a chip that can be cleared
+  const extra = DRILL.map((d) => ({ ...d, value: search.get(d.key) ?? "" })).filter((d) => d.value);
+  const statuses = filters.status === "All" ? [] : filters.status.split(",");
   const setFilter = (k: string, v: string) => {
     const p = new URLSearchParams(search.toString());
     if (v === "All" || !v) p.delete(k);
@@ -36,19 +62,20 @@ export function Queue() {
     setPicked([]);
   };
 
-  const apps = useMemo(() => {
+  const apps = (() => {
     if (!cfg) return [];
     const needle = q.trim().toLowerCase();
     return dr.apps
       .filter((a) => a.eventId === cfg.eventId)
       .filter((a) => filters.type === "All" || a.type === filters.type)
       .filter((a) => filters.mission === "All" || a.mission === filters.mission)
-      .filter((a) => filters.status === "All" || a.status === filters.status)
+      .filter((a) => !statuses.length || statuses.includes(a.status))
+      .filter((a) => extra.every((d) => d.test(a, d.value)))
       .filter((a) => filters.assignee === "All" || (filters.assignee === "none" ? !a.assignee : a.assignee === filters.assignee))
       .filter((a) => !filters.flag || FLAGS[filters.flag]?.test(a, cfg, now))
       .filter((a) => !needle || `${a.ref ?? ""} ${a.org.name} ${a.contact.name} ${a.contact.email} ${a.org.country} ${a.org.sector}`.toLowerCase().includes(needle))
       .sort((x, y) => y.statusAt.localeCompare(x.statusAt));
-  }, [dr.apps, cfg, filters.type, filters.mission, filters.status, filters.assignee, filters.flag, q, now]);
+  })();
 
   if (!cfg) return null;
   if (!drCan(me, "review") && !drCan(me, "assign")) return <Refusal title="Applications are the review team's">Your role, {me?.role}, works with meetings and the live board.</Refusal>;
@@ -79,7 +106,7 @@ export function Queue() {
                   </option>
                 ))}
               </select>
-              <select className="input" aria-label="Status" value={filters.status} onChange={(e) => setFilter("status", e.target.value)}>
+              <select className="input" aria-label="Status" value={statuses.length > 1 ? "All" : filters.status} onChange={(e) => setFilter("status", e.target.value)}>
                 <option value="All">All statuses</option>
                 {STATUSES.map((s) => (
                   <option key={s}>{s}</option>
@@ -95,10 +122,15 @@ export function Queue() {
                 ))}
               </select>
             </div>
-            {filters.flag && (
-              <div className="px-5 pb-3 text-[13px]">
-                Showing <b className="font-medium">{FLAGS[filters.flag].label}</b>.{" "}
-                <button className="link" onClick={() => setFilter("flag", "")}>
+            {(filters.flag || extra.length > 0 || statuses.length > 1) && (
+              <div className="px-5 pb-3 flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="text-slate">Showing</span>
+                {filters.flag && <Chip label={FLAGS[filters.flag].label} onClear={() => setFilter("flag", "")} />}
+                {statuses.length > 1 && <Chip label={statuses.join(" or ")} onClear={() => setFilter("status", "")} />}
+                {extra.map((d) => (
+                  <Chip key={d.key} label={`${d.label}: ${d.show ? d.show(d.value, dr) : d.value}`} onClear={() => setFilter(d.key, "")} />
+                ))}
+                <button className="link" onClick={() => router.replace("/dealroom/applications")}>
                   Show all
                 </button>
               </div>

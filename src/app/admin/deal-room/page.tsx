@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Empty, KV, PageHeader, Section, Stat } from "@/components/ui";
 import { useStore } from "@/lib/store";
@@ -183,7 +184,14 @@ export default function AdminDealRoom() {
         </Section>
 
         {/* DA-7: every loss of connection at the venue, closed with what the sync did */}
-        <Section title="Incidents" flush action={dr.offline ? <span className="pill bg-bad-50 text-bad">Offline now</span> : <span className="pill bg-ok-50 text-ok">Connected</span>}>
+        <Section title="Incidents" flush action={
+            <span className="flex items-center gap-3">
+              <Link className="link text-[13px]" href="/dealroom/live">
+                Live board
+              </Link>
+              {dr.offline ? <span className="pill bg-bad-50 text-bad">Offline now</span> : <span className="pill bg-ok-50 text-ok">Connected</span>}
+            </span>
+          }>
           <div className="grid grid-cols-3 gap-4 px-5 pb-4">
             <Stat label="Incidents" value={dr.incidents.length} />
             <Stat label="Records synced" value={dr.incidents.reduce((n, i) => n + i.synced, 0)} />

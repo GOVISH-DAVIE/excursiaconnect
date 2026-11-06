@@ -283,7 +283,7 @@ function Exceptions() {
                   <td className="td text-[13px] whitespace-nowrap">{fmtStamp(x.at)}</td>
                   <td className="td text-[13px]">
                     {x.kind}
-                    <div className="text-slate">{x.ref}</div>
+                    <RefLink refText={x.ref} />
                   </td>
                   <td className="td text-[13px]">{x.reason}</td>
                   <td className="td text-[13px]">{staffName(dr, x.by)}</td>
@@ -483,5 +483,20 @@ function Archive({ cfg, lead }: { cfg: DrConfig; lead: boolean }) {
         )}
       </Section>
     </div>
+  );
+}
+
+/** What an exception was about, opening it: a meeting on the schedule, an application, or the settings themselves. */
+function RefLink({ refText }: { refText: string }) {
+  const { dr } = useDr();
+  const mt = dr.meetings.find((m) => m.id === refText);
+  const app = dr.apps.find((a) => a.ref === refText || a.id === refText);
+  const [label, href] = mt ? [`Meeting of ${fmtStamp(mt.start)}`, `/dealroom/meetings?meeting=${mt.id}`] : app ? [`${app.ref ?? "Application"}, ${app.org.name}`, `/dealroom/applications/${app.id}`] : [refText, undefined];
+  return href ? (
+    <Link className="block text-slate hover:text-ink hover:underline" href={href}>
+      {label}
+    </Link>
+  ) : (
+    <div className="text-slate">{label}</div>
   );
 }

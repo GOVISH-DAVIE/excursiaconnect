@@ -38,7 +38,27 @@ export default function LiveBoard() {
     <>
       <PageHeader
         title="Live board"
-        kicker={`${fmtStamp(now)}. ${counts.held} held, ${counts.live} in progress, ${counts.upcoming} to come, ${counts.noShow} no-show today. ${arrived} arrivals recorded at the desk.`}
+        kicker={
+          <>
+            {fmtStamp(now)}.{" "}
+            {(
+              [
+                [counts.held, "held", "Held"],
+                [counts.live, "in progress", "In progress"],
+                [counts.upcoming, "to come", "Confirmed"],
+                [counts.noShow, "no-show", "No-show"],
+              ] as const
+            ).map(([n, label, st], i) => (
+              <span key={label}>
+                {i > 0 && ", "}
+                <Link className="hover:underline underline-offset-4" href={`/dealroom/meetings?tab=Schedule&day=${day}&status=${encodeURIComponent(st)}`}>
+                  {n} {label}
+                </Link>
+              </span>
+            ))}{" "}
+            today. {arrived} arrivals recorded at the desk.
+          </>
+        }
         actions={
           <>
             <button className={dr.offline ? "btn-primary" : "btn-secondary"} onClick={() => dispatch({ type: "dr/offline", on: !dr.offline })}>

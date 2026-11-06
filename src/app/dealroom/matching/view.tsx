@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
-import { MATCH_LABEL, blockedPair, candidates, compact, drCan, matchStage, matchable, missionName, staffName, type MatchStage } from "@/lib/dealroom/logic";
+import { MATCH_LABEL, ticketBand, blockedPair, candidates, compact, drCan, matchStage, matchable, missionName, staffName, type MatchStage } from "@/lib/dealroom/logic";
 import type { DrApplication } from "@/lib/dealroom/types";
 import { downloadCsv, row } from "@/lib/csv";
 import { fmtStamp } from "@/lib/time";
@@ -15,8 +16,15 @@ const tabs = ["Find matches", "Suggestions", "By mission"] as const;
 
 /** DR-7, DR-10, DL-7: the system proposes and explains; a reviewer decides; nothing is ever matched on its own. */
 export default function Matching() {
+  // a link to this page with other filters starts the view afresh
+  const q = useSearchParams();
+  return <MatchingBody key={q.toString()} />;
+}
+
+function MatchingBody() {
   const { dr, cfg, me } = useDr();
-  const [tab, setTab] = useState<(typeof tabs)[number]>("Find matches");
+  const q = useSearchParams();
+  const [tab, setTab] = useState<(typeof tabs)[number]>(tabs.find((t) => t === q.get("tab")) ?? "Find matches");
   if (!cfg) return null;
   if (!drCan(me, "match")) return <Refusal title="Matching is for the lead and reviewers">Operations schedules the matches once both parties accept.</Refusal>;
   const suggestions = dr.matches.filter((m) => m.decision === "Suggested").length;
@@ -33,9 +41,12 @@ export default function Matching() {
 
 function Find() {
   const { dr, cfg, now } = useDr();
-  const [side, setSide] = useState<"seeker" | "provider">("seeker");
+  const q = useSearchParams();
+  // ?who= opens on one seeker or provider
+  const asked = dr.apps.find((a) => a.id === q.get("who"));
+  const [side, setSide] = useState<"seeker" | "provider">(asked?.type ?? "seeker");
   const [mission, setMission] = useState("All");
-  const [pickedId, setPickedId] = useState<string>("");
+  const [pickedId, setPickedId] = useState<string>(asked?.id ?? "");
   const pool = dr.apps.filter((a) => a.eventId === cfg!.eventId && a.type === side && matchable(a) && (mission === "All" || a.mission === mission));
   const picked = dr.apps.find((a) => a.id === pickedId) ?? pool[0];
   const list = picked && cfg ? candidates(dr, cfg, picked) : [];
@@ -246,13 +257,22 @@ const STAGES: MatchStage[] = ["Suggested", "Approved", "Introduced", "Accepted",
 
 function ByMission() {
   const { dr, cfg, now } = useDr();
-  const [mission, setMission] = useState(cfg?.missions[0].id ?? "");
+  const q = useSearchParams();
+  // reports drill in by mission, stage, sector or ticket band
+  const [mission, setMission] = useState(q.get("mission") ?? cfg?.missions[0].id ?? "");
+  const [stage, setStage] = useState<MatchStage | "">((STAGES.find((x) => x === q.get("stage")) ?? "") as MatchStage | "");
+  const [sector, setSector] = useState(q.get("sector") ?? "");
+  const [band, setBand] = useState(q.get("band") ?? "");
   if (!cfg) return null;
-  const list = dr.matches
-    .filter((m) => dr.apps.find((a) => a.id === m.seekerId)?.mission === mission)
+  const all = dr.matches
+    .filter((m) => {
+      const s = dr.apps.find((a) => a.id === m.seekerId);
+      return (mission === "All" || s?.mission === mission) && (!sector || s?.org.sector === sector) && (!band || ticketBand(s?.ask?.amount ?? 0) === band);
+    })
     .map((m) => ({ m, s: dr.apps.find((a) => a.id === m.seekerId)!, p: dr.apps.find((a) => a.id === m.providerId)!, st: matchStage(m, cfg, now) }))
     .sort((a, b) => STAGES.indexOf(a.st) - STAGES.indexOf(b.st) || b.m.met.length - a.m.met.length);
-  const counts = STAGES.map((st) => [st, list.filter((x) => x.st === st).length] as const);
+  const counts = STAGES.map((st) => [st, all.filter((x) => x.st === st).length] as const);
+  const list = stage ? all.filter((x) => x.st === stage) : all;
   const exportCsv = () =>
     downloadCsv(`deal-room-matches-${cfg.missions.find((m) => m.id === mission)?.code}`, [
       row(["Seeker", "Provider", "Stage", "Meets", "Misses", "Note", "Decided by", "Brief"]),
@@ -262,6 +282,7 @@ function ByMission() {
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <select className="input h-9 w-auto" value={mission} onChange={(e) => setMission(e.target.value)}>
+          <option value="All">All missions</option>
           {cfg.missions.map((m) => (
             <option key={m.id} value={m.id}>
               {m.code} {missionName(cfg, m.id)}
@@ -275,15 +296,37 @@ function ByMission() {
           Print the briefs
         </Link>
       </div>
+      {(sector || band) && (
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+          <span className="text-slate">Seekers in</span>
+          {sector && (
+            <span className="pill bg-paper-200 text-ink">
+              {sector}
+              <button className="ml-1 text-slate hover:text-ink" aria-label="Clear the sector" onClick={() => setSector("")}>
+                ×
+              </button>
+            </span>
+          )}
+          {band && (
+            <span className="pill bg-paper-200 text-ink">
+              {band}
+              <button className="ml-1 text-slate hover:text-ink" aria-label="Clear the ticket band" onClick={() => setBand("")}>
+                ×
+              </button>
+            </span>
+          )}
+        </p>
+      )}
+      {/* each count picks out its pairs below; pressed again it shows every stage */}
       <div className="mb-4 grid grid-cols-4 sm:grid-cols-8 gap-2">
         {counts.map(([st, n]) => (
-          <div key={st} className="surface p-3 text-center">
+          <button key={st} aria-pressed={stage === st} onClick={() => setStage(stage === st ? "" : st)} className={`surface p-3 text-center hover:border-line-strong ${stage === st ? "!border-ink" : ""}`}>
             <div className="t-stat">{n}</div>
             <div className="text-[12px] text-slate">{st}</div>
-          </div>
+          </button>
         ))}
       </div>
-      <Section title={`${list.length} pairs, in priority order`} flush>
+      <Section title={`${list.length} pairs${stage ? `, ${stage.toLowerCase()}` : ", in priority order"}`} action={stage ? <button className="link text-[13px]" onClick={() => setStage("")}>Every stage</button> : undefined} flush>
         <table className="w-full">
           <thead>
             <tr>
@@ -296,8 +339,16 @@ function ByMission() {
           <tbody>
             {list.map(({ m, s, p, st }) => (
               <tr key={m.id} className="hover:bg-paper">
-                <td className="td text-[13px]">{s.org.name}</td>
-                <td className="td text-[13px]">{p.org.name}</td>
+                <td className="td text-[13px]">
+                  <Link className="hover:underline" href={`/dealroom/matching?who=${s.id}`}>
+                    {s.org.name}
+                  </Link>
+                </td>
+                <td className="td text-[13px]">
+                  <Link className="hover:underline" href={`/dealroom/matching?who=${p.id}`}>
+                    {p.org.name}
+                  </Link>
+                </td>
                 <td className="td text-[13px] text-slate">
                   {m.met.length} of {m.met.length + m.missed.length}
                 </td>

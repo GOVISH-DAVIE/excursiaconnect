@@ -1,10 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { PageHeader, Section, Tabs } from "@/components/ui";
 import { useStore } from "@/lib/store";
-import { DR_ZONE, compact, conversionValues, decisionOf, drCan, matchStage, medianDays, missionName, occupies, oppOpen, oppOverdue, oppParties, qualified, staffName, type MatchStage } from "@/lib/dealroom/logic";
+import { DR_ZONE, ticketBand, compact, conversionValues, decisionOf, drCan, matchStage, medianDays, missionName, occupies, oppOpen, oppOverdue, oppParties, qualified, staffName, type MatchStage } from "@/lib/dealroom/logic";
 import type { DrApplication, DrMeeting, DrOpportunity } from "@/lib/dealroom/types";
 import { downloadCsv, row } from "@/lib/csv";
 import { addMinutes, fmtStamp } from "@/lib/time";
@@ -44,7 +45,10 @@ export default function Reports() {
   );
 }
 
-type Col<T> = { h: string; v: (x: T) => ReactNode; csv?: (x: T) => unknown; right?: boolean };
+type Col<T> = { h: string; v: (x: T) => ReactNode; csv?: (x: T) => unknown; right?: boolean; href?: (x: T) => string | undefined };
+
+/** A query string from the filters a drill-down passes on; empty ones are left out. */
+const qs = (o: Record<string, string | undefined>) => Object.entries(o).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join("&");
 
 function Table<T>({ title, rows, cols, file }: { title: string; rows: T[]; cols: Col<T>[]; file: string }) {
   return (
@@ -70,11 +74,21 @@ function Table<T>({ title, rows, cols, file }: { title: string; rows: T[]; cols:
         <tbody>
           {rows.map((r, i) => (
             <tr key={i} className="hover:bg-paper">
-              {cols.map((c) => (
-                <td key={c.h} className={c.right ? "td-r" : "td"}>
-                  {c.v(r)}
-                </td>
-              ))}
+              {cols.map((c) => {
+                const v = c.v(r);
+                const href = c.href && v !== 0 && v !== "–" ? c.href(r) : undefined;
+                return (
+                  <td key={c.h} className={c.right ? "td-r" : "td"}>
+                    {href ? (
+                      <Link href={href} className="hover:underline underline-offset-4">
+                        {v}
+                      </Link>
+                    ) : (
+                      v
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -94,6 +108,11 @@ function Mobilisation({ apps }: { apps: DrApplication[] }) {
   const [by, setBy] = useState<"mission" | "source" | "owner" | "type">("mission");
   const label = (a: DrApplication) => (by === "mission" ? missionName(cfg!, a.mission) : by === "source" ? a.source : by === "owner" ? staffName(dr, a.owner) : a.type === "seeker" ? "Capital seeker" : "Finance provider");
   const g = groups(apps, label);
+  const scope = (x: { list: DrApplication[] }) => {
+    const a = x.list[0];
+    return by === "mission" ? { mission: a.mission } : by === "source" ? { source: a.source } : by === "owner" ? { owner: a.owner } : { type: a.type };
+  };
+  const to = (x: { list: DrApplication[] }, more: Record<string, string>) => `/dealroom/applications?${qs({ ...scope(x), ...more })}`;
   return (
     <>
       <div className="mb-3 flex items-center gap-2 text-[14px]">
@@ -111,9 +130,9 @@ function Mobilisation({ apps }: { apps: DrApplication[] }) {
         rows={g}
         cols={[
           { h: by[0].toUpperCase() + by.slice(1), v: (x) => x.k },
-          { h: "Leads", v: (x) => x.list.filter((a) => a.status === "Lead" || a.status === "Invited").length, right: true },
-          { h: "Started", v: (x) => x.list.filter((a) => a.status !== "Lead" && a.status !== "Invited").length, right: true },
-          { h: "Submitted", v: (x) => x.list.filter((a) => !!a.ref).length, right: true },
+          { h: "Leads", v: (x) => x.list.filter((a) => a.status === "Lead" || a.status === "Invited").length, right: true, href: (x) => to(x, { flag: "leads" }) },
+          { h: "Started", v: (x) => x.list.filter((a) => a.status !== "Lead" && a.status !== "Invited").length, right: true, href: (x) => to(x, { status: "Draft,Submitted,In review,Information requested,Decided" }) },
+          { h: "Submitted", v: (x) => x.list.filter((a) => !!a.ref).length, right: true, href: (x) => to(x, { flag: "submitted" }) },
           { h: "Days to first review, median", v: (x) => medianDays(x.list.map((a) => [a.submittedAt, a.firstReviewAt])) ?? "–", right: true },
         ]}
       />
@@ -127,6 +146,7 @@ function Qualification({ apps }: { apps: DrApplication[] }) {
   const seekers = apps.filter((a) => a.type === "seeker" && a.ref);
   const g = groups(seekers, (a) => (by === "mission" ? missionName(cfg!, a.mission) : a.assignee ? staffName(dr, a.assignee) : "Not assigned"));
   const dec = (l: DrApplication[], d: string) => l.filter((a) => decisionOf(a)?.decision === d).length;
+  const to = (x: { list: DrApplication[] }, more: Record<string, string>) => `/dealroom/applications?${qs({ type: "seeker", ...(by === "mission" ? { mission: x.list[0].mission } : { assignee: x.list[0].assignee ?? "none" }), ...more })}`;
   return (
     <>
       <div className="mb-3 flex items-center gap-2 text-[14px]">
@@ -142,13 +162,13 @@ function Qualification({ apps }: { apps: DrApplication[] }) {
         rows={g}
         cols={[
           { h: by === "mission" ? "Mission" : "Reviewer", v: (x) => x.k },
-          { h: "In review", v: (x) => x.list.filter((a) => a.status === "Submitted" || a.status === "In review").length, right: true },
-          { h: "Info requested", v: (x) => x.list.filter((a) => a.status === "Information requested").length, right: true },
-          { h: "Approved", v: (x) => dec(x.list, "Approved"), right: true },
-          { h: "Conditional", v: (x) => dec(x.list, "Conditional"), right: true },
-          { h: "Waitlisted", v: (x) => dec(x.list, "Waitlisted"), right: true },
-          { h: "Declined", v: (x) => dec(x.list, "Declined"), right: true },
-          { h: "Ready", v: (x) => x.list.filter((a) => qualified(a) && a.readiness === "Deal Room Ready").length, right: true },
+          { h: "In review", v: (x) => x.list.filter((a) => a.status === "Submitted" || a.status === "In review").length, right: true, href: (x) => to(x, { status: "Submitted,In review" }) },
+          { h: "Info requested", v: (x) => x.list.filter((a) => a.status === "Information requested").length, right: true, href: (x) => to(x, { status: "Information requested" }) },
+          { h: "Approved", v: (x) => dec(x.list, "Approved"), right: true, href: (x) => to(x, { decision: "Approved" }) },
+          { h: "Conditional", v: (x) => dec(x.list, "Conditional"), right: true, href: (x) => to(x, { decision: "Conditional" }) },
+          { h: "Waitlisted", v: (x) => dec(x.list, "Waitlisted"), right: true, href: (x) => to(x, { decision: "Waitlisted" }) },
+          { h: "Declined", v: (x) => dec(x.list, "Declined"), right: true, href: (x) => to(x, { decision: "Declined" }) },
+          { h: "Ready", v: (x) => x.list.filter((a) => qualified(a) && a.readiness === "Deal Room Ready").length, right: true, href: (x) => to(x, { flag: "ready" }) },
           { h: "Days to decision, median", v: (x) => medianDays(x.list.filter((a) => a.status === "Decided").map((a) => [a.submittedAt, a.statusAt])) ?? "–", right: true },
         ]}
       />
@@ -159,6 +179,7 @@ function Qualification({ apps }: { apps: DrApplication[] }) {
 function VerificationReport({ apps }: { apps: DrApplication[] }) {
   const providers = apps.filter((a) => a.type === "provider" && a.ref);
   const g = groups(providers, (a) => a.providerKind ?? "Not set");
+  const to = (x: { list: DrApplication[] }, more: Record<string, string>) => `/dealroom/applications?${qs({ type: "provider", kind: x.list[0].providerKind, ...more })}`;
   return (
     <Table
       title="Finance providers by type"
@@ -166,11 +187,11 @@ function VerificationReport({ apps }: { apps: DrApplication[] }) {
       rows={g}
       cols={[
         { h: "Type", v: (x) => x.k },
-        { h: "Applied", v: (x) => x.list.length, right: true },
-        { h: "KYC pending", v: (x) => x.list.filter((a) => a.verification?.state === "Verification pending").length, right: true },
-        { h: "NDA signed", v: (x) => x.list.filter((a) => !!a.verification?.nda).length, right: true },
-        { h: "Verified", v: (x) => x.list.filter((a) => a.verification?.state === "Verified").length, right: true },
-        { h: "Declined", v: (x) => x.list.filter((a) => a.verification?.state === "Declined").length, right: true },
+        { h: "Applied", v: (x) => x.list.length, right: true, href: (x) => to(x, { flag: "submitted" }) },
+        { h: "KYC pending", v: (x) => x.list.filter((a) => a.verification?.state === "Verification pending").length, right: true, href: (x) => to(x, { verification: "Verification pending" }) },
+        { h: "NDA signed", v: (x) => x.list.filter((a) => !!a.verification?.nda).length, right: true, href: (x) => to(x, { nda: "1" }) },
+        { h: "Verified", v: (x) => x.list.filter((a) => a.verification?.state === "Verified").length, right: true, href: (x) => to(x, { verification: "Verified" }) },
+        { h: "Declined", v: (x) => x.list.filter((a) => a.verification?.state === "Declined").length, right: true, href: (x) => to(x, { verification: "Declined" }) },
       ]}
     />
   );
@@ -181,11 +202,11 @@ const STAGES: MatchStage[] = ["Approved", "Introduced", "Accepted", "Declined", 
 function Matchmaking() {
   const { dr, cfg, now } = useDr();
   const [by, setBy] = useState<"mission" | "sector" | "ticket">("mission");
-  const band = (a: number) => (a < 1e6 ? "Under USD 1m" : a < 5e6 ? "USD 1m to 5m" : "USD 5m and over");
   const rows = dr.matches.map((m) => {
     const s = dr.apps.find((a) => a.id === m.seekerId)!;
-    return { m, st: matchStage(m, cfg!, now), key: by === "mission" ? missionName(cfg!, s.mission) : by === "sector" ? s.org.sector : band(s.ask?.amount ?? 0) };
+    return { m, st: matchStage(m, cfg!, now), key: by === "mission" ? missionName(cfg!, s.mission) : by === "sector" ? s.org.sector : ticketBand(s.ask?.amount ?? 0), mission: s.mission };
   });
+  const to = (x: { k: string; list: { mission: string }[] }, st: string) => `/dealroom/matching?${qs({ tab: "By mission", mission: by === "mission" ? x.list[0].mission : "All", sector: by === "sector" ? x.k : undefined, band: by === "ticket" ? x.k : undefined, stage: st })}`;
   const groups = [...new Set(rows.map((r) => r.key))].map((k) => ({ k, list: rows.filter((r) => r.key === k) }));
   const answered = (side: "seeker" | "provider") => dr.matches.filter((m) => m.intro?.[side]);
   const rate = (side: "seeker" | "provider") => (answered(side).length ? Math.round((answered(side).filter((m) => m.intro![side]!.response === "Accepted").length / answered(side).length) * 100) : 0);
@@ -204,7 +225,7 @@ function Matchmaking() {
         title="From proposal to acceptance"
         file={`deal-room-matchmaking-by-${by}`}
         rows={groups}
-        cols={[{ h: by[0].toUpperCase() + by.slice(1), v: (x) => x.k }, ...STAGES.map((st) => ({ h: st, v: (x: { list: { st: MatchStage }[] }) => x.list.filter((r) => r.st === st).length, right: true }))]}
+        cols={[{ h: by[0].toUpperCase() + by.slice(1), v: (x) => x.k }, ...STAGES.map((st) => ({ h: st, v: (x: { list: { st: MatchStage }[] }) => x.list.filter((r) => r.st === st).length, right: true, href: (x: (typeof groups)[number]) => to(x, st) }))]}
       />
     </>
   );
@@ -230,17 +251,17 @@ function MeetingsReport() {
         file="deal-room-meetings-by-day"
         rows={rows}
         cols={[
-          { h: "Day", v: (x) => fmtStamp(x.d, false), csv: (x) => x.d },
-          { h: "Proposed", v: (x) => x.proposed, right: true },
-          { h: "Confirmed", v: (x) => x.confirmed, right: true },
-          { h: "Held", v: (x) => x.held, right: true },
-          { h: "Moved", v: (x) => x.changed, right: true },
+          { h: "Day", v: (x) => fmtStamp(x.d, false), csv: (x) => x.d, href: (x) => `/dealroom/meetings?${qs({ tab: "Schedule", day: x.d })}` },
+          { h: "Proposed", v: (x) => x.proposed, right: true, href: (x) => `/dealroom/meetings?${qs({ tab: "Schedule", day: x.d, status: "Proposed" })}` },
+          { h: "Confirmed", v: (x) => x.confirmed, right: true, href: (x) => `/dealroom/meetings?${qs({ tab: "Schedule", day: x.d, status: "Confirmed,In progress" })}` },
+          { h: "Held", v: (x) => x.held, right: true, href: (x) => `/dealroom/meetings?${qs({ tab: "Schedule", day: x.d, status: "Held" })}` },
+          { h: "Moved", v: (x) => x.changed, right: true, href: () => "/dealroom/meetings?tab=Changes" },
           { h: "Cancelled", v: (x) => x.cancelled, right: true },
-          { h: "No-show", v: (x) => x.noShow, right: true },
+          { h: "No-show", v: (x) => x.noShow, right: true, href: (x) => `/dealroom/meetings?${qs({ tab: "Schedule", day: x.d, status: "No-show" })}` },
           { h: "Room use", v: (x) => `${x.use}%`, right: true },
         ]}
       />
-      <Table title="Room utilisation, whole summit" file="deal-room-rooms" rows={byRoom} cols={[{ h: "Room", v: (x) => x.r.name }, { h: "Meetings", v: (x) => x.n, right: true }, { h: "Table slots", v: (x) => x.cap, right: true }, { h: "Used", v: (x) => `${x.cap ? Math.round((x.n / x.cap) * 100) : 0}%`, right: true }]} />
+      <Table title="Room utilisation, whole summit" file="deal-room-rooms" rows={byRoom} cols={[{ h: "Room", v: (x) => x.r.name }, { h: "Meetings", v: (x) => x.n, right: true, href: () => "/dealroom/meetings?tab=Schedule" }, { h: "Table slots", v: (x) => x.cap, right: true }, { h: "Used", v: (x) => `${x.cap ? Math.round((x.n / x.cap) * 100) : 0}%`, right: true }]} />
     </div>
   );
 }
@@ -270,28 +291,47 @@ function Daily({ day }: { day?: string }) {
       </div>
       <Section title={`Daily report, ${fmtStamp(d, false)}${d === now.slice(0, 10) && now.slice(11) < "19:00" ? ", so far" : ""}`}>
         <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          {[
-            ["Scheduled", ms.length],
-            ["Held", ms.filter((m) => m.status === "Held").length],
-            ["No-shows", ms.filter((m) => m.status === "No-show").length],
-            ["Positive", cat("Positive")],
-            ["Follow-up needed", cat("Follow-up needed")],
-            ["Not a fit", cat("Not a fit")],
-          ].map(([k, v]) => (
-            <div key={k as string}>
-              <div className="t-stat">{v}</div>
+          {(
+            [
+              ["Scheduled", ms.length, ""],
+              ["Held", ms.filter((m) => m.status === "Held").length, "Held"],
+              ["No-shows", ms.filter((m) => m.status === "No-show").length, "No-show"],
+              ["Positive", cat("Positive"), "Held"],
+              ["Follow-up needed", cat("Follow-up needed"), "Held"],
+              ["Not a fit", cat("Not a fit"), "Held"],
+            ] as const
+          ).map(([k, v, st]) => (
+            <Link key={k} href={`/dealroom/meetings?${qs({ tab: "Schedule", day: d, status: st || undefined })}`} className="group">
+              <div className="t-stat group-hover:underline underline-offset-4">{v}</div>
               <div className="text-[13px] text-slate">{k}</div>
-            </div>
+            </Link>
           ))}
         </div>
-        {missing.length > 0 && <p className="mt-4 text-[14px] text-bad">{missing.length} meeting{missing.length > 1 ? "s" : ""} ended without an outcome: operations fixes them before the report is sent again.</p>}
+        {missing.length > 0 && (
+          <p className="mt-4 text-[14px] text-bad">
+            {missing.length} meeting{missing.length > 1 ? "s" : ""} ended without an outcome: operations fixes them before the report is sent again.{" "}
+            <Link className="link" href="/dealroom/live">
+              Open the live board
+            </Link>
+          </p>
+        )}
       </Section>
       <Section title={`${actions.length} next actions created`} flush>
         <table className="w-full">
           <tbody>
             {actions.map((m) => (
               <tr key={m.id}>
-                <td className="td text-[13px]">{name(m)}</td>
+                <td className="td text-[13px]">
+                  {dr.opportunities.find((o) => o.meetingId === m.id) ? (
+                    <Link className="hover:underline" href={`/dealroom/opportunities/${dr.opportunities.find((o) => o.meetingId === m.id)!.id}`}>
+                      {name(m)}
+                    </Link>
+                  ) : (
+                    <Link className="hover:underline" href={`/dealroom/matches/${m.matchId}`}>
+                      {name(m)}
+                    </Link>
+                  )}
+                </td>
                 <td className="td text-[13px]">{m.outcome!.nextAction}</td>
                 <td className="td text-[13px]">{staffName(dr, m.outcome!.owner)}</td>
                 <td className="td text-[13px]">{m.outcome!.due && fmtStamp(m.outcome!.due, false)}</td>
@@ -319,6 +359,12 @@ function Conversion() {
       .map(([cur, v]) => compact(v[f], cur))
       .join(" · ") || "–";
   const reasons = ["No fit", "Timing", "Terms", "Diligence failed", "Other"].map((r) => ({ r, list: opps.filter((o) => o.closed?.reason === r) }));
+  const scope = (x: { k: string; list: DrOpportunity[] }) => {
+    if (x.k === "All" || !x.list.length) return {};
+    const o = x.list[0];
+    return by === "owner" ? { owner: o.owner } : by === "mission" ? { mission: oppParties(dr, o).seeker?.mission } : by === "sector" ? { sector: sector(o) } : { month: x.k };
+  };
+  const to = (x: { k: string; list: DrOpportunity[] }, more: Record<string, string>) => `/dealroom/opportunities?${qs({ ...scope(x), ...more })}`;
   const overdue = opps.filter((o) => oppOverdue(o, now)).sort((a, b) => a.due.localeCompare(b.due));
   return (
     <>
@@ -338,24 +384,24 @@ function Conversion() {
         rows={[...groups, total]}
         cols={[
           { h: by === "month" ? "Month opened" : by[0].toUpperCase() + by.slice(1), v: (x) => (x.k === "All" ? <b className="font-medium">All</b> : x.k), csv: (x) => x.k },
-          { h: "Open", v: (x) => x.list.filter(oppOpen).length, right: true },
-          { h: "Overdue", v: (x) => x.list.filter((o) => oppOverdue(o, now)).length, right: true },
-          { h: "Won", v: (x) => x.list.filter((o) => o.stage === "Closed – won").length, right: true },
-          { h: "Lost", v: (x) => x.list.filter((o) => !!o.closed).length, right: true },
+          { h: "Open", v: (x) => x.list.filter(oppOpen).length, right: true, href: (x) => to(x, {}) },
+          { h: "Overdue", v: (x) => x.list.filter((o) => oppOverdue(o, now)).length, right: true, href: (x) => to(x, { flag: "overdue" }) },
+          { h: "Won", v: (x) => x.list.filter((o) => o.stage === "Closed – won").length, right: true, href: (x) => to(x, { stage: "Closed – won" }) },
+          { h: "Lost", v: (x) => x.list.filter((o) => !!o.closed).length, right: true, href: (x) => to(x, { stage: "Closed – lost" }) },
           { h: "Sought", v: (x) => money(x.list, "sought"), right: true },
-          { h: "Promised", v: (x) => money(x.list, "promised"), right: true },
-          { h: "Committed", v: (x) => money(x.list, "committed"), right: true },
-          { h: "Received", v: (x) => money(x.list, "received"), right: true },
+          { h: "Promised", v: (x) => money(x.list, "promised"), right: true, href: (x) => to(x, { has: "Promise" }) },
+          { h: "Committed", v: (x) => money(x.list, "committed"), right: true, href: (x) => to(x, { has: "Commitment" }) },
+          { h: "Received", v: (x) => money(x.list, "received"), right: true, href: (x) => to(x, { has: "Funds received" }) },
         ]}
       />
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Table title="Closed as lost, by reason" file="deal-room-closed-by-reason" rows={reasons} cols={[{ h: "Reason", v: (x) => x.r }, { h: "Opportunities", v: (x) => x.list.length, right: true }]} />
+        <Table title="Closed as lost, by reason" file="deal-room-closed-by-reason" rows={reasons} cols={[{ h: "Reason", v: (x) => x.r }, { h: "Opportunities", v: (x) => x.list.length, right: true, href: (x) => `/dealroom/opportunities?${qs({ reason: x.r })}` }]} />
         <Table
           title={`Overdue next actions, ${overdue.length}`}
           file="deal-room-overdue-actions"
           rows={overdue}
           cols={[
-            { h: "Opportunity", v: (o) => `${oppParties(dr, o).seeker?.org.name} · ${oppParties(dr, o).provider?.org.name}` },
+            { h: "Opportunity", v: (o) => `${oppParties(dr, o).seeker?.org.name} · ${oppParties(dr, o).provider?.org.name}`, href: (o) => `/dealroom/opportunities/${o.id}` },
             { h: "Owner", v: (o) => staffName(dr, o.owner) },
             { h: "Next action", v: (o) => o.nextAction },
             { h: "Due", v: (o) => fmtStamp(o.due, false), csv: (o) => o.due },
