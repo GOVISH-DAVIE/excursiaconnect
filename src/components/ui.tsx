@@ -146,7 +146,8 @@ export function PageHeader({ title, kicker, actions, crumbs, badge }: { title: R
         </nav>
       )}
       <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
+        {/* the title keeps at least 240px; when the actions cannot fit beside it they drop to their own row */}
+        <div className="min-w-0 flex-1 basis-60">
           <h1 className="h1 flex items-center gap-3 flex-wrap">
             <span>{title}</span>
             {badge}

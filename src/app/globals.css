@@ -132,7 +132,8 @@ body {
   .link:hover::after { transform: translateX(3px); }
 
   /* surfaces */
-  .surface { @apply rounded-lg border border-line bg-white; }
+  /* a card scrolls sideways on a narrow screen rather than widening the page: every table lives in one */
+  .surface { @apply rounded-lg border border-line bg-white; overflow-x: auto; }
   .card-link { transition: transform 180ms var(--m-ease), border-color var(--m-in) var(--m-ease); }
   .card-link:hover { transform: translateY(-2px); border-color: var(--line-strong); }
 
@@ -228,6 +229,7 @@ body {
   .nav__toggle { display: inline-flex; }
 }
 @media (max-width: 639px) {
+  .nav--static .nav__bar > .link { white-space: nowrap; flex: none; }
   .nav__actions > .btn-primary { display: none; }
   .nav__bar { gap: var(--s-4); }
   .nav__logo { font-size: 15px; min-width: 0; }
