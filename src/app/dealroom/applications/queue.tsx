@@ -235,7 +235,7 @@ function Row({ a, picked, onPick }: { a: DrApplication; picked: boolean; onPick?
 }
 
 const SAMPLE = `type,organisation,contact,email,phone,country,mission,source,owner
-seeker,Kasai Grain Ltd,Esi Boateng,esi.boateng@mail.example,+254711000201,Ghana,M2,Partner,Daniel Ochieng
+seeker,Kasai Grain Ltd,Esi Boateng,esi.boateng.kasai@grain.example,+254711000201,Ghana,M2,Partner,Daniel Ochieng
 provider,Atlas Impact Partners,Moses Eze,moses.eze@mail.example,+254711000202,Nigeria,M1,Mission team,Wairimu Gathoni
 seeker,,Juma Mushi,juma.mushi@mail.example,+254711000203,Tanzania,M1,Referral,Tom Kiplagat
 seeker,Volta Cold Chain Ltd,Fatou Ndiaye,fatou.ndiaye,+254711000204,Senegal,M4,Inbound,Daniel Ochieng`;
@@ -381,6 +381,7 @@ function Duplicates() {
     for (let j = i + 1; j < apps.length; j++) {
       const a = apps[i];
       const b = apps[j];
+      if (a.type !== b.type) continue; // a seeker and a provider at one organisation are two roles, not a duplicate
       const on = a.org.regNo && a.org.regNo === b.org.regNo ? "registration number" : a.contact.email.toLowerCase() === b.contact.email.toLowerCase() ? "email" : a.contact.phone && a.contact.phone === b.contact.phone ? "phone" : "";
       if (on && !(cfg.multiplePerOrg && on === "registration number" && a.ask?.useOfFunds !== b.ask?.useOfFunds)) pairs.push({ a, b, on });
     }

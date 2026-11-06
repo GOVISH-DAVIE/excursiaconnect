@@ -244,10 +244,12 @@ function addDaysTo(day: string, n: number) {
   return d.toISOString().slice(0, 10);
 }
 
-function person() {
+/** A person at an organisation; the email carries the organisation's domain, so no two records share one by chance. */
+function person(org: string) {
   const f = pick(FIRST);
   const l = pick(LAST);
-  return { name: `${f} ${l}`, email: `${f.toLowerCase()}.${l.toLowerCase()}@mail.example`, phone: `+2547${between(10000000, 99999999)}` };
+  const domain = org.toLowerCase().replace(/\b(ltd|limited)\b/g, "").replace(/[^a-z]+/g, "");
+  return { name: `${f} ${l}`, email: `${f.toLowerCase()}.${l.toLowerCase()}@${domain}.example`, phone: `+2547${between(10000000, 99999999)}` };
 }
 
 type SeekerState = "Lead" | "Invited" | "Draft" | "Submitted" | "In review" | "Info" | "InfoExpired" | "PendingSecond" | "Declined" | "Waitlisted" | "CondOpen" | "CondMet" | "Ready" | "ReadyReReview" | "Prep" | "NotReady";
@@ -336,8 +338,8 @@ export function seedDealRoom(): { dr: DealRoomState; delegates: Delegate[]; drZo
       const amount = pick([350_000, 600_000, 900_000, 1_500_000, 2_500_000, 4_000_000, 6_500_000, 12_000_000, 20_000_000]);
       const instrument: Instrument = pick(sector === "Fintech" ? ["Equity", "Debt"] : sector === "Agribusiness" || sector === "Logistics" ? ["Debt", "Trade finance", "Equity"] : ["Equity", "Debt", "Mezzanine"]);
       const id = `dr_cs${(i + 1).toString().padStart(2, "0")}`;
-      const contact = person();
-      const dm = rand() < 0.5 ? { ...contact, title: "Chief Executive" } : { ...person(), title: pick(["Chief Executive", "Managing Director", "Chief Financial Officer", "Founder"]) };
+      const contact = person(name);
+      const dm = rand() < 0.5 ? { ...contact, title: "Chief Executive" } : { ...person(name), title: pick(["Chief Executive", "Managing Director", "Chief Financial Officer", "Founder"]) };
       const early = ["Lead", "Invited", "Draft"].includes(st);
       const submittedDay =
         st === "Submitted" || st === "In review" || st === "PendingSecond" ? addDaysTo("2027-03-08", between(0, 7)) : st === "Info" ? addDaysTo("2027-03-01", between(0, 6)) : st === "InfoExpired" ? "2027-02-26" : addDaysTo("2027-01-12", between(0, 36));
@@ -504,7 +506,7 @@ export function seedDealRoom(): { dr: DealRoomState; delegates: Delegate[]; drZo
       do name = `${pick(PLACES)} ${kind === "Bank" ? "Bank" : kind === "DFI" ? "Development Finance" : pick(PROVIDER_NAMES)}`; while (usedNames.has(name));
       usedNames.add(name);
       const id = `dr_fp${(j + 1).toString().padStart(2, "0")}`;
-      const contact = person();
+      const contact = person(name);
       const mission = MISSIONS[j % 3].id;
       const sectors = [...new Set([...SECTORS_BY_MISSION[mission], ...pickSome(SECTORS, 2)])].slice(0, between(3, 5));
       const mandate: Mandate = {
@@ -533,7 +535,7 @@ export function seedDealRoom(): { dr: DealRoomState; delegates: Delegate[]; drZo
         assignee,
         org: { name, regNo: `REG-${between(1995, 2021)}-${between(1000, 9999)}`, country: pick(["Kenya", "Nigeria", "South Africa", "Côte d'Ivoire", "Ghana", "Rwanda"]), sector: "Finance", website: `https://${name.split(" ")[0].toLowerCase()}${name.split(" ")[1].toLowerCase()}.example` },
         contact,
-        decisionMaker: { ...person(), title: pick(["Managing Partner", "Investment Director", "Head of Corporate Banking", "Chief Investment Officer", "Head of Sourcing"]) },
+        decisionMaker: { ...person(name), title: pick(["Managing Partner", "Investment Director", "Head of Corporate Banking", "Chief Investment Officer", "Head of Sourcing"]) },
         mandate: early && st !== "Draft" ? undefined : mandate,
         caps: { perDay: between(4, 8), perEvent: between(12, 24) },
         documents: [],

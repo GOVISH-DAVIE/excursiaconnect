@@ -20,7 +20,8 @@ export function DealRoomPublic({ slug }: { slug: string }) {
   const { state } = useStore();
   const event = state.events.find((e) => e.slug === slug);
   const cfg = event ? state.dealRoom.configs[event.id] : undefined;
-  if (!event || !event.dealRoom?.enabled || !cfg) return <div className="p-10">This event has no Deal Room.</div>;
+  if (!event || !event.dealRoom?.enabled) return <div className="p-10">This event has no Deal Room.</div>;
+  if (!cfg) return <div className="p-10">The Deal Room for {event.name} opens once its team has set it up.</div>;
   const organiser = state.organisers.find((o) => o.id === event.organiserId);
   const accent = event.brand.primary;
   const accentInk = readableOn(accent);

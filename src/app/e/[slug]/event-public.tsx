@@ -150,7 +150,7 @@ export function EventPublic({ slug }: { slug: string }) {
                 {label}
               </a>
             ))}
-            {event.dealRoom?.enabled && (
+            {(event.dealRoom?.enabled && !!state.dealRoom.configs[event.id]) && (
               <Link className="nav__link" href={`/e/${event.slug}/deal-room`}>
                 Deal Room
               </Link>
@@ -177,7 +177,7 @@ export function EventPublic({ slug }: { slug: string }) {
                   {label}
                 </a>
               ))}
-              {event.dealRoom?.enabled && <Link href={`/e/${event.slug}/deal-room`}>Deal Room</Link>}
+              {(event.dealRoom?.enabled && !!state.dealRoom.configs[event.id]) && <Link href={`/e/${event.slug}/deal-room`}>Deal Room</Link>}
               {live && (
                 <Link href={register} className="btn btn-primary btn-cta">
                   {action}
