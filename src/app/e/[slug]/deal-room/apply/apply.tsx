@@ -89,7 +89,9 @@ export function Apply({ slug }: { slug: string }) {
     if (existing) {
       first.current = false;
       setType(existing.type);
-      setApp({ ...existing, contact: { ...existing.contact, email: existing.contact.email || email, phone: existing.contact.phone || phone } });
+      // a lead or an early draft may not have the ask or traction yet: start them blank so every field can be filled
+      const fill = blank(event.id, existing.type, email, phone, dr.clock);
+      setApp({ ...existing, ask: existing.ask ?? fill.ask, traction: existing.traction ?? fill.traction, mandate: existing.mandate ?? fill.mandate, contact: { ...existing.contact, email: existing.contact.email || email, phone: existing.contact.phone || phone } });
       return;
     }
     const a = blank(event.id, type, email, phone, dr.clock);

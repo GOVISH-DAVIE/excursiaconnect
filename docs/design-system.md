@@ -72,6 +72,17 @@ A real logo keeps its own colours. The icon is never tinted or inverted.
 
 **Copy.** Sentence case everywhere. The h1 names the category and the place; the first screen holds one hard fact; every heading has a noun; buttons are a verb and an object ("Get a ticket", "Choose this ticket"); the main action reads the same in the nav, the hero, the close and the phone bar. No caption under a visual; a sold item's name and price sit inside its tile.
 
+## The Deal Room
+
+The Deal Room reuses the dashboard and site components; what it adds:
+
+- **Staff workspace.** `/dealroom` uses `<Rail>` with a *Signed in as* switcher and the demo clock in its context slot; the nav shows only what the signed-in role may use. Shared bits are in [`src/app/dealroom/bits.tsx`](../src/app/dealroom/bits.tsx): `<Pill tone>` (ok, okSolid, warn, bad, mute, coral, ink), status, decision and readiness pills, `<When>` for clock dates, `<DocLine>` and `<UploadDoc>` (file picker with *Use a sample file*), `<Refusal>` for a role or rule that closes a screen, `<Labeled>`.
+- **Refusals before they happen.** A greyed button always says why, next to it or in its title, using the same function the reducer uses to refuse.
+- **Participant portal.** `/dr/[appId]` is phone-first: the event's colour in the header (`.brand`), tabs that scroll sideways, cards one column wide. `.dr-track` is the step tracker: a short list on a phone, a row of equal steps from 640px.
+- **Public page and form.** `.dr-steps` (how it works), `.dr-toggle` (seeker or provider), `.dr-form`, `.dr-check` and `.dr-verdict` (the self-check), on the site contract above.
+- **Dates.** `fmtStamp` for clock times ("Tue 16 Mar, 10:40"); `fmtLong` with the year for dates that can fall in another year, such as the document deletion date.
+- **Phone width.** Grid columns that hold a sideways-scrolling row or a wide table carry `min-w-0`, so the page never grows wider than the screen.
+
 ## Checking a page
 
 The taste skill's layout checker runs against the dev server:

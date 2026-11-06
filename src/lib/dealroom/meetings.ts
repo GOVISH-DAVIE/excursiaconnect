@@ -19,6 +19,7 @@ import {
   readyToSchedule,
   slotProblems,
   slotTimes,
+  staffName,
   type SlotRequest,
 } from "./logic";
 import type { DealRoomState, DrMatch, DrMeeting, DrOpportunity, DrOutcome } from "./types";
@@ -40,7 +41,7 @@ export type DrMeetAction =
   | { type: "dr/cancelMeeting"; meetingId: string; reason: string }
   | { type: "dr/arrive"; delegateId: string }
   | { type: "dr/startMeeting"; meetingId: string }
-  | { type: "dr/outcome"; meetingId: string; attendance: "Held" | "No-show" | "Cancelled"; noShow?: "seeker" | "provider" | "both"; outcome?: Omit<DrOutcome, "by" | "at">; device?: string }
+  | { type: "dr/outcome"; meetingId: string; attendance: "Held" | "No-show" | "Cancelled"; noShow?: "seeker" | "provider" | "both"; outcome?: Omit<DrOutcome, "by" | "at">; device?: string; paper?: string }
   | { type: "dr/refill"; meetingId: string; matchId: string }
   | { type: "dr/offline"; on: boolean }
   | { type: "dr/sync" }
@@ -349,7 +350,16 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
       if (!mt || !["Confirmed", "In progress", "Held", "No-show"].includes(mt.status)) return state;
       if (action.attendance === "Held" && !action.outcome) return state;
+      // an outcome already on record is never silently replaced: only a paper-sheet entry with a reason, logged (Flow 7 step 6)
+      const recorded = mt.status === "Held" || mt.status === "No-show";
+      if (recorded && !action.paper?.trim()) return state;
       const outcome: DrOutcome | undefined = action.outcome ? { ...action.outcome, by: me!.id, at } : undefined;
+      if (recorded) {
+        const was = mt.outcome ? `${mt.outcome.category} by ${staffName(dr, mt.outcome.by)}` : mt.status;
+        dr = exception(dr, mt.eventId, me!.id, "Paper entry over an outcome", `${action.paper!.trim()} (replaced ${was})`, `Meeting ${fmtStamp(mt.start)}`);
+        dr = patchMeeting(dr, mt.id, (m) => ({ ...m, history: [...m.history, { at, by: me!.id, what: `Entered from the paper sheet over ${was}: ${action.paper!.trim()}` }] }));
+        return withDr(state, applyOutcome(dr, dr.meetings.find((m) => m.id === mt.id)!, action.attendance, action.noShow, outcome, me!.id));
+      }
       // with no connection the record waits on the device, with the id it was given there (Flow 7)
       if (dr.offline) {
         return withDr(state, { ...dr, queue: [...dr.queue, { device: action.device ?? "This device", meetingId: mt.id, attendance: action.attendance === "Cancelled" ? "No-show" : action.attendance, noShow: action.noShow, outcome: outcome ?? { category: "Not a fit", by: me!.id, at, clientId: uid("cl", at) } }] });
@@ -402,7 +412,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       }
       const inc = dr.incidents.find((i) => !i.endedAt);
       dr = { ...dr, queue: [], incidents: dr.incidents.map((i) => (i === inc ? { ...i, endedAt: at, synced, duplicates, conflicts } : i)) };
-      if (inc) dr = send(dr, Object.keys(dr.configs)[0], "st_lead", `Incident report: offline ${fmtStamp(inc.startedAt)} to ${at.slice(11)}; ${synced} records synced, ${duplicates} duplicates dropped, ${conflicts} conflict${conflicts === 1 ? "" : "s"} to resolve`, "/dealroom/live", "Email");
+      if (inc) dr = send(dr, Object.keys(dr.configs)[0], "st_lead", `Incident report: offline ${fmtStamp(inc.startedAt)} to ${at.slice(11)}; ${synced} record${synced === 1 ? "" : "s"} synced, ${duplicates} duplicate${duplicates === 1 ? "" : "s"} dropped, ${conflicts} conflict${conflicts === 1 ? "" : "s"} to resolve`, "/dealroom/live", "Email");
       return withDr(state, dr);
     }
 

@@ -1,4 +1,4 @@
-# ExcursiaConnect — clickable prototype (v0.2)
+# ExcursiaConnect — clickable prototype (v0.3)
 
 Next.js 16 (App Router, Turbopack, Tailwind v4) prototype of the ExcursiaConnect PRD. All data is mock and lives in the browser (`localStorage`), so every persona's actions — register, approve, scan, enrol, book, message — carry across screens until you reset from the home page.
 
@@ -43,12 +43,32 @@ Every number on a summary screen links to the page that explains it: stat tiles 
 
 Scan verdict order (as in the PRD): valid badge → entitled here, now → anti-passback → zone capacity. Accrediting at the desk marks the delegate checked in for the day.
 
+## Deal Room module
+
+An add-on switched on per event that qualifies capital seekers and finance providers, matches them only when both are ready and have accepted an introduction, schedules timed meetings in Deal Room rooms, and tracks each opportunity to evidenced money for six months. It runs on a seeded Bouer event, Connected Africa 3.0 (15 to 18 March 2027). The product documents are [01-Deal-Room-PRD.md](docs/01-Deal-Room-PRD.md) to [04-Deal-Room-Research.md](docs/04-Deal-Room-Research.md); what is covered is in [docs/deal-room-coverage.md](docs/deal-room-coverage.md) and the flow-by-flow test in [docs/deal-room-use-case-test.md](docs/deal-room-use-case-test.md).
+
+| Route | Persona | What it shows |
+| --- | --- | --- |
+| `/e/connected-africa-3/deal-room` | Public | Who it is for, the eligibility self-check, how it works, missions, questions |
+| `/e/connected-africa-3/deal-room/apply` | Applicant | One-time code (prototype: `482913`), seeker or provider form, autosave and resume link, gaps named on submit |
+| `/dr/[appId]` | Participant | Status, requests, decision, profile and teaser, verification and NDA, mandate; then directory, introductions with consent, meetings, deals and the access log. Try `dr_cs54` (seeker), `dr_fp19` (investor), `dr_cs24`, `dr_fp10` |
+| `/dealroom` | Deal Room team | Dashboard against the targets, applications and review, matching, meetings, live board, opportunities, reports, notifications, settings. Switch who you are in the rail |
+| `/scan?event=ev_ca3&post=drdesk` | Desk staff | Deal Room desk and room doors, judged against each participant's meetings |
+| `/print/deal-room` | Operations | Printable schedules per day, room or participant, and the briefs |
+| `/admin/deal-room` | Algotech | Staff accounts, support access under a grant, the live window, incidents, the archive date |
+
+**The demo clock.** The rail's clock starts at summit day 2, 10:40, and only moves forward: +25 minutes, 19:00 (daily report), 15 June (the seeded opportunities have moved on; weekly digests and monthly reports sent) and 19 September (archived, read-only). Expiries, lapses, late flags and overdue actions are worked out from it, never stored. Reset the demo data from the home page to start again.
+
+**Where the rules live.** Every rule (clashes, caps, both-accept, consent, roles, second decider, read-only archive) is enforced in `src/lib/dealroom/` reducers; screens call the same functions in `logic.ts` to explain a refusal before it happens. Settings, Checks runs three 50-request booking bursts and the invariant check.
+
 ## Structure
 
 ```
 src/lib/types.ts     domain types (Event, Tier, Delegate, Order, Zone, Room, Session, Message)
 src/lib/seed.ts      deterministic mock data: 3 events, 5 tiers, 5 zones, 15 sessions, 212 delegates, orders
-src/lib/store.tsx    client store (reducer + localStorage) and domain helpers: scanVerdict, makeOrder, money
+src/lib/store.tsx    client store (reducer + localStorage, versioned) and domain helpers: scanVerdict, makeOrder, money
+src/lib/dealroom/    Deal Room types, rules (logic.ts), reducers (reducer, meetings, conversion) and seed
+src/lib/time.ts      minute and date arithmetic; csv.ts for exports
 src/components/      ui primitives, programme view, reset button
 src/app/             routes per persona
 public/brand/        ExcursiaConnect logo files

@@ -133,7 +133,7 @@ export default function LiveBoard() {
             </section>
           )}
         </div>
-        <div className="lg:sticky lg:top-4 self-start">{picked ? <Actions m={picked} /> : <Empty>Tap a meeting to mark it in progress, record its outcome or refill a no-show.</Empty>}</div>
+        <div className="lg:sticky lg:top-4 self-start">{picked ? <Actions key={picked.id} m={picked} /> : <Empty>Tap a meeting to mark it in progress, record its outcome or refill a no-show.</Empty>}</div>
       </div>
     </>
   );
@@ -170,7 +170,9 @@ function Actions({ m }: { m: DrMeeting }) {
   const owners = dr.staff.filter((x) => x.active && x.role !== "Operations");
   const present = m.status === "No-show" ? (m.noShow === "seeker" ? p : m.noShow === "provider" ? s : undefined) : undefined;
   const refill = present ? dr.matches.filter((x) => bothAccepted(x) && (x.seekerId === present.id || x.providerId === present.id) && x.id !== mm.id && !dr.meetings.some((y) => y.matchId === x.id && (occupies(y, cfg!, now) || y.status === "Held"))) : [];
-  const canRecord = can("outcome") && ["Confirmed", "In progress"].includes(m.status) && m.start <= addMinutes(now, 30);
+  const recorded = m.status === "Held" || m.status === "No-show";
+  const [paper, setPaper] = useState<string | null>(null);
+  const canRecord = can("outcome") && ((["Confirmed", "In progress"].includes(m.status) && m.start <= addMinutes(now, 30)) || (recorded && paper !== null && !dr.offline));
   return (
     <Section title={`${m.start.slice(11)} to ${m.end.slice(11)}`} action={<MeetingPill m={m} />}>
       <div className="text-[14px]">
@@ -191,8 +193,21 @@ function Actions({ m }: { m: DrMeeting }) {
           {m.outcome.notes && (m.outcome.sensitive && !(me?.role === "Lead" || me?.id === m.outcome.owner) ? <div className="text-slate">Notes marked sensitive: the lead and the owner only.</div> : <div className="text-slate">{m.outcome.notes}</div>)}
         </div>
       )}
+      {recorded && can("outcome") && paper === null && !dr.offline && (
+        <button className="link mt-3 text-[13px]" onClick={() => setPaper("")}>
+          Enter from the paper sheet
+        </button>
+      )}
       {canRecord && (
         <div className="mt-4 grid gap-2 border-t border-line pt-3">
+          {recorded && (
+            <>
+              <p className="rounded-md bg-warn-50 px-3 py-2 text-[13px] text-warn">
+                This meeting already has an outcome{m.outcome ? `, ${m.outcome.category.toLowerCase()} recorded by ${staffName(dr, m.outcome.by)} at ${m.outcome.at.slice(11)}` : ` (${m.status.toLowerCase()})`}. The paper sheet replaces it, and the change is logged as an exception.
+              </p>
+              <input className="input h-9 text-[13px]" placeholder="Why the paper sheet wins, for example tablet lost during the outage" value={paper ?? ""} onChange={(e) => setPaper(e.target.value)} />
+            </>
+          )}
           <div className="flex gap-1">
             {(["Held", "No-show"] as const).map((x) => (
               <button key={x} className={attendance === x ? "btn-primary btn-sm" : "btn-secondary btn-sm"} onClick={() => setAttendance(x)}>
@@ -233,17 +248,20 @@ function Actions({ m }: { m: DrMeeting }) {
           )}
           <button
             className="btn-primary btn-sm"
-            onClick={() =>
+            onClick={() => {
+              if (recorded) setPaper(null);
               dispatch({
                 type: "dr/outcome",
                 meetingId: m.id,
                 attendance,
                 noShow: attendance === "No-show" ? noShow : undefined,
                 outcome: attendance === "Held" ? { ...o, nextAction: o.nextAction?.trim() || undefined, clientId: `cl_${m.id}_${now.replace(/\D/g, "")}` } : undefined,
-              })
-            }
+                paper: recorded ? paper ?? "" : undefined,
+              });
+            }}
+            disabled={recorded && !paper?.trim()}
           >
-            {dr.offline ? "Save on this device" : "Record"}
+            {dr.offline ? "Save on this device" : recorded ? "Replace with the paper sheet" : "Record"}
           </button>
           {attendance === "Held" && o.nextAction?.trim() && <p className="text-[12px] text-slate">A next action opens an opportunity owned by {staffName(dr, o.owner)}.</p>}
         </div>
