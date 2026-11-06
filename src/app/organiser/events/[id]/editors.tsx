@@ -45,9 +45,10 @@ export function TierEditor({ eventId, tier, onClose }: { eventId: string; tier?:
   const { state, dispatch } = useStore();
   const event = state.events.find((e) => e.id === eventId)!;
   const zones = state.zones.filter((z) => z.eventId === eventId);
-  const [t, setT] = useState<Tier>(tier ?? { id: uid("t"), eventId, name: "", price: 0, currency: "KES", cap: 100, sold: 0, visibility: "public", approval: "auto", entitlements: ["all-days", ...zones.filter((z) => z.id !== "z_vip").map((z) => z.id)], description: "" });
+  // a pending price (awaiting approval) is what the organiser last asked for, so the form opens on it
+  const [t, setT] = useState<Tier>(tier ? { ...tier, price: tier.pendingPrice ?? tier.price, currency: tier.pendingCurrency ?? tier.currency } : { id: uid("t"), eventId, name: "", price: 0, currency: "KES", cap: 100, sold: 0, visibility: "public", approval: "auto", entitlements: ["all-days", ...zones.filter((z) => z.id !== "z_vip").map((z) => z.id)], description: "" });
   const toggle = (e: string) => setT({ ...t, entitlements: t.entitlements.includes(e) ? t.entitlements.filter((x) => x !== e) : [...t.entitlements, e] });
-  const moneyChange = !!tier && event.state === "Live" && (tier.price !== t.price || tier.currency !== t.currency);
+  const moneyChange = !!tier && (event.state === "Live" || (event.state === "Under review" && event.stateBefore === "Live")) && (tier.price !== t.price || tier.currency !== t.currency);
   const minCap = Math.max(1, tier?.sold ?? 0);
   const bad = t.cap < minCap ? `Capacity must be at least ${minCap}` : t.saleFrom && t.saleTo && t.saleTo < t.saleFrom ? "The sale must end after it starts" : undefined;
 

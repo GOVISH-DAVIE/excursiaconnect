@@ -1,6 +1,6 @@
 # Prototype coverage against the use cases
 
-Checked against [stakeholders-and-processes.md](stakeholders-and-processes.md) on 5 November 2026. **Built** means the flow works end to end in the prototype on mock data; **Partial** means the screen exists but a step is simulated or missing; **Not built** means nothing on screen. Phase 2 and 3 items are listed only where the prototype already reaches into them.
+Checked against [stakeholders-and-processes.md](stakeholders-and-processes.md) on 5 November 2026 and re-run as a full use-case pass on 6 November ([use-case-test.md](use-case-test.md), verdict per ID). **Built** means the flow works end to end in the prototype on mock data; **Partial** means the screen exists but a step is simulated or missing; **Not built** means nothing on screen. Phase 2 and 3 items are listed only where the prototype already reaches into them.
 
 ## Platform admin (PA)
 
@@ -12,15 +12,15 @@ Checked against [stakeholders-and-processes.md](stakeholders-and-processes.md) o
 | PA-4 | Set an organiser's pricing | Built | `/admin/organisers/[oid]`: Save rate card |
 | PA-5 | Monitor all events | Built | `/admin/performance`: every event by state, fill, gross, commission; per organiser |
 | PA-6 | Clear reconciliation exceptions | Built | `/admin/finance`: each exception resolved with a reason; the payout run is blocked while any is open |
-| PA-7 | Run and confirm payouts | Built | `/admin/finance`: Run Friday payouts pays every verified organiser's scheduled balance; held while KYC is pending |
+| PA-7 | Run and confirm payouts | Built | `/admin/finance`: Run Friday payouts pays each verified organiser's scheduled balance, one record per organiser and period; held while KYC is pending or the balance is zero |
 | PA-8 | Monthly commission invoice | Partial | `/organiser/finance` shows the invoice line; no eTIMS document |
-| PA-9 | Suspend an organiser or event | Partial | `/admin`: Suspend event on a live event; no organiser-level suspension |
+| PA-9 | Suspend an organiser or event | Partial | `/admin`: Suspend event with a required reason, Lift suspension; registration and scanning stop; no organiser-level suspension |
 
 ## Organiser (OR)
 
 | ID | Use case | Status | Where |
 | --- | --- | --- | --- |
-| OR-1 | Complete KYC once | Partial | `/organiser/kyc` shows the pack; signing is a button |
+| OR-1 | Complete KYC once | Partial | `/organiser/kyc` shows the pack; the data processing agreement is e-signed by typed name |
 | OR-2 | Create an event in Draft | Built | `/organiser`, New event |
 | OR-3 | Define ticket tiers | Built | Tickets and form: add and edit tiers (price, cap, sale window, visibility, approval, entitlements); pause sales on the tier page |
 | OR-4 | Build the registration form | Built | Tickets and form: custom fields (text, long text, choice, file) shown per category; the registration form renders them |
@@ -33,7 +33,7 @@ Checked against [stakeholders-and-processes.md](stakeholders-and-processes.md) o
 | OR-11 | Import sponsored delegates | Built | Delegates tab, Import CSV: per-row errors, badges issued without payment |
 | OR-12 | Define zones and rooms | Built | Zones and rooms: add and edit zones (capacity, window) and rooms (seats, zone) |
 | OR-13 | Build the agenda | Built | Programme: add and edit sessions with a room clash check and the seats offered against the room |
-| OR-14 | Change a live event | Built | A price change on a live tier returns the event to Under review with the note; registration continues |
+| OR-14 | Change a live event | Built | A price change on a live tier returns the event to Under review; registration continues at the approved price and the new one takes effect when Algotech approves, which returns the event to Live |
 | OR-15 | Watch the event live | Built | Overview: registrations, attendance, occupancy, revenue, with a drill-down behind every number |
 | OR-16 | Request a payout | Partial | Payouts and statements shown; the weekly run is automatic |
 | OR-17 | Close the event and get the report | Built | Close event on a live event; Download report (workbook of delegates and orders) |
@@ -67,11 +67,11 @@ Checked against [stakeholders-and-processes.md](stakeholders-and-processes.md) o
 | DE-5 | Pay by card | Partial | Paystack fields simulated |
 | DE-6 | Pay by bank transfer | Built | Pro-forma; confirmed when the organiser marks it paid, which now writes the ledger and the seat |
 | DE-7 | Resume an abandoned registration | Not built | Needs a server |
-| DE-8 | Join a waitlist | Built | Register on a sold-out tier |
+| DE-8 | Join a waitlist | Built | Register on a sold-out tier; Offer place holds the seat for 24 hours and the badge takes the payment |
 | DE-9 | Receive and keep the badge | Partial | Badge page with QR; email and SMS simulated |
 | DE-10 | Edit own profile | Built | Badge: Edit my details until the organiser locks edits |
 | DE-11 | Choose breakout sessions | Built | Badge: enrol with seats left |
-| DE-12 | Get accredited and enter zones | Built | Scanner: desk and zone verdicts |
+| DE-12 | Get accredited and enter zones | Built | Scanner: the desk accredits; every zone door refuses a badge that has not been through the desk |
 | DE-13 | Watch a hybrid session | Partial | Stream placeholder on virtual tickets |
 | DE-14 | Rate a session | Not built | Ratings are seeded only |
 | DE-15 | Request a refund | Built | Badge: within seven days of the event; the organiser approves on the Delegates tab |

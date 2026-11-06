@@ -56,6 +56,8 @@ export interface Tier {
   paused?: boolean; // sales stopped, the tier still shown
   saleFrom?: string; // ISO dates; empty = open now / until the event
   saleTo?: string;
+  pendingPrice?: number; // OR-14: a price change on a live event sells at the approved price until Algotech approves this one
+  pendingCurrency?: "KES" | "USD";
 }
 
 /** A field on the registration form beyond the standard ones (OR-4). */
@@ -126,6 +128,7 @@ export interface Delegate {
   bookable: boolean;
   slots?: { day: number; time: string; location: string; bookedBy?: string }[];
   grants?: string[]; // manual zone grants
+  offerExpires?: string; // OS-7: a waitlist place offered, to be paid by this time (YYYY-MM-DD HH:MM)
   badgeCode: string; // what the QR encodes
   cancelled?: boolean;
   answers?: Record<string, string>; // custom form fields, by field id

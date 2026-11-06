@@ -109,6 +109,8 @@ export function EventPublic({ slug }: { slug: string }) {
 
   const accent = event.brand.primary;
   const accentInk = readableOn(accent);
+  // the mark the organiser set under Edit brand; the organiser's initials only until one exists
+  const markText = (event.brand.logoText || initials(organiser?.name ?? event.name)).slice(0, 4).toUpperCase();
   const register = `/e/${event.slug}/register`;
   const action = "Get a ticket";
   const sameMonth = event.startDate.slice(0, 7) === event.endDate.slice(0, 7);
@@ -124,8 +126,8 @@ export function EventPublic({ slug }: { slug: string }) {
   };
 
   const mark = (
-    <span className="mark" style={{ background: accent, color: accentInk }} aria-hidden="true">
-      {initials(organiser?.name ?? event.name)}
+    <span className="mark" style={{ background: accent, color: accentInk, fontSize: markText.length > 2 ? 10 : 13 }} aria-hidden="true">
+      {markText}
     </span>
   );
   const cta = live ? (

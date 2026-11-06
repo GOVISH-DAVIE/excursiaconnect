@@ -50,8 +50,9 @@ type Action =
   | { type: "mergeDelegates"; keepId: string; dropId: string }
   | { type: "setProfileLock"; eventId: string; locked: boolean }
   | { type: "releaseWaitlist"; delegateId: string }
+  | { type: "expireOffer"; delegateId: string }
   | { type: "requestRefund"; delegateId: string }
-  | { type: "markPaid"; delegateId: string }
+  | { type: "markPaid"; delegateId: string; method?: PaymentMethod }
   | { type: "addOrganiser"; organiser: AppState["organisers"][number] }
   | { type: "setRateCard"; organiserId: string; licenceFee: number; commissionPct: number }
   | { type: "resolveException"; ref: string; how: string }
@@ -113,6 +114,14 @@ function reducer(state: AppState, action: Action): AppState {
           const what = restore ? "Approved on the new terms; registration continues" : action.state + (action.note ? `: ${action.note}` : "");
           return { ...e, ...action.pricing, state: next, stateBefore: leavingLive ? "Live" : restore || action.state === "Live" ? undefined : e.stateBefore, reviewNote: action.note ?? e.reviewNote, history: [...(e.history ?? []), { at: stamp(), what }] };
         }),
+        // the pending price takes effect on approval; a rejection or a request for changes drops it
+        tiers: state.tiers.map((t) => {
+          if (t.eventId !== action.eventId || t.pendingPrice === undefined) return t;
+          const { pendingPrice, pendingCurrency, ...rest } = t;
+          if (action.state === "Approved") return { ...rest, price: pendingPrice, currency: pendingCurrency ?? t.currency };
+          if (action.state === "Rejected" || action.state === "Changes requested") return rest;
+          return t;
+        }),
       };
     case "addEvent":
       return { ...state, events: [...state.events, action.event] };
@@ -146,8 +155,13 @@ function reducer(state: AppState, action: Action): AppState {
         messages: state.messages.map((m) => ({ ...m, from: m.from === action.dropId ? action.keepId : m.from, to: m.to === action.dropId ? action.keepId : m.to })),
       };
     }
-    case "releaseWaitlist":
-      return { ...state, delegates: state.delegates.map((d) => (d.id === action.delegateId && d.status === "Waitlisted" ? { ...d, status: "Awaiting payment" } : d)) };
+    case "releaseWaitlist": {
+      // OS-7: the place is held for 24 hours; the delegate pays from the badge, or the seat goes to the next in line
+      const until = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
+      return { ...state, delegates: state.delegates.map((d) => (d.id === action.delegateId && d.status === "Waitlisted" ? { ...d, status: "Awaiting payment", offerExpires: until } : d)) };
+    }
+    case "expireOffer":
+      return { ...state, delegates: state.delegates.map((d) => (d.id === action.delegateId && d.status === "Awaiting payment" && d.offerExpires ? { ...d, status: "Waitlisted", offerExpires: undefined } : d)) };
     case "requestRefund":
       return { ...state, delegates: state.delegates.map((d) => (d.id === action.delegateId && (d.status === "Confirmed" || d.status === "Checked in") ? { ...d, status: "Refund requested" } : d)) };
     case "markPaid": {
@@ -157,10 +171,10 @@ function reducer(state: AppState, action: Action): AppState {
       const hasOrder = state.orders.some((o) => o.delegateId === d.id);
       const tier = state.tiers.find((t) => t.id === d.tierId);
       const event = state.events.find((e) => e.id === d.eventId);
-      const newOrder: Order | null = !hasOrder && tier && event && tier.price > 0 ? makeOrder(tier.price, tier.currency, event.commissionPct, "bank", d.id, tier.id, event.id) : null;
+      const newOrder: Order | null = !hasOrder && tier && event && tier.price > 0 ? makeOrder(tier.price, tier.currency, event.commissionPct, action.method ?? "bank", d.id, tier.id, event.id) : null;
       return {
         ...state,
-        delegates: state.delegates.map((x) => (x.id === d.id ? { ...x, status: "Confirmed" } : x)),
+        delegates: state.delegates.map((x) => (x.id === d.id ? { ...x, status: "Confirmed", offerExpires: undefined } : x)),
         orders: [...(newOrder ? [{ ...newOrder, status: "paid" as const }] : []), ...state.orders.map((o) => (o.delegateId === d.id ? { ...o, status: "paid" as const } : o))],
         tiers: state.tiers.map((t) => (t.id === d.tierId ? { ...t, sold: t.sold + 1 } : t)),
       };
@@ -171,16 +185,28 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, organisers: state.organisers.map((o) => (o.id === action.organiserId ? { ...o, licenceFee: action.licenceFee, commissionPct: action.commissionPct } : o)) };
     case "resolveException":
       return { ...state, exceptions: state.exceptions.map((x) => (x.ref === action.ref ? { ...x, resolved: { at: stamp(), how: action.how } } : x)) };
-    case "runPayouts":
-      return { ...state, payoutsPaid: [...new Set([...state.payoutsPaid, ...action.payoutIds])] };
+    case "runPayouts": {
+      // PA-7: one key per organiser and period; a held organiser (KYC pending) or a zero balance is never paid
+      const ok = action.payoutIds.filter((key) => {
+        const [organiserId, periodId] = key.split("/");
+        const org = state.organisers.find((o) => o.id === organiserId);
+        const p = org && payoutsFor(state, org.id).find((x) => x.id === periodId);
+        return !!org && org.kycStatus === "Verified" && !!p && p.net > 0;
+      });
+      return { ...state, payoutsPaid: [...new Set([...state.payoutsPaid, ...ok])] };
+    }
     case "sendCampaign":
       return { ...state, campaigns: [action.campaign, ...state.campaigns] };
     case "upsertTier": {
       const old = state.tiers.find((t) => t.id === action.tier.id);
       const exists = !!old;
-      const tiers = exists ? state.tiers.map((t) => (t.id === action.tier.id ? action.tier : t)) : [...state.tiers, action.tier];
-      // OR-14: a money change on a live event goes back to Algotech; registration continues on the approved terms
-      const moneyChanged = old && (old.price !== action.tier.price || old.currency !== action.tier.currency);
+      const event0 = state.events.find((e) => e.id === action.tier.eventId);
+      const liveNow = event0?.state === "Live" || (event0?.state === "Under review" && event0.stateBefore === "Live");
+      // OR-14: a money change on a live event goes back to Algotech; registration continues on the approved terms,
+      // so the approved price stays on the tier and the new one waits as pendingPrice until approval
+      const moneyChanged = !!old && liveNow && (old.price !== action.tier.price || old.currency !== action.tier.currency);
+      const saved: Tier = moneyChanged ? { ...action.tier, price: old!.pendingPrice !== undefined ? old!.price : old!.price, currency: old!.currency, pendingPrice: action.tier.price, pendingCurrency: action.tier.currency } : action.tier;
+      const tiers = exists ? state.tiers.map((t) => (t.id === action.tier.id ? saved : t)) : [...state.tiers, action.tier];
       const events = state.events.map((e) =>
         e.id === action.tier.eventId && e.state === "Live" && moneyChanged
           ? { ...e, state: "Under review" as const, stateBefore: "Live" as const, reviewNote: `${action.tier.name} price changed from ${old!.price} to ${action.tier.price}; registration continues on the approved terms`, history: [...(e.history ?? []), { at: stamp(), what: `Under review: ${action.tier.name} price changed to ${action.tier.currency} ${action.tier.price}` }] }
@@ -384,6 +410,8 @@ export function scanVerdict(state: AppState, code: string, zoneId: string, direc
   if (state.events.find((e) => e.id === delegate.eventId)?.state === "Suspended") return { verdict: "deny", reason: "Event suspended by Algotech", delegate };
   if (delegate.status === "Pending" || delegate.status === "Awaiting payment") return { verdict: "deny", reason: "Registration not paid", delegate };
   if (delegate.status === "Waitlisted" || delegate.status === "Refund requested") return { verdict: "deny", reason: delegate.status === "Waitlisted" ? "On the waitlist, no seat yet" : "Refund requested", delegate };
+  // the desk comes first: no zone door admits a badge that has not been accredited (DE-12, AZ-2)
+  if (!delegate.accredited) return { verdict: "deny", reason: "Not accredited: go to the desk first", delegate };
   if (direction === "out") return { verdict: "allow", delegate };
   const tier = state.tiers.find((t) => t.id === delegate.tierId);
   const zone = state.zones.find((z) => z.id === zoneId);
@@ -439,6 +467,6 @@ export function payoutsFor(state: AppState, organiserId: string): Payout[] {
     const orders = state.orders.filter((o) => eventIds.includes(o.eventId) && o.status === "paid" && o.at >= p.from && o.at <= p.to);
     const gross = orders.reduce((a, o) => a + o.gross, 0);
     const commission = orders.reduce((a, o) => a + o.commission, 0);
-    return { id: p.id, organiserId, date: p.date, status: state.payoutsPaid.includes(p.id) ? "Paid" : p.status, orders, gross, commission, net: gross - commission };
+    return { id: p.id, organiserId, date: p.date, status: state.payoutsPaid.includes(`${organiserId}/${p.id}`) ? "Paid" : p.status, orders, gross, commission, net: gross - commission };
   });
 }

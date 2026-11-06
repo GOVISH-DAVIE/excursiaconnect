@@ -176,6 +176,16 @@ export function EventWorkspace({ id }: { id: string }) {
           <span className="font-medium">Algotech asked for changes:</span> {event.reviewNote}. Edit and resubmit.
         </div>
       )}
+      {event.state === "Suspended" && (
+        <div className="mb-5 rounded-lg bg-bad-50 px-4 py-3 text-[14px] text-bad">
+          <span className="font-medium">Suspended by Algotech:</span> {event.reviewNote || "no reason given"}. Registration and scanning are paused and payouts are held until it is lifted. Reply to Algotech to resolve it.
+        </div>
+      )}
+      {event.state === "Under review" && event.stateBefore === "Live" && (
+        <div className="mb-5 rounded-lg bg-warn-50 px-4 py-3 text-[14px] text-warn">
+          <span className="font-medium">Back with Algotech:</span> {event.reviewNote}. Registration continues at the approved prices; the new price takes effect when Algotech approves it.
+        </div>
+      )}
       {event.state === "Closed" && (
         <div className="mb-5 rounded-lg bg-paper-200 px-4 py-3 text-[14px] text-slate">
           Closed {event.closedAt}. The figures below are final; the workbook holds every delegate and order.
@@ -214,7 +224,10 @@ export function EventWorkspace({ id }: { id: string }) {
                         ))}
                       </div>
                     </td>
-                    <td className="td-r">{t.price === 0 ? "Free" : money(t.price, t.currency)}</td>
+                    <td className="td-r">
+                      {t.price === 0 ? "Free" : money(t.price, t.currency)}
+                      {t.pendingPrice !== undefined && <span className="block text-[12px] text-warn">{money(t.pendingPrice, t.pendingCurrency ?? t.currency)} awaiting approval</span>}
+                    </td>
                     <td className="td-r">
                       {t.sold} / {t.cap}
                     </td>

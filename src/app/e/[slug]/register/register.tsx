@@ -39,8 +39,9 @@ export function Register({ slug }: { slug: string }) {
   const total = tier ? tier.price - discount + extrasTotal : 0;
   const accent = event.brand.primary;
   const accentInk = readableOn(accent);
+  const markText = (event.brand.logoText || initials(organiser?.name ?? event.name)).slice(0, 4).toUpperCase();
 
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value });
+  const set =(k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value });
 
   function finish() {
     if (!tier) return;
@@ -102,8 +103,8 @@ export function Register({ slug }: { slug: string }) {
       <header className="nav nav--static">
         <div className="wrap nav__bar">
           <Link href={`/e/${event.slug}`} className="nav__logo">
-            <span className="mark" style={{ background: accent, color: accentInk }} aria-hidden="true">
-              {initials(organiser?.name ?? event.name)}
+            <span className="mark" style={{ background: accent, color: accentInk, fontSize: markText.length > 2 ? 10 : 13 }} aria-hidden="true">
+              {markText}
             </span>
             <span className="nav__name">{event.name}</span>
           </Link>

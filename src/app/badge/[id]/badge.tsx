@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Programme } from "@/components/programme";
 import { StatusPill, Wordmark } from "@/components/ui";
-import { useStore } from "@/lib/store";
+import { money, useStore } from "@/lib/store";
 import { useToday } from "@/lib/use-today";
 
 const tabs = ["Badge", "My day", "Programme", "People", "Messages"] as const;
@@ -22,6 +22,7 @@ export function Badge({ id }: { id: string }) {
   const [editing, setEditing] = useState(false);
   const [profile, setProfile] = useState({ name: "", organisation: "", jobTitle: "", phone: "" });
   const [refunding, setRefunding] = useState(false);
+  const [paying, setPaying] = useState<"idle" | "pushed">("idle");
 
   const me = state.delegates.find((d) => d.id === id);
   if (!me) return <div className="p-10 text-slate">{hydrated ? "Badge not found." : "Loading…"}</div>;
@@ -31,6 +32,8 @@ export function Badge({ id }: { id: string }) {
   const refundOpen = !today || today < refundDeadline.toISOString().slice(0, 10);
   const refundBy = refundDeadline.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
   const tier = state.tiers.find((t) => t.id === me.tierId)!;
+  // the 24-hour hold on a waitlist offer, judged on the client only (today is "" during prerender)
+  const offerExpired = !!today && !!me.offerExpires && me.offerExpires < `${today} ${new Date().toTimeString().slice(0, 5)}`;
   const sessions = state.sessions.filter((s) => s.eventId === event.id);
   const zones = state.zones.filter((z) => tier.entitlements.includes(z.id) || (me.category === "VIP" && z.id === "z_vip"));
   const people = state.delegates.filter((d) => d.id !== me.id && d.eventId === event.id && d.bookable && (d.status === "Confirmed" || d.status === "Checked in") && (query === "" || `${d.name} ${d.organisation}`.toLowerCase().includes(query.toLowerCase()))).slice(0, 12);
@@ -151,6 +154,23 @@ export function Badge({ id }: { id: string }) {
                     )}
                     {me.status === "Refund requested" && <span className="text-warn">Refund requested; the organiser is reviewing it.</span>}
                     {me.status === "Waitlisted" && <span className="text-slate">You are on the waitlist for {tier.name}. We offer places in order, with 24 hours to pay.</span>}
+                    {me.status === "Awaiting payment" && me.offerExpires && (
+                      offerExpired ? (
+                        <span className="text-bad">Your place was held until {me.offerExpires} and has gone to the next in line. You are back on the waitlist.</span>
+                      ) : (
+                        <span className="inline-flex flex-wrap items-center gap-2">
+                          <span className="text-ok">A place is yours: pay {money(tier.price, tier.currency)} by {me.offerExpires} to keep it.</span>
+                          {paying === "idle" ? (
+                            <button className="btn-primary btn-sm" onClick={() => { setPaying("pushed"); setTimeout(() => { dispatch({ type: "markPaid", delegateId: me.id, method: "mpesa" }); setPaying("idle"); }, 1800); }}>
+                              Pay by M-Pesa
+                            </button>
+                          ) : (
+                            <span className="text-slate">Prompt sent to {me.phone}. Waiting for your PIN…</span>
+                          )}
+                        </span>
+                      )
+                    )}
+                    {me.status === "Awaiting payment" && !me.offerExpires && <span className="text-slate">Awaiting payment. Your badge opens when the organiser confirms it.</span>}
                   </div>
                 )}
               </div>

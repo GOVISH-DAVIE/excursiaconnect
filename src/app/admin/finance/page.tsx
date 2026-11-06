@@ -46,7 +46,7 @@ export default function AdminFinance() {
           </span>
           <span className="flex gap-2">
             <button className="btn-quiet" onClick={() => setConfirmRun(false)}>Not now</button>
-            <button className="btn-primary" onClick={() => { dispatch({ type: "runPayouts", payoutIds: runnable.map((r) => r.payout!.id) }); setConfirmRun(false); }}>Confirm and pay</button>
+            <button className="btn-primary" onClick={() => { dispatch({ type: "runPayouts", payoutIds: runnable.map((r) => `${r.o.id}/${r.payout!.id}`) }); setConfirmRun(false); }}>Confirm and pay</button>
           </span>
         </div>
       )}
