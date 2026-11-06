@@ -17,6 +17,10 @@ import type {
   DocKind,
   MatchField,
   MeetingStatus,
+  CloseReason,
+  DrOpportunity,
+  OppStage,
+  OutcomeKind,
 } from "./types";
 
 export const EV_CA3 = "ev_ca3";
@@ -428,6 +432,11 @@ export function validateDealRoom(state: { dealRoom: DealRoomState; delegates: { 
         if (ma && mb && (ma.seekerId === mb.seekerId || ma.providerId === mb.providerId)) problems.push(`A participant has two meetings at ${a.start}`);
       }
   }
+  // conversion: won rests on a signed commitment, lost on a reason and a note, every one of them in the pack
+  for (const o of dr.opportunities) {
+    if (o.stage === "Closed – won" && !o.outcomes.some((x) => x.kind === "Commitment")) problems.push(`Opportunity ${o.id} is won without a signed commitment`);
+    if (o.stage === "Closed – lost" && (!o.closed?.reason || !o.closed.note)) problems.push(`Opportunity ${o.id} is lost without a reason and a note`);
+  }
   return problems;
 }
 
@@ -589,4 +598,67 @@ export function ics(m: DrMeeting, title: string, where: string) {
   const f = (s: string) => `${s.slice(0, 10).replace(/-/g, "")}T${s.slice(11, 16).replace(":", "")}00`;
   const esc = (s: string) => s.replace(/[\\;,]/g, (c) => `\\${c}`);
   return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//ExcursiaConnect//Deal Room//EN", "BEGIN:VEVENT", `UID:${m.id}@excursiaconnect`, `DTSTAMP:${f(addMinutes(m.proposedAt, -180))}Z`, `DTSTART;TZID=Africa/Nairobi:${f(m.start)}`, `DTEND;TZID=Africa/Nairobi:${f(m.end)}`, `SUMMARY:${esc(title)}`, `LOCATION:${esc(where)}`, "BEGIN:VALARM", "TRIGGER:-PT30M", "ACTION:DISPLAY", "DESCRIPTION:Deal Room meeting in 30 minutes", "END:VALARM", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+}
+
+/* ---------- conversion (Cut 3) ---------- */
+
+export const OPEN_STAGES: OppStage[] = ["Follow-up", "Diligence", "Negotiation"];
+export const CLOSE_REASONS: CloseReason[] = ["No fit", "Timing", "Terms", "Diligence failed", "Other"];
+/** What each stage needs before an opportunity may enter it (PRD Conversion, stages table). */
+export const STAGE_EVIDENCE: Record<OppStage, string> = {
+  "Follow-up": "The meeting outcome",
+  Diligence: "A note or the provider's data request",
+  Negotiation: "A term sheet or written proposal",
+  "Closed – won": "A signed commitment, recorded as an outcome",
+  "Closed – lost": "A close reason and a note",
+};
+export const OUTCOME_NEEDS: Record<OutcomeKind, string> = {
+  Interest: "Date and how it was expressed",
+  Promise: "Date and what was said or written; an amount if one was named",
+  Commitment: "Amount, currency, instrument, date and the signed document",
+  "Funds received": "Amount, currency, date and the disbursement evidence",
+};
+
+export const oppOpen = (o: DrOpportunity) => !o.closed && o.stage !== "Closed – won";
+export const oppOverdue = (o: DrOpportunity, now: string) => oppOpen(o) && o.due < now.slice(0, 10);
+
+/** The last thing that moved the opportunity: a stage, an outcome, an update or a new next action. Reviews and requests do not count. */
+export function lastActivity(o: DrOpportunity) {
+  const moves = o.history.filter((h) => !/^(Reviewed|Status update requested)/.test(h.what)).map((h) => h.at);
+  return [...moves, ...o.updates.map((u) => u.at), ...o.outcomes.map((x) => x.at)].sort().pop() ?? o.stageDates["Follow-up"] ?? "";
+}
+/** Stalled: open with nothing moving for 30 days, the cue for the lead to reassign (DL-10). */
+export const STALL_DAYS = 30;
+export const oppStalled = (o: DrOpportunity, now: string) => oppOpen(o) && !!lastActivity(o) && daysBetween(lastActivity(o).slice(0, 10), now) > STALL_DAYS;
+export const evidenceDate = (o: DrOpportunity) => [...o.outcomes.map((x) => x.date), ...o.updates.filter((u) => u.doc).map((u) => u.at.slice(0, 10))].sort().pop();
+export const reviewedThisMonth = (o: DrOpportunity, now: string) => o.reviews.some((r) => r.month === now.slice(0, 7));
+
+export function oppParties(dr: DealRoomState, o: DrOpportunity) {
+  const match = dr.matches.find((m) => m.id === o.matchId);
+  return { match, seeker: dr.apps.find((a) => a.id === match?.seekerId), provider: dr.apps.find((a) => a.id === match?.providerId) };
+}
+
+/** Value at the stage it is evidenced, per currency, so the four figures can never be added together (PRD Conversion req. 4). */
+export function conversionValues(dr: DealRoomState, opps: DrOpportunity[]) {
+  const t: Record<string, { sought: number; promised: number; committed: number; received: number }> = {};
+  const add = (cur: string, k: "sought" | "promised" | "committed" | "received", n = 0) => {
+    t[cur] ??= { sought: 0, promised: 0, committed: 0, received: 0 };
+    t[cur][k] += n;
+  };
+  for (const o of opps) {
+    const { seeker } = oppParties(dr, o);
+    if (seeker?.ask && !o.closed) add(seeker.ask.currency, "sought", seeker.ask.amount);
+    for (const x of o.outcomes) {
+      const k = x.kind === "Promise" ? "promised" : x.kind === "Commitment" ? "committed" : x.kind === "Funds received" ? "received" : undefined;
+      if (k && x.amount) add(x.currency ?? seeker?.ask?.currency ?? "USD", k, x.amount);
+    }
+  }
+  return t;
+}
+
+/** Documents are deleted this long after the conversion end date unless the lead extends it (PRD Confidentiality req. 8). */
+export function deletionDate(cfg: DrConfig) {
+  const d = new Date(cfg.rules.conversionEnd + "T12:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + cfg.rules.retentionMonths);
+  return d.toISOString().slice(0, 10);
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Meter, PageHeader, Section, Stat } from "@/components/ui";
-import { FLAGS, bothAccepted, funnel, medianDays, missionName, occupies, qualified, type FlagKey } from "@/lib/dealroom/logic";
+import { FLAGS, bothAccepted, compact, conversionValues, funnel, medianDays, missionName, occupies, oppOpen, oppOverdue, qualified, reviewedThisMonth, type FlagKey } from "@/lib/dealroom/logic";
 import { fmtStamp } from "@/lib/time";
 import { useDr } from "./bits";
 
@@ -20,10 +20,22 @@ export default function DealRoomDashboard() {
     { label: "Booked meetings", value: dr.meetings.filter((m) => occupies(m, cfg, now) || m.status === "Held").length, target: 200, due: "2027-03-18", href: "/dealroom/meetings", sub: `${dr.meetings.filter((m) => m.status === "Held").length} held so far, summit week 15 to 18 March` },
   ];
 
-  const attention = (Object.keys(FLAGS) as FlagKey[])
-    .filter((k) => ["unassigned", "second", "expired", "rereview", "teaser", "kyc", "profile"].includes(k))
-    .map((k) => ({ k, label: FLAGS[k].label, n: apps.filter((a) => FLAGS[k].test(a, cfg, now)).length }))
-    .filter((x) => x.n > 0);
+  const opps = dr.opportunities.filter((o) => o.eventId === cfg.eventId);
+  const value = (k: "committed" | "received") =>
+    Object.entries(conversionValues(dr, opps))
+      .filter(([, v]) => v[k] > 0)
+      .map(([cur, v]) => compact(v[k], cur))
+      .join(" · ") || "none yet";
+  const owns = me?.role === "Lead" || me?.role === "Reviewer";
+  const mineOpen = opps.filter((o) => oppOpen(o) && (me?.role === "Lead" || o.owner === me?.id));
+  const attention = [
+    ...(Object.keys(FLAGS) as FlagKey[])
+      .filter((k) => ["unassigned", "second", "expired", "rereview", "teaser", "kyc", "profile"].includes(k))
+      .map((k) => ({ k, href: q(k), label: FLAGS[k].label, n: apps.filter((a) => FLAGS[k].test(a, cfg, now)).length })),
+    // after the summit: the owner's and the lead's overdue next actions, and the lead's monthly review (PRD Conversion req. 2, 3)
+    ...(owns && !dr.archivedAt ? [{ k: "opp-overdue", href: "/dealroom/opportunities?flag=overdue", label: "Opportunities with an overdue next action", n: mineOpen.filter((o) => oppOverdue(o, now)).length }] : []),
+    ...(can("conversion") && !dr.archivedAt && now.slice(0, 10) > cfg.rules.appClose ? [{ k: "opp-review", href: "/dealroom/opportunities?tab=Monthly%20review", label: "Opportunities to review this month", n: mineOpen.filter((o) => !reviewedThisMonth(o, now)).length }] : []),
+  ].filter((x) => x.n > 0);
 
   const stages = [
     { label: "Leads and invitations", n: f.leads, href: q("leads") },
@@ -56,14 +68,20 @@ export default function DealRoomDashboard() {
             <div className="mt-2 text-[12px] text-slate">{t.sub}</div>
           </Link>
         ))}
-        <div className="surface p-4">
+        <Link href={me?.role === "Lead" || me?.role === "Reviewer" ? "/dealroom/opportunities" : "/dealroom"} className="surface p-4 hover:border-line-strong">
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-[13px] font-medium">Conversion tracking</span>
             <span className="text-[12px] text-slate whitespace-nowrap">to {fmtStamp(cfg.rules.conversionEnd, false)}</span>
           </div>
-          <div className="mt-2 t-stat">{dr.opportunities.length}</div>
-          <div className="mt-2 text-[12px] text-slate">{can("conversion") ? "Opportunities open after the summit, reviewed monthly" : "Values are visible to the lead only"}</div>
-        </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="t-stat">{opps.filter(oppOpen).length}</span>
+            <span className="text-slate text-sm">open of {opps.length}</span>
+          </div>
+          <div className="mt-2 text-[12px] text-slate">
+            {opps.filter((o) => o.stage === "Closed – won").length} won, {opps.filter((o) => o.closed).length} lost
+            {can("conversion") ? `. Committed ${value("committed")}, received ${value("received")}` : ". Values are the lead's to see"}
+          </div>
+        </Link>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -96,7 +114,7 @@ export default function DealRoomDashboard() {
             <ul>
               {attention.map((a) => (
                 <li key={a.k}>
-                  <Link href={q(a.k)} className="flex items-center justify-between gap-3 px-5 py-3 border-b border-line last:border-0 hover:bg-paper text-sm">
+                  <Link href={a.href} className="flex items-center justify-between gap-3 px-5 py-3 border-b border-line last:border-0 hover:bg-paper text-sm">
                     <span>{a.label}</span>
                     <span className="pill bg-warn-50 text-warn">{a.n}</span>
                   </Link>

@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
-import { PROVIDER_FIELDS, SEEKER_DOCS, SEEKER_FIELDS, MATCH_LABEL, bothAccepted, staffName, validateDealRoom } from "@/lib/dealroom/logic";
+import { PROVIDER_FIELDS, SEEKER_DOCS, SEEKER_FIELDS, MATCH_LABEL, bothAccepted, deletionDate, staffName, validateDealRoom } from "@/lib/dealroom/logic";
 import { drReducer } from "@/lib/dealroom/reducer";
 import type { AppState } from "@/lib/types";
 import type { DrConfig, DrException } from "@/lib/dealroom/types";
-import { fmtStamp } from "@/lib/time";
+import { fmtLong, fmtStamp } from "@/lib/time";
 import { Labeled, Pill, useDr } from "../bits";
 
-const tabs = ["Missions and sources", "Forms", "Rubric", "Matching", "Rules and deadlines", "Exceptions", "Support access", "Checks"] as const;
+const tabs = ["Missions and sources", "Forms", "Rubric", "Matching", "Rules and deadlines", "Exceptions", "Support access", "Archive and retention", "Checks"] as const;
 
 /** DL-1, DL-2, DL-6, DL-11: the lead sets the Deal Room once; everyone else reads it. */
 export default function Settings() {
@@ -36,6 +36,7 @@ export default function Settings() {
       {tab === "Rules and deadlines" && <Rules cfg={cfg} lead={lead} />}
       {tab === "Exceptions" && <Exceptions />}
       {tab === "Support access" && <Support />}
+      {tab === "Archive and retention" && <Archive cfg={cfg} lead={lead} />}
       {tab === "Checks" && <Concurrency />}
       {tab === "Checks" && (
         <Section title="Invariant checks" className="mt-4">
@@ -412,5 +413,75 @@ function Concurrency() {
         </table>
       )}
     </Section>
+  );
+}
+
+/** DA-8: at the conversion end date the Deal Room turns read-only, the pack goes to the lead, and documents are
+ *  scheduled for deletion 12 months later unless the lead extends retention with a reason (PRD Confidentiality req. 8). */
+function Archive({ cfg, lead }: { cfg: DrConfig; lead: boolean }) {
+  const { dr, dispatch } = useDr();
+  const [months, setMonths] = useState(6);
+  const [reason, setReason] = useState("");
+  const docs = dr.apps.filter((a) => a.eventId === cfg.eventId).reduce((n, a) => n + a.documents.length, 0);
+  const log = cfg.log.filter((l) => l.what.startsWith("Document retention"));
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Section title={dr.archivedAt ? `Archived ${fmtStamp(dr.archivedAt, false)}` : "Not archived yet"}>
+        <dl className="grid gap-2 text-[14px]">
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate">Tracking ends</dt>
+            <dd>{fmtLong(cfg.rules.conversionEnd)}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate">Then</dt>
+            <dd className="text-right">Every record read-only; the post-summit pack sent to the lead</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate">Documents deleted on</dt>
+            <dd className="font-medium">{fmtLong(deletionDate(cfg))}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate">Documents held</dt>
+            <dd>{docs}</dd>
+          </div>
+        </dl>
+        <Link href="/dealroom/opportunities?tab=Export" className="btn-secondary mt-4 inline-flex">
+          The post-summit pack
+        </Link>
+        <p className="mt-3 text-[13px] text-slate">Records stay readable and exportable after the archive; only documents are deleted. {dr.archivedAt ? "Nothing in the Deal Room can change now except retention." : "Move the demo clock to 19 Sep to see the archive."}</p>
+      </Section>
+      <Section title="Extend document retention">
+        {lead ? (
+          <div className="grid gap-3">
+            <Labeled label="By">
+              <select className="input" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
+                {[3, 6, 12].map((m) => (
+                  <option key={m} value={m}>
+                    {m} months
+                  </option>
+                ))}
+              </select>
+            </Labeled>
+            <Labeled label="Reason">
+              <input className="input" placeholder="For example: two deals still disbursing" value={reason} onChange={(e) => setReason(e.target.value)} />
+            </Labeled>
+            <button className="btn-primary justify-self-start" disabled={!reason.trim()} onClick={() => { dispatch({ type: "dr/retention", eventId: cfg.eventId, months, reason }); setReason(""); }}>
+              Extend to {fmtLong(deletionDate({ ...cfg, rules: { ...cfg.rules, retentionMonths: cfg.rules.retentionMonths + months } }))}
+            </button>
+          </div>
+        ) : (
+          <p className="text-[14px] text-slate">The lead extends retention, with a reason.</p>
+        )}
+        {log.length > 0 && (
+          <ul className="mt-4 border-t border-line pt-3 text-[13px]">
+            {log.map((l, i) => (
+              <li key={i} className="py-1">
+                {fmtStamp(l.at, false)}, {staffName(dr, l.by)}: {l.what}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+    </div>
   );
 }

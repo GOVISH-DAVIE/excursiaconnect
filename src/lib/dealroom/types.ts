@@ -25,6 +25,9 @@ export type DocKind =
   | "Beneficial owners"
   | "Signatory ID"
   | "Signed NDA"
+  | "Term sheet"
+  | "Commitment letter"
+  | "Disbursement evidence"
   | "Other";
 
 export interface DrDocument {
@@ -260,6 +263,34 @@ export interface DrOppOutcome {
   at: string;
 }
 
+export type CloseReason = "No fit" | "Timing" | "Terms" | "Diligence failed" | "Other";
+
+/** A progress note: the owner's own, or a participant's reply to a status request, with any evidence they attached. */
+export interface DrOppUpdate {
+  id: string;
+  from: "owner" | "seeker" | "provider";
+  text: string;
+  at: string;
+  by: string;
+  doc?: DrDocument;
+}
+
+/** What the seeded opportunities do after the summit, played as the demo clock passes each moment (never stored ahead of the clock). */
+export type DrScriptStep =
+  | { kind: "stage"; stage: OppStage; evidence: string }
+  | { kind: "outcome"; outcome: Omit<DrOppOutcome, "id" | "by" | "at"> }
+  | { kind: "update"; from: DrOppUpdate["from"]; text: string; doc?: DrDocument }
+  | { kind: "next"; nextAction: string; due: string }
+  | { kind: "close"; reason: CloseReason; note: string }
+  | { kind: "review"; note: string }
+  | { kind: "request"; to: "seeker" | "provider" };
+export interface DrScripted {
+  at: string;
+  oppId: string;
+  by: string;
+  step: DrScriptStep;
+}
+
 export interface DrOpportunity {
   id: string;
   eventId: string;
@@ -271,10 +302,11 @@ export interface DrOpportunity {
   nextAction: string;
   due: string;
   outcomes: DrOppOutcome[];
-  updates: { id: string; from: "owner" | "seeker" | "provider"; text: string; at: string; by: string }[];
-  requests: { id: string; to: "seeker" | "provider"; at: string; by: string }[];
+  stageEvidence?: Partial<Record<OppStage, string>>; // what justified entering each stage (PRD Conversion, stages table)
+  updates: DrOppUpdate[];
+  requests: { id: string; to: "seeker" | "provider"; at: string; by: string; answeredAt?: string }[];
   reviews: { month: string; by: string; at: string; note: string }[];
-  closed?: { reason: "No fit" | "Timing" | "Terms" | "Diligence failed" | "Other"; note: string; by: string; at: string };
+  closed?: { reason: CloseReason; note: string; by: string; at: string };
   history: DrHistory[];
 }
 
@@ -418,6 +450,7 @@ export interface DealRoomState {
   offline: boolean;
   liveWindow?: { declaredAt: string; by: string; rota: string[] };
   archivedAt?: string;
+  script?: DrScripted[];
   seq: { cs: number; fp: number };
   adminLog: DrHistory[]; // staff provisioning and support access
 }

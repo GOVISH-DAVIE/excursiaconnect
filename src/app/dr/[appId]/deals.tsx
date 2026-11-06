@@ -6,6 +6,7 @@ import { askBand, canSee, compact, confirmBy, consentGranted, ics, introExpiresA
 import type { DrApplication, DrDocument, DrMatch, DrMeeting } from "@/lib/dealroom/types";
 import { downloadText } from "@/lib/csv";
 import { fmtStamp } from "@/lib/time";
+import { UploadDoc } from "@/app/dealroom/bits";
 
 function Card({ title, children, aside }: { title?: string; children: ReactNode; aside?: ReactNode }) {
   return (
@@ -394,5 +395,86 @@ export function AccessLog({ app }: { app: DrApplication }) {
         </ul>
       )}
     </Card>
+  );
+}
+
+/* ---------- deal progress after the summit (CS-12, FP-10) ---------- */
+
+export function Deals({ app }: { app: DrApplication }) {
+  const { state, dispatch } = useStore();
+  const dr = state.dealRoom;
+  const side = app.type;
+  const mine = dr.opportunities.filter((o) => dr.matches.some((m) => m.id === o.matchId && (side === "seeker" ? m.seekerId : m.providerId) === app.id));
+  const [text, setText] = useState<Record<string, string>>({});
+  const [docs, setDocs] = useState<Record<string, DrDocument | undefined>>({});
+  const [kind, setKind] = useState<DrDocument["kind"]>(side === "provider" ? "Commitment letter" : "Financial statements");
+  if (!mine.length) return <Card title="No deals yet">An opportunity opens when a meeting ends with an agreed next step.</Card>;
+  return (
+    <>
+      {mine.map((o) => {
+        const m = dr.matches.find((x) => x.id === o.matchId)!;
+        const other = dr.apps.find((a) => a.id === (side === "seeker" ? m.providerId : m.seekerId))!;
+        const asked = o.requests.filter((r) => r.to === side && !r.answeredAt);
+        const open = !o.closed && o.stage !== "Closed – won";
+        const sent = o.updates.filter((u) => u.from === side);
+        return (
+          <Card key={o.id} title={`With ${other.org.name}`} aside={<span className={`pill whitespace-nowrap ${o.stage === "Closed – won" ? "bg-ok text-white" : o.closed ? "bg-paper-200 text-slate" : "bg-warn-50 text-warn"}`}>{o.stage}</span>}>
+            {open && (
+              <p className="text-[14px]">
+                Next step: {o.nextAction}, {o.due < dr.clock.slice(0, 10) ? "was due" : "by"} {fmtStamp(o.due, false)}.
+              </p>
+            )}
+            {asked.length > 0 && <p className="mt-2 rounded-md bg-warn-50 px-3 py-2 text-[14px] text-warn">The Deal Room team asked for an update on {fmtStamp(asked[0].at, false)}.</p>}
+            {sent.length > 0 && (
+              <ul className="mt-3 text-[14px]">
+                {sent.map((u) => (
+                  <li key={u.id} className="py-1.5 border-b border-line last:border-0">
+                    <span className="text-[12px] text-slate">You, {fmtStamp(u.at)}: </span>
+                    {u.text}
+                    {u.doc && <span className="text-[12px] text-slate"> · {u.doc.name}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {open && !dr.archivedAt && (
+              <div className="mt-3 border-t border-line pt-3">
+                <textarea className="input min-h-20" placeholder={side === "provider" ? "Where the decision stands: committee date, terms, disbursement" : "Where it stands on your side"} value={text[o.id] ?? ""} onChange={(e) => setText({ ...text, [o.id]: e.target.value })} />
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {docs[o.id] ? (
+                    <span className="text-[13px]">
+                      {docs[o.id]!.kind}: {docs[o.id]!.name}{" "}
+                      <button className="link" onClick={() => setDocs({ ...docs, [o.id]: undefined })}>
+                        remove
+                      </button>
+                    </span>
+                  ) : (
+                    <>
+                      <select className="input h-9 w-auto text-[13px]" aria-label="Evidence kind" value={kind} onChange={(e) => setKind(e.target.value as DrDocument["kind"])}>
+                        {(side === "provider" ? ["Commitment letter", "Disbursement evidence", "Term sheet", "Other"] : ["Financial statements", "Term sheet", "Other"]).map((k) => (
+                          <option key={k}>{k}</option>
+                        ))}
+                      </select>
+                      <UploadDoc kind={kind} at={dr.clock} label="Attach evidence" onDone={(d) => setDocs({ ...docs, [o.id]: d })} />
+                    </>
+                  )}
+                </div>
+                <button
+                  className="btn-primary mt-3"
+                  disabled={!(text[o.id] ?? "").trim()}
+                  onClick={() => {
+                    dispatch({ type: "dr/oppReply", oppId: o.id, side, text: text[o.id] ?? "", doc: docs[o.id] });
+                    setText({ ...text, [o.id]: "" });
+                    setDocs({ ...docs, [o.id]: undefined });
+                  }}
+                >
+                  Send the update
+                </button>
+                <p className="mt-2 text-[12px] text-slate">Your update and any evidence go to the deal&apos;s owner at the Deal Room. They record commitments and move the stage.</p>
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </>
   );
 }

@@ -15,6 +15,7 @@ export function DealRoomShell({ children }: { children: ReactNode }) {
     { href: "/dealroom/matching", label: "Matching", show: drCan(me, "match") },
     { href: "/dealroom/meetings", label: "Meetings", show: drCan(me, "schedule") },
     { href: "/dealroom/live", label: "Live board", show: drCan(me, "liveboard") || drCan(me, "outcome") },
+    { href: "/dealroom/opportunities", label: "Opportunities", show: me?.role === "Lead" || me?.role === "Reviewer" },
     { href: "/dealroom/reports", label: "Reports", show: true },
     { href: "/dealroom/notifications", label: "Notifications", show: true },
     { href: "/dealroom/settings", label: "Settings and rules", show: true },

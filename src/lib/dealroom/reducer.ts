@@ -31,10 +31,12 @@ import type {
   Readiness,
 } from "./types";
 import { exception, note, patchApp, portal, send, uid, withDr } from "./util";
+import { drConvReducer, playForward, type DrConvAction } from "./conversion";
 import { drMeetReducer, type DrMeetAction } from "./meetings";
 
 export type DrAction =
   | DrMeetAction
+  | DrConvAction
   | { type: "dr/clock"; clock: string }
   | { type: "dr/actAs"; staffId: string }
   | { type: "dr/config"; eventId: string; patch: Partial<DrConfig>; note: string }
@@ -126,7 +128,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
   const me = acting(dr);
 
   // after the conversion end date the Deal Room is read-only (DA-8); only the clock and the switcher still move
-  if (dr.archivedAt && action.type !== "dr/clock" && action.type !== "dr/actAs") return state;
+  if (dr.archivedAt && action.type !== "dr/clock" && action.type !== "dr/actAs" && action.type !== "dr/retention") return state;
   if (STAFF_ACTIONS.has(action.type) && !me?.active) return state;
 
   const app = "appId" in action ? dr.apps.find((a) => a.id === action.appId) : undefined;
@@ -143,11 +145,19 @@ export function drReducer(state: AppState, action: DrAction): AppState {
         if (!ev) continue;
         for (let d = ev.startDate; d <= ev.endDate; d = new Date(new Date(d + "T12:00:00Z").getTime() + 86400000).toISOString().slice(0, 10)) {
           const seven = `${d} 19:00`;
-          if (dr.clock < seven && action.clock >= seven) next = send(next, c.eventId, "st_lead", `Daily Deal Room report, ${new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}`, `/dealroom/reports?day=${d}`, "Email");
+          // stamped at 19:00 that day, even when the clock jumps past several evenings at once
+          if (dr.clock < seven && action.clock >= seven) next = { ...send({ ...next, clock: seven }, c.eventId, "st_lead", `Daily Deal Room report, ${new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}`, `/dealroom/reports?day=${d}`, "Email"), clock: next.clock };
         }
       }
-      // tracking ends on the conversion end date: the Deal Room becomes read-only (DA-8)
-      for (const c of Object.values(dr.configs)) if (!next.archivedAt && action.clock.slice(0, 10) > c.rules.conversionEnd) next = { ...next, archivedAt: `${c.rules.conversionEnd} 23:59` };
+      // after the summit: the seeded opportunities move on, owners get weekly digests, the lead a monthly report
+      next = playForward(next, state.events, dr.clock, action.clock);
+      next = { ...next, outbox: [...next.outbox].sort((a, b) => b.at.localeCompare(a.at)) };
+      // tracking ends on the conversion end date: the Deal Room becomes read-only and the pack goes to the lead (DA-8)
+      for (const c of Object.values(dr.configs))
+        if (!next.archivedAt && action.clock.slice(0, 10) > c.rules.conversionEnd) {
+          next = { ...next, archivedAt: `${c.rules.conversionEnd} 23:59` };
+          next = { ...send({ ...next, clock: next.archivedAt! }, c.eventId, "st_lead", "The Deal Room is archived: the post-summit pack is ready", "/dealroom/opportunities?tab=Export", "Email"), clock: next.clock };
+        }
       return withDr(state, next);
     }
 
@@ -516,6 +526,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
     }
 
     default:
+      if (action.type.startsWith("dr/opp") || action.type === "dr/retention") return drConvReducer(state, action as DrConvAction);
       return drMeetReducer(state, action as DrMeetAction);
   }
 }

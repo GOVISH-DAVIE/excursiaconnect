@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { Empty, KV, PageHeader, Section, Stat } from "@/components/ui";
 import { useStore } from "@/lib/store";
-import { EV_CA3, compact, publicStatus } from "@/lib/dealroom/logic";
+import { EV_CA3, compact, deletionDate, publicStatus } from "@/lib/dealroom/logic";
 import type { DrRole } from "@/lib/dealroom/types";
-import { fmtStamp } from "@/lib/time";
+import { fmtLong, fmtStamp } from "@/lib/time";
 import { DocLine } from "@/app/dealroom/bits";
 
 /** DA-2, DA-3, DA-5: Algotech provisions the Deal Room staff and opens a participant's file only under a lead's grant. */
@@ -21,11 +21,17 @@ export default function AdminDealRoom() {
   const grant = target && dr.grants.find((g) => g.appId === target.id && g.to === viewer && g.expires > dr.clock);
   const open = viewing ? dr.apps.find((a) => a.id === viewing) : undefined;
   const [rota, setRota] = useState(() => dr.liveWindow?.rota ?? ["", ""]);
+  const cfg = dr.configs[EV_CA3];
   const mins = (a: string, b: string) => Math.round((Date.parse(b.replace(" ", "T") + ":00Z") - Date.parse(a.replace(" ", "T") + ":00Z")) / 60000);
 
   return (
     <>
       <PageHeader title="Deal Room" kicker={`${event.name}: add-on KES ${event.dealRoom?.addOnPrice.toLocaleString("en-KE")}, ${event.dealRoom?.deskStaff} desk staff a day. Algotech enables and supports; it takes no part in deal decisions.`} />
+      {cfg && (
+        <p className="mb-4 rounded-lg bg-paper-200 px-4 py-3 text-[14px]">
+          {dr.archivedAt ? `Archived ${fmtStamp(dr.archivedAt, false)}: read-only, the post-summit pack sent to the lead.` : `Tracking runs to ${fmtStamp(cfg.rules.conversionEnd, false)}; the Deal Room then archives itself.`} Documents are deleted {fmtLong(deletionDate(cfg))} unless the lead extends retention.
+        </p>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
         <Section title={`Staff accounts, ${dr.staff.filter((s) => s.active).length} active`} flush>

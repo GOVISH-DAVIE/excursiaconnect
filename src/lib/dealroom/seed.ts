@@ -16,6 +16,8 @@ import type {
   DrMeeting,
   DrOpportunity,
   DrQueued,
+  DrScripted,
+  DrScriptStep,
   DrAssessment,
   DrConfig,
   DrDecisionEntry,
@@ -876,4 +878,72 @@ function seedMatching(dr: DealRoomState, delegates: Delegate[]) {
   dr.incidents = [{ id: "inc_1", startedAt: "2027-03-15 14:05", endedAt: "2027-03-15 14:32", cause: "Venue Wi-Fi dropped on the Deal floor", synced: 6, duplicates: 1, conflicts: 0 }];
   dr.liveWindow = { declaredAt: "2027-03-14 18:00", by: "admin", rota: ["Kevin (Algotech), on call", "Faith (Algotech), back-up"] };
   dr.outbox.unshift({ id: "msg_s5", eventId: EV_CA3, at: "2027-03-15 19:00", to: "st_lead", channel: "Email", subject: "Daily Deal Room report, Mon 15 Mar", link: "/dealroom/reports?day=2027-03-15", status: "Delivered" });
+  dr.script = seedConversion(dr);
 }
+
+/**
+ * After the summit, as the demo clock moves to June and September: what each seeded opportunity does.
+ * Six patterns, so the conversion screens show every case: won with funds received, in negotiation,
+ * lost, stalled from the start, stalled in diligence, and waiting on a provider's committee.
+ */
+function seedConversion(dr: DealRoomState): DrScripted[] {
+  const out: DrScripted[] = [];
+  const day = (n: number, h = 10) => {
+    const d = new Date("2027-03-19T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() + n);
+    return date(d.toISOString().slice(0, 10), h, 0);
+  };
+  const ymd = (n: number) => day(n).slice(0, 10);
+  const doc = (kind: DrDocument["kind"], name: string, at: string): DrDocument => ({ id: `doc_cv_${name.replace(/\W+/g, "").slice(0, 10)}_${at.replace(/\D/g, "").slice(4, 8)}`, name, kind, size: 1_400_000, at, download: true });
+  [...dr.opportunities].sort((a, b) => a.id.localeCompare(b.id)).forEach((o, j) => {
+    const m = dr.matches.find((x) => x.id === o.matchId)!;
+    const seeker = dr.apps.find((a) => a.id === m.seekerId)!;
+    const ask = seeker.ask!;
+    const at = (n: number, step: DrScriptStep, by = o.owner, h = 10) => out.push({ at: day(n + (j % 3), h), oppId: o.id, by, step });
+    const round = (x: number) => Math.round((ask.amount * x) / 10_000) * 10_000;
+    switch (j % 6) {
+      case 0: // won, with a first tranche received
+        at(3, { kind: "update", from: "owner", text: "Call held with both sides; the investor wants audited accounts and the pipeline." });
+        at(4, { kind: "stage", stage: "Diligence", evidence: "Data request: audited accounts, pipeline and cap table" });
+        at(4, { kind: "next", nextAction: "Seeker uploads the data pack", due: ymd(18) });
+        at(10, { kind: "request", to: "seeker" });
+        at(13, { kind: "update", from: "seeker", text: "Audited accounts and the pipeline are in the data room.", doc: doc("Financial statements", "audited-accounts-2026.pdf", day(13 + (j % 3))) }, seeker.id);
+        at(34, { kind: "stage", stage: "Negotiation", evidence: "Term sheet received from the investor" });
+        at(35, { kind: "outcome", outcome: { kind: "Promise", amount: round(0.6), currency: ask.currency, date: ymd(35 + (j % 3)), evidence: "Email from the investment committee chair" } });
+        at(36, { kind: "next", nextAction: "Sign the facility agreement", due: ymd(60) });
+        at(58, { kind: "outcome", outcome: { kind: "Commitment", amount: round(0.6), currency: ask.currency, instrument: ask.instrument, date: ymd(58 + (j % 3)), evidence: "Signed facility agreement.pdf" } });
+        at(58, { kind: "stage", stage: "Closed – won", evidence: "Facility agreement signed" });
+        at(76, { kind: "outcome", outcome: { kind: "Funds received", amount: round(0.3), currency: ask.currency, date: ymd(76 + (j % 3)), evidence: "Disbursement confirmation, first tranche.pdf" } });
+        break;
+      case 1: // in negotiation with a promise, next step after mid-June
+        at(5, { kind: "stage", stage: "Diligence", evidence: "Investor reviewing the financial model" });
+        at(5, { kind: "next", nextAction: "Investor site visit", due: ymd(30) });
+        at(42, { kind: "stage", stage: "Negotiation", evidence: "Written proposal sent by the investor" });
+        at(47, { kind: "outcome", outcome: { kind: "Promise", amount: round(0.5), currency: ask.currency, date: ymd(47 + (j % 3)), evidence: "Letter of intent, unsigned" } });
+        at(66, { kind: "next", nextAction: "Agree final terms", due: "2027-06-30" });
+        break;
+      case 2: // lost on timing
+        at(8, { kind: "stage", stage: "Diligence", evidence: "Data request received" });
+        at(30, { kind: "close", reason: "Timing", note: "The investor's fund closes its investment period in May; revisit next year." });
+        break;
+      case 3: // nothing after the meeting: overdue and stalled by June
+        break;
+      case 4: // diligence, then quiet
+        at(9, { kind: "stage", stage: "Diligence", evidence: "Site visit requested" });
+        at(10, { kind: "next", nextAction: "Site visit to the plant", due: "2027-04-30" });
+        break;
+      case 5: // waiting on the provider's credit committee
+        at(26, { kind: "request", to: "provider" });
+        at(30, { kind: "update", from: "provider", text: "Our credit committee meets on 3 June; a commitment decision follows." }, m.providerId);
+        at(31, { kind: "next", nextAction: "Credit committee decision", due: "2027-06-10" });
+        break;
+    }
+  });
+  // the lead's monthly reviews for April and May; June's is the one waiting at the 15 June step
+  for (const o of dr.opportunities) {
+    out.push({ at: "2027-04-02 11:00", oppId: o.id, by: "st_lead", step: { kind: "review", note: "Monthly review" } });
+    out.push({ at: "2027-05-04 11:00", oppId: o.id, by: "st_lead", step: { kind: "review", note: "Monthly review" } });
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at));
+}
+

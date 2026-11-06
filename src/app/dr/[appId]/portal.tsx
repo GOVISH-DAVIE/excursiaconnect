@@ -9,7 +9,7 @@ import type { DrApplication, DrDocument, Instrument, KycItem } from "@/lib/dealr
 import { fmtStamp } from "@/lib/time";
 import { ApplicantStatus, DocLine, UploadDoc } from "@/app/dealroom/bits";
 import { MandateFields } from "@/app/e/[slug]/deal-room/apply/apply";
-import { AccessLog, Directory, Introductions, Meetings } from "./deals";
+import { AccessLog, Deals, Directory, Introductions, Meetings } from "./deals";
 
 /*
   The participant's own page: what they applied with, where it stands, what is asked of them.
@@ -17,7 +17,7 @@ import { AccessLog, Directory, Introductions, Meetings } from "./deals";
   introductions open from this page once the participant is verified or Deal Room Ready.
 */
 
-type Tab = "Status" | "Profile" | "Directory" | "Introductions" | "Meetings" | "Documents" | "Access log" | "Verification" | "Mandate" | "Messages";
+type Tab = "Status" | "Profile" | "Directory" | "Introductions" | "Meetings" | "Deals" | "Documents" | "Access log" | "Verification" | "Mandate" | "Messages";
 const INSTRUMENTS: Instrument[] = ["Equity", "Debt", "Mezzanine", "Grant", "Trade finance", "Other"];
 
 export function Portal({ id }: { id: string }) {
@@ -37,6 +37,9 @@ export function Portal({ id }: { id: string }) {
       ? ["Status", ...(qualified(app) ? (["Profile", "Introductions", "Meetings"] as Tab[]) : []), "Documents", ...(qualified(app) ? (["Access log"] as Tab[]) : []), "Messages"]
       : ["Status", ...(verified ? (["Directory", "Introductions", "Meetings"] as Tab[]) : []), "Verification", "Mandate", "Messages"];
   const waiting = mine.filter((m) => !m.intro![app.type] && matchStage(m, dr.configs[app.eventId], dr.clock) === "Introduced").length;
+  const deals = dr.opportunities.filter((o) => mine.some((m) => m.id === o.matchId));
+  const asked = deals.filter((o) => o.requests.some((r) => r.to === app.type && !r.answeredAt)).length;
+  if (deals.length) tabs.splice(tabs.indexOf("Meetings") + 1, 0, "Deals");
   const messages = dr.outbox.filter((m) => m.to === app.id).length;
 
   return (
@@ -60,16 +63,26 @@ export function Portal({ id }: { id: string }) {
               {t}
               {t === "Messages" && messages > 0 && <span className="ml-1 opacity-70">{messages}</span>}
               {t === "Introductions" && waiting > 0 && <span className="ml-1 opacity-70">{waiting}</span>}
+              {t === "Deals" && asked > 0 && <span className="ml-1 opacity-70">{asked}</span>}
             </button>
           ))}
         </nav>
       </header>
       <main className="mx-auto max-w-3xl px-5 py-6 space-y-4">
+        {tab === "Status" && asked > 0 && (
+          <Card title="The Deal Room team asks for an update">
+            <p className="text-[14px] text-slate">On {asked === 1 ? "one of your deals" : `${asked} of your deals`}: a sentence on where it stands, and any commitment or disbursement evidence.</p>
+            <button className="btn-primary mt-3" onClick={() => setTab("Deals")}>
+              Send an update
+            </button>
+          </Card>
+        )}
         {tab === "Status" && <Status app={app} />}
         {tab === "Profile" && <Profile app={app} />}
         {tab === "Directory" && <Directory app={app} />}
         {tab === "Introductions" && <Introductions app={app} />}
         {tab === "Meetings" && <Meetings app={app} />}
+        {tab === "Deals" && <Deals app={app} />}
         {tab === "Documents" && <Documents app={app} />}
         {tab === "Access log" && <AccessLog app={app} />}
         {tab === "Verification" && <Verification app={app} />}

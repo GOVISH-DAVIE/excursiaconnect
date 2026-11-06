@@ -40,3 +40,6 @@ export function fmtStamp(stamp: string, withTime = true) {
   const day = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
   return withTime && stamp.length > 10 ? `${day}, ${stamp.slice(11, 16)}` : day;
 }
+
+/** A date with its year, for dates that can fall in another year than the event: "18 September 2028". */
+export const fmtLong = (date: string) => new Date(date.slice(0, 10) + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });

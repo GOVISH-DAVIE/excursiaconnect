@@ -4,13 +4,13 @@ import { useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { PageHeader, Section, Tabs } from "@/components/ui";
 import { useStore } from "@/lib/store";
-import { DR_ZONE, decisionOf, drCan, matchStage, medianDays, missionName, occupies, qualified, staffName, type MatchStage } from "@/lib/dealroom/logic";
-import type { DrApplication, DrMeeting } from "@/lib/dealroom/types";
+import { DR_ZONE, compact, conversionValues, decisionOf, drCan, matchStage, medianDays, missionName, occupies, oppOpen, oppOverdue, oppParties, qualified, staffName, type MatchStage } from "@/lib/dealroom/logic";
+import type { DrApplication, DrMeeting, DrOpportunity } from "@/lib/dealroom/types";
 import { downloadCsv, row } from "@/lib/csv";
 import { addMinutes, fmtStamp } from "@/lib/time";
 import { Refusal, useDr } from "../bits";
 
-const allTabs = ["Mobilisation", "Qualification", "Verification", "Matchmaking", "Meetings", "Daily"] as const;
+const allTabs = ["Mobilisation", "Qualification", "Verification", "Matchmaking", "Meetings", "Daily", "Conversion"] as const;
 type Tab = (typeof allTabs)[number];
 
 /** PRD Reporting: one table per area, each broken down and exportable. Role limits apply (req. 5): reviewers see
@@ -20,7 +20,8 @@ export default function Reports() {
   const q = useSearchParams();
   const review = drCan(me, "review");
   const ops = drCan(me, "schedule");
-  const tabs = allTabs.filter((t) => (["Mobilisation", "Qualification", "Verification", "Matchmaking"].includes(t) ? review : ops || me?.role === "Lead"));
+  // conversion values are the lead's alone (PRD Reporting req. 5)
+  const tabs = allTabs.filter((t) => (t === "Conversion" ? drCan(me, "conversion") : ["Mobilisation", "Qualification", "Verification", "Matchmaking"].includes(t) ? review : ops || me?.role === "Lead"));
   const [picked, setTab] = useState<Tab | null>(null);
   const asked = allTabs.find((t) => t === q.get("tab"));
   const tab = picked ?? (asked && tabs.includes(asked) ? asked : tabs[0]);
@@ -38,6 +39,7 @@ export default function Reports() {
       {tab === "Matchmaking" && <Matchmaking />}
       {tab === "Meetings" && <MeetingsReport />}
       {tab === "Daily" && <Daily day={q.get("day") ?? undefined} />}
+      {tab === "Conversion" && <Conversion />}
     </>
   );
 }
@@ -299,5 +301,67 @@ function Daily({ day }: { day?: string }) {
         </table>
       </Section>
     </div>
+  );
+}
+
+/** PRD Reporting, Conversion: value at the stage it is evidenced, never summed across stages; overdue actions; closed by reason. */
+function Conversion() {
+  const { dr, cfg, now } = useDr();
+  const [by, setBy] = useState<"owner" | "mission" | "sector" | "month">("owner");
+  const opps = dr.opportunities.filter((o) => o.eventId === cfg!.eventId);
+  const sector = (o: DrOpportunity) => oppParties(dr, o).seeker?.org.sector ?? "–";
+  const key = (o: DrOpportunity) => (by === "owner" ? staffName(dr, o.owner) : by === "mission" ? missionName(cfg!, oppParties(dr, o).seeker?.mission ?? "") : by === "sector" ? sector(o) : (o.stageDates["Follow-up"] ?? "").slice(0, 7));
+  const groups = [...new Set(opps.map(key))].sort().map((k) => ({ k, list: opps.filter((o) => key(o) === k) }));
+  const total = { k: "All", list: opps };
+  const money = (list: DrOpportunity[], f: "sought" | "promised" | "committed" | "received") =>
+    Object.entries(conversionValues(dr, list))
+      .filter(([, v]) => v[f] > 0)
+      .map(([cur, v]) => compact(v[f], cur))
+      .join(" · ") || "–";
+  const reasons = ["No fit", "Timing", "Terms", "Diligence failed", "Other"].map((r) => ({ r, list: opps.filter((o) => o.closed?.reason === r) }));
+  const overdue = opps.filter((o) => oppOverdue(o, now)).sort((a, b) => a.due.localeCompare(b.due));
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[14px]">
+        <span className="text-slate">Break down by</span>
+        <select className="input h-9 w-auto" value={by} onChange={(e) => setBy(e.target.value as typeof by)}>
+          <option value="owner">Owner</option>
+          <option value="mission">Mission</option>
+          <option value="sector">Sector</option>
+          <option value="month">Month opened</option>
+        </select>
+        <span className="text-[13px] text-slate">Value counts at the stage it is evidenced: sought, promised, committed, received are never added together.</span>
+      </div>
+      <Table
+        title="Opportunities and value by stage of evidence"
+        file={`deal-room-conversion-by-${by}`}
+        rows={[...groups, total]}
+        cols={[
+          { h: by === "month" ? "Month opened" : by[0].toUpperCase() + by.slice(1), v: (x) => (x.k === "All" ? <b className="font-medium">All</b> : x.k), csv: (x) => x.k },
+          { h: "Open", v: (x) => x.list.filter(oppOpen).length, right: true },
+          { h: "Overdue", v: (x) => x.list.filter((o) => oppOverdue(o, now)).length, right: true },
+          { h: "Won", v: (x) => x.list.filter((o) => o.stage === "Closed – won").length, right: true },
+          { h: "Lost", v: (x) => x.list.filter((o) => !!o.closed).length, right: true },
+          { h: "Sought", v: (x) => money(x.list, "sought"), right: true },
+          { h: "Promised", v: (x) => money(x.list, "promised"), right: true },
+          { h: "Committed", v: (x) => money(x.list, "committed"), right: true },
+          { h: "Received", v: (x) => money(x.list, "received"), right: true },
+        ]}
+      />
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <Table title="Closed as lost, by reason" file="deal-room-closed-by-reason" rows={reasons} cols={[{ h: "Reason", v: (x) => x.r }, { h: "Opportunities", v: (x) => x.list.length, right: true }]} />
+        <Table
+          title={`Overdue next actions, ${overdue.length}`}
+          file="deal-room-overdue-actions"
+          rows={overdue}
+          cols={[
+            { h: "Opportunity", v: (o) => `${oppParties(dr, o).seeker?.org.name} · ${oppParties(dr, o).provider?.org.name}` },
+            { h: "Owner", v: (o) => staffName(dr, o.owner) },
+            { h: "Next action", v: (o) => o.nextAction },
+            { h: "Due", v: (o) => fmtStamp(o.due, false), csv: (o) => o.due },
+          ]}
+        />
+      </div>
+    </>
   );
 }
