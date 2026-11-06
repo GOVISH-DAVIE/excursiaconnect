@@ -9,7 +9,7 @@ import type { AppState, Capability, Category, Delegate, EventState, FormField, O
 export const STORAGE_KEY = "excursiaconnect-proto-v1";
 /** Bumped whenever the seed gains records in arrays that already exist, so a saved browser resets instead of
  *  keeping an older copy that lacks them (hydrate only merges top-level keys). */
-export const SEED_VERSION = 2;
+export const SEED_VERSION = 3;
 
 export { overlaps };
 
@@ -288,6 +288,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
     case "book":
+      // a Deal Room participant is never bookable through the open calendar; their meetings come by introduction
+      if (state.delegates.find((d) => d.id === action.hostId)?.category === "Deal Room") return state;
       return {
         ...state,
         delegates: state.delegates.map((d) => (d.id === action.hostId && d.slots ? { ...d, slots: d.slots.map((s, i) => (i === action.slotIndex ? { ...s, bookedBy: action.byId } : s)) } : d)),
@@ -295,7 +297,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "message":
       return { ...state, messages: [...state.messages, { id: `m_${Date.now()}`, from: action.from, to: action.to, body: action.body, at: nowTime() }] };
     case "updateDelegate":
-      return { ...state, delegates: state.delegates.map((d) => (d.id === action.delegateId ? { ...d, ...action.patch } : d)) };
+      return { ...state, delegates: state.delegates.map((d) => (d.id === action.delegateId ? { ...d, ...action.patch, ...(d.category === "Deal Room" ? { bookable: false } : {}) } : d)) };
     case "setCurrentDelegate":
       return { ...state, currentDelegateId: action.delegateId };
     case "updateSession":

@@ -12,6 +12,9 @@ export function DealRoomShell({ children }: { children: ReactNode }) {
   const nav: (NavItem & { show: boolean })[] = [
     { href: "/dealroom", label: "Dashboard", exact: true, show: true },
     { href: "/dealroom/applications", label: "Applications", show: drCan(me, "review") || drCan(me, "assign") },
+    { href: "/dealroom/matching", label: "Matching", show: drCan(me, "match") },
+    { href: "/dealroom/meetings", label: "Meetings", show: drCan(me, "schedule") },
+    { href: "/dealroom/live", label: "Live board", show: drCan(me, "liveboard") || drCan(me, "outcome") },
     { href: "/dealroom/reports", label: "Reports", show: true },
     { href: "/dealroom/notifications", label: "Notifications", show: true },
     { href: "/dealroom/settings", label: "Settings and rules", show: true },

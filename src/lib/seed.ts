@@ -1,6 +1,6 @@
 import type { AppState, Delegate, Order, Session, Shift, TeamMember } from "./types";
 import { DEFAULT_GRANTS } from "./roles";
-import { bouer, ca3, ca3Rooms, ca3Tiers, ca3Zones, seedDealRoom } from "./dealroom/seed";
+import { bouer, ca3, ca3Rooms, ca3Sessions, ca3Tiers, ca3Zones, seedDealRoom } from "./dealroom/seed";
 import { DR_TIER, DR_ZONE } from "./dealroom/logic";
 
 const team: TeamMember[] = [
@@ -252,7 +252,7 @@ export const seed: AppState = {
   tiers: [...tiers, ...ca3TierRows],
   zones: [...zones, ...ca3ZoneRows],
   rooms: [...rooms, ...ca3Rooms],
-  sessions,
+  sessions: [...sessions, ...ca3Sessions],
   delegates: [...delegates, ...deal.delegates],
   orders: cleanOrders,
   messages: [

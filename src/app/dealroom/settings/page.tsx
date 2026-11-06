@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
-import { PROVIDER_FIELDS, SEEKER_DOCS, SEEKER_FIELDS, MATCH_LABEL, staffName, validateDealRoom } from "@/lib/dealroom/logic";
+import { PROVIDER_FIELDS, SEEKER_DOCS, SEEKER_FIELDS, MATCH_LABEL, bothAccepted, staffName, validateDealRoom } from "@/lib/dealroom/logic";
+import { drReducer } from "@/lib/dealroom/reducer";
+import type { AppState } from "@/lib/types";
 import type { DrConfig, DrException } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
 import { Labeled, Pill, useDr } from "../bits";
@@ -34,8 +36,9 @@ export default function Settings() {
       {tab === "Rules and deadlines" && <Rules cfg={cfg} lead={lead} />}
       {tab === "Exceptions" && <Exceptions />}
       {tab === "Support access" && <Support />}
+      {tab === "Checks" && <Concurrency />}
       {tab === "Checks" && (
-        <Section title="Invariant checks">
+        <Section title="Invariant checks" className="mt-4">
           {problems.length === 0 ? <p className="text-[14px] text-ok">Every check passes: references unique, every qualified participant badged, every Ready seeker meets the gate, every decision has its decider and a different confirmer.</p> : (
             <ul className="space-y-1 text-[14px] text-bad">
               {problems.map((p) => (
@@ -344,6 +347,67 @@ function Support() {
                 </tr>
               );
             })}
+          </tbody>
+        </table>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * PRD acceptance: "a 50-request concurrency test books no clashes". Fifty proposals arrive in one burst and go
+ * through the real reducer one after another, on a copy of the state, so the live schedule is never touched.
+ */
+function Concurrency() {
+  const { state } = useDr();
+  const [result, setResult] = useState<{ name: string; requests: number; booked: number; refused: number; problems: number }[] | null>(null);
+  const run = () => {
+    const lead = state.dealRoom.staff.find((x) => x.role === "Lead" && x.active)!;
+    const base: AppState = structuredClone(state);
+    const acc = base.dealRoom.matches.filter(bothAccepted);
+    base.dealRoom = { ...base.dealRoom, clock: "2027-03-01 09:00", actingStaffId: lead.id, meetings: base.dealRoom.meetings.filter((m) => !acc.slice(0, 50).some((a) => a.id === m.matchId)) };
+    const test = (name: string, reqs: { matchId: string; roomId: string; table: number; start: string }[]) => {
+      let st = base;
+      const before = st.dealRoom.meetings.length;
+      for (const req of reqs) st = drReducer(st, { type: "dr/propose", req });
+      const booked = st.dealRoom.meetings.length - before;
+      return { name, requests: reqs.length, booked, refused: reqs.length - booked, problems: validateDealRoom(st).filter((p) => /share|two meetings/i.test(p)).length };
+    };
+    const day = "2027-03-17";
+    const fifty = Array.from({ length: 50 }, (_, i) => acc[i % acc.length].id);
+    setResult([
+      test("Fifty requests for one room, one table, one time", fifty.map((matchId) => ({ matchId, roomId: "r_dr1", table: 1, start: `${day} 16:00` }))),
+      test("Fifty requests for the four tables of Deal floor A at 16:00", fifty.map((matchId, i) => ({ matchId, roomId: "r_dr5", table: 1 + (i % 4), start: `${day} 16:00` }))),
+      test("Fifty requests across three times and two rooms", fifty.map((matchId, i) => ({ matchId, roomId: i % 2 ? "r_dr2" : "r_dr3", table: 1, start: `${day} ${["14:00", "14:25", "14:50"][i % 3]}` }))),
+    ]);
+  };
+  return (
+    <Section title="Concurrency test, 50 requests at once">
+      <p className="text-[14px] text-slate">Runs on a copy of today&apos;s state, with the clock set before the summit; nothing you see elsewhere changes.</p>
+      <button className="btn-primary mt-3" onClick={run}>
+        Run the test
+      </button>
+      {result && (
+        <table className="w-full mt-4">
+          <thead>
+            <tr>
+              <th className="th">Burst</th>
+              <th className="th-r">Requests</th>
+              <th className="th-r">Booked</th>
+              <th className="th-r">Refused</th>
+              <th className="th-r">Double bookings</th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.map((r) => (
+              <tr key={r.name}>
+                <td className="td text-[13px]">{r.name}</td>
+                <td className="td-r">{r.requests}</td>
+                <td className="td-r">{r.booked}</td>
+                <td className="td-r">{r.refused}</td>
+                <td className={`td-r font-medium ${r.problems ? "text-bad" : "text-ok"}`}>{r.problems}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}

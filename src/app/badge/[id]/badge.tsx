@@ -36,9 +36,16 @@ export function Badge({ id }: { id: string }) {
   const offerExpired = !!today && !!me.offerExpires && me.offerExpires < `${today} ${new Date().toTimeString().slice(0, 5)}`;
   const sessions = state.sessions.filter((s) => s.eventId === event.id);
   const zones = state.zones.filter((z) => tier.entitlements.includes(z.id) || (me.category === "VIP" && z.id === "z_vip"));
-  const people = state.delegates.filter((d) => d.id !== me.id && d.eventId === event.id && d.bookable && (d.status === "Confirmed" || d.status === "Checked in") && (query === "" || `${d.name} ${d.organisation}`.toLowerCase().includes(query.toLowerCase()))).slice(0, 12);
+  // Deal Room participants meet only by introduction, so the open calendar never lists them (PRD Matching req. 6)
+  const people = state.delegates.filter((d) => d.id !== me.id && d.eventId === event.id && d.bookable && d.category !== "Deal Room" && (d.status === "Confirmed" || d.status === "Checked in") && (query === "" || `${d.name} ${d.organisation}`.toLowerCase().includes(query.toLowerCase()))).slice(0, 12);
   const threads = [...new Set(state.messages.filter((m) => m.from === me.id || m.to === me.id).map((m) => (m.from === me.id ? m.to : m.from)))];
   const thread = chatWith ? state.messages.filter((m) => (m.from === me.id && m.to === chatWith) || (m.from === chatWith && m.to === me.id)) : [];
+  const drApp = me.category === "Deal Room" ? state.dealRoom.apps.find((a) => a.delegateId === me.id) : undefined;
+  const drMeetings = drApp
+    ? state.dealRoom.meetings
+        .filter((m) => ["Proposed", "Change requested", "Confirmed", "In progress", "Held"].includes(m.status) && state.dealRoom.matches.some((x) => x.id === m.matchId && (x.seekerId === drApp.id || x.providerId === drApp.id)))
+        .sort((a, b) => a.start.localeCompare(b.start))
+    : [];
   const catColor: Record<string, string> = { Speaker: "#5B2A86", Panelist: "#5B2A86", Sponsor: "#0A7E8C", Exhibitor: "#0A7E8C", VIP: "#B8860B", "General Delegate": event.brand.primary, "Deal Room": "#1F2937" };
 
   return (
@@ -99,10 +106,17 @@ export function Badge({ id }: { id: string }) {
                 <button className="btn-secondary text-[13px]" onClick={() => window.print()}>
                   Print badge (PDF)
                 </button>
-                <button className="btn-secondary text-[13px]" onClick={() => dispatch({ type: "updateDelegate", delegateId: me.id, patch: { bookable: !me.bookable, slots: me.slots ?? [{ day: 1, time: "15:45", location: "Networking lounge" }, { day: 2, time: "10:30", location: "Networking lounge" }] } })}>
-                  {me.bookable ? "Close my calendar" : "Open my calendar"}
-                </button>
+                {drApp ? (
+                  <a className="btn-secondary text-[13px]" href={`/dr/${drApp.id}`}>
+                    My Deal Room
+                  </a>
+                ) : (
+                  <button className="btn-secondary text-[13px]" onClick={() => dispatch({ type: "updateDelegate", delegateId: me.id, patch: { bookable: !me.bookable, slots: me.slots ?? [{ day: 1, time: "15:45", location: "Networking lounge" }, { day: 2, time: "10:30", location: "Networking lounge" }] } })}>
+                    {me.bookable ? "Close my calendar" : "Open my calendar"}
+                  </button>
+                )}
               </div>
+              {drApp && <p className="mt-2 text-[13px] text-slate">Your Deal Room meetings are booked by the Deal Room team after an introduction both sides accept, so your calendar stays closed to open booking.</p>}
 
               {/* DE-10: edit own profile until the organiser locks edits; DE-15: ask for a refund within policy */}
               <div className="mt-4 border-t border-line pt-4">
@@ -185,6 +199,34 @@ export function Badge({ id }: { id: string }) {
 
           {tab === "My day" && (
             <div>
+              {drApp && (
+                <div className="mb-5">
+                  <div className="text-[13px] font-medium">Deal Room meetings</div>
+                  {drMeetings.length === 0 ? (
+                    <p className="mt-1 text-sm text-slate">None booked yet.</p>
+                  ) : (
+                    <ul className="mt-2 divide-y divide-line rounded-lg border border-line">
+                      {drMeetings.map((m) => {
+                        const x = state.dealRoom.matches.find((mm) => mm.id === m.matchId)!;
+                        const other = state.dealRoom.apps.find((a) => a.id === (x.seekerId === drApp.id ? x.providerId : x.seekerId));
+                        const room = state.rooms.find((r) => r.id === m.roomId);
+                        return (
+                          <li key={m.id} className="flex items-start justify-between gap-3 px-3 py-2.5 text-sm">
+                            <span>
+                              <span className="num font-medium">Day {Math.round((Date.parse(m.start.slice(0, 10)) - Date.parse(event.startDate)) / 864e5) + 1}, {m.start.slice(11)}</span> with {other?.org.name}
+                              <span className="block text-[13px] text-slate">
+                                {room?.name ?? "Online"}
+                                {m.table ? `, table ${m.table}` : ""}
+                              </span>
+                            </span>
+                            <span className={`pill shrink-0 ${m.status === "Confirmed" || m.status === "In progress" ? "bg-ok-50 text-ok" : m.status === "Held" ? "bg-paper-200 text-slate" : "bg-warn-50 text-warn"}`}>{m.status === "Proposed" ? "To confirm" : m.status}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
               <p className="text-sm text-slate mb-3">Only what you are enrolled in or entitled to.</p>
               <Programme sessions={sessions} rooms={state.rooms} days={event.days} startDate={event.startDate} enrolled={me.sessions} myDayOnly canEnrol={tier.entitlements.includes("breakouts")} onEnrol={(sid, on) => dispatch({ type: "enrol", delegateId: me.id, sessionId: sid, on })} />
             </div>

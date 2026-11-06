@@ -3,11 +3,19 @@
  * 10:40. Mission names, the venue and the rubric weights are stand-ins until Bouer confirms them;
  * each is editable in Settings. Its own random sequence, so the platform seed does not shift.
  */
-import type { Delegate, EventRecord, Organiser, Room, Tier, Zone } from "../types";
-import { DR_TIER, DR_ZONE, EV_CA3, refNo } from "./logic";
+import type { Delegate, EventRecord, Organiser, Room, Session, Tier, Zone } from "../types";
+import { addMinutes } from "../time";
+import { DR_TIER, DR_ZONE, EV_CA3, candidates, matchable, refNo, slotProblems, slotTimes } from "./logic";
+import { draftBrief } from "./meetings";
 import type {
   DealRoomState,
+  DrAccess,
   DrApplication,
+  DrConsent,
+  DrMatch,
+  DrMeeting,
+  DrOpportunity,
+  DrQueued,
   DrAssessment,
   DrConfig,
   DrDecisionEntry,
@@ -85,6 +93,7 @@ export const ca3Zones: Zone[] = [
 ];
 
 export const ca3Rooms: Room[] = [
+  { id: "r_ca3_ws", zoneId: "z_ca3_main", name: "Workshop room", capacity: 60 },
   { id: "r_dr1", zoneId: DR_ZONE, name: "Boardroom 1", capacity: 6 },
   { id: "r_dr2", zoneId: DR_ZONE, name: "Boardroom 2", capacity: 6 },
   { id: "r_dr3", zoneId: DR_ZONE, name: "Boardroom 3", capacity: 6 },
@@ -92,6 +101,13 @@ export const ca3Rooms: Room[] = [
   { id: "r_dr5", zoneId: DR_ZONE, name: "Deal floor A", capacity: 16 },
   { id: "r_dr6", zoneId: DR_ZONE, name: "Deal floor B", capacity: 16 },
   { id: "r_dr7", zoneId: DR_ZONE, name: "Deal floor C", capacity: 16 },
+];
+
+/** A little of the summit programme, so a Deal Room slot can clash with a session a participant enrolled in. */
+export const ca3Sessions: Session[] = [
+  { id: "s_ca3_1", eventId: EV_CA3, day: 1, start: "09:00", end: "10:30", title: "Opening plenary: capital for a connected Africa", kind: "plenary", speakers: [], enrolled: 0, attended: 0, status: "ended", walkIns: true },
+  { id: "s_ca3_2", eventId: EV_CA3, day: 2, start: "11:30", end: "12:30", title: "Workshop: preparing for investor diligence", roomId: "r_ca3_ws", kind: "breakout", speakers: [], capacity: 60, enrolled: 0, attended: 0, status: "scheduled", walkIns: false },
+  { id: "s_ca3_3", eventId: EV_CA3, day: 3, start: "14:00", end: "15:00", title: "Workshop: blended finance structures", roomId: "r_ca3_ws", kind: "breakout", speakers: [], capacity: 60, enrolled: 0, attended: 0, status: "scheduled", walkIns: false },
 ];
 
 /* ---------- rules ---------- */
@@ -661,7 +677,6 @@ export function seedDealRoom(): { dr: DealRoomState; delegates: Delegate[]; drZo
     ],
     grants: [],
     outbox: [
-      { id: "msg_s1", eventId: EV_CA3, at: "2027-03-16 08:00", to: "st_lead", channel: "Email", subject: "Daily Deal Room report, Mon 15 Mar", link: "/dealroom/reports", status: "Delivered" },
       { id: "msg_s2", eventId: EV_CA3, at: "2027-03-15 21:40", to: "dr_cs99", channel: "Email and SMS", subject: "Application received, reference " + refNo("seeker", cs), link: "/dr/dr_cs99", status: "Delivered" },
       { id: "msg_s3", eventId: EV_CA3, at: "2027-03-15 16:20", to: "st_lead", channel: "Email", subject: "A decision waits for a second decider", link: "/dealroom/applications", status: "Delivered" },
       { id: "msg_s4", eventId: EV_CA3, at: "2027-03-12 09:00", to: "dr_cs22", channel: "SMS", subject: "Reminder: information requested on your application", link: "/dr/dr_cs22", status: "Failed" },
@@ -676,5 +691,187 @@ export function seedDealRoom(): { dr: DealRoomState; delegates: Delegate[]; drZo
       ...ca3Staff.map((s) => ({ at: s.addedAt, by: "admin", what: `Account created: ${s.name}, ${s.role}${s.canDecide && s.role !== "Lead" ? ", may decide" : ""}${s.mfa ? ", MFA on" : ""}` })).reverse(),
     ],
   };
+  seedMatching(dr, delegates);
   return { dr, delegates, drZoneInside: inside };
+}
+
+/**
+ * Cut 2: matches, introductions and meetings, made by the same rules the screens use. Matching ran
+ * 1 to 19 February, introductions went out with it, meetings were booked from 22 February, and the
+ * summit has run a day and forty minutes. Mutates the slice and the badges it is given.
+ */
+function seedMatching(dr: DealRoomState, delegates: Delegate[]) {
+  const cfg = dr.configs[EV_CA3];
+  const seekers = dr.apps.filter((a) => a.type === "seeker" && matchable(a));
+  const load: Record<string, number> = {};
+  const matches: DrMatch[] = [];
+  const reviewerOf = (a: DrApplication) => a.assignee ?? "st_rev1";
+
+  // a few delegates take the diligence workshop on day 2, so their meetings must avoid it
+  for (const a of seekers.slice(0, 10)) {
+    const d = delegates.find((x) => x.id === a.delegateId);
+    if (d) d.sessions = ["s_ca3_2"];
+  }
+  ca3Sessions[1].enrolled = delegates.filter((d) => d.sessions.includes("s_ca3_2")).length;
+
+  seekers.forEach((seeker, i) => {
+    const day = 1 + (i % 18);
+    const at = date(`2027-02-${day.toString().padStart(2, "0")}`, 10 + (i % 6), 15);
+    const list = candidates({ ...dr, matches }, cfg, seeker).filter((c) => !c.exclusionHit && c.mandatoryMiss.length <= 1 && (load[c.provider.id] ?? 0) < 7);
+    const take = list.slice(0, 3);
+    take.forEach((c, k) => {
+      load[c.provider.id] = (load[c.provider.id] ?? 0) + 1;
+      const note = c.mandatoryMiss.length ? `${c.mandatoryMiss[0] === "ticket" ? "Ask sits just outside the ticket range" : `Misses ${c.mandatoryMiss[0]}`}; the investor confirmed flexibility on a call.` : "";
+      const m: DrMatch = { id: `mx_${seeker.id}_${k}`, eventId: EV_CA3, seekerId: seeker.id, providerId: c.provider.id, origin: k === 2 && i % 7 === 0 ? "interest" : "search", met: c.met, missed: c.missed, exclusionHit: c.exclusionHit, decision: "Approved", note, by: reviewerOf(seeker), at, history: [{ at, by: reviewerOf(seeker), what: `Approved${note ? `: ${note}` : ""}` }] };
+      m.brief = { ...draftBrief({ ...dr, matches: [...matches, m] }, m), editedAt: at };
+      matches.push(m);
+    });
+    // one pair a reviewer turned down, with the reason on record
+    const no = list[3];
+    if (no && i % 4 === 0) matches.push({ id: `mx_${seeker.id}_r`, eventId: EV_CA3, seekerId: seeker.id, providerId: no.provider.id, origin: "search", met: no.met, missed: no.missed, decision: i % 8 === 0 ? "Deferred" : "Rejected", note: i % 8 === 0 ? "Revisit after the summit if the provider widens its countries." : "The investor's stage focus does not fit this raise.", by: reviewerOf(seeker), at, history: [{ at, by: reviewerOf(seeker), what: i % 8 === 0 ? "Deferred" : "Rejected" }] });
+  });
+
+  // introductions and the answers to them
+  let n = 0;
+  for (const m of matches) {
+    if (m.decision !== "Approved") continue;
+    n++;
+    const seeker = dr.apps.find((a) => a.id === m.seekerId)!;
+    const deck = seeker.documents.find((d) => d.kind === "Pitch deck");
+    const fin = seeker.documents.find((d) => d.kind === "Financial statements");
+    const items = ["teaser", "profile", ...(deck ? [deck.id] : []), ...(fin ? [fin.id] : [])];
+    if (n % 13 === 0) continue; // approved, brief written, not introduced yet
+    const pending = n % 17 === 0;
+    const sentAt = pending ? date("2027-03-13", 11, 0) : addMinutes(m.at, 60 * 24);
+    m.intro = { items, sentAt, by: m.by };
+    m.history.push({ at: sentAt, by: m.by, what: "Introduction sent" });
+    if (pending) continue;
+    if (n % 19 === 0) continue; // nobody answered: expired
+    const seekerAt = addMinutes(sentAt, 60 * 20);
+    const providerAt = addMinutes(sentAt, 60 * 40);
+    if (n % 11 === 0) {
+      m.intro.seeker = { response: "Accepted", at: seekerAt };
+      m.intro.provider = { response: "Declined", reason: "Outside our pipeline for this quarter.", at: providerAt };
+      continue;
+    }
+    if (n % 23 === 0) {
+      m.intro.seeker = { response: "Declined", reason: "Already in talks with this investor.", at: seekerAt };
+      continue;
+    }
+    m.intro.seeker = { response: "Accepted", at: seekerAt };
+    m.intro.provider = { response: "Accepted", at: providerAt };
+    const consents: DrConsent[] = [];
+    if (deck) consents.push({ id: `cs_${m.id}_d`, seekerId: m.seekerId, providerId: m.providerId, docId: deck.id, granted: true, at: seekerAt, version: 1 });
+    if (fin) consents.push({ id: `cs_${m.id}_f`, seekerId: m.seekerId, providerId: m.providerId, docId: fin.id, granted: n % 3 !== 0, at: seekerAt, version: 1 });
+    dr.consents.push(...consents);
+  }
+  dr.matches = matches;
+
+  // a provider found two teasers in the directory on its own
+  const fp = dr.apps.find((a) => a.type === "provider" && a.verification?.state === "Verified")!;
+  for (const s of seekers.filter((x) => !matches.some((m) => m.seekerId === x.id && m.providerId === fp.id)).slice(0, 2)) {
+    matches.push({ id: `mx_${s.id}_int`, eventId: EV_CA3, seekerId: s.id, providerId: fp.id, origin: "interest", met: [], missed: [], decision: "Suggested", note: "", by: "applicant", at: date("2027-03-15", 18, 30), history: [{ at: date("2027-03-15", 18, 30), by: "applicant", what: `${fp.org.name} expressed interest` }] });
+  }
+
+  // meetings: booked through the slot rules, with the clock wound back to the booking window
+  const ctx = { dealRoom: { ...dr, clock: "2027-02-22 09:00", meetings: [] as DrMeeting[] }, events: [ca3], rooms: ca3Rooms, delegates, sessions: ca3Sessions };
+  const times = slotTimes(cfg);
+  const dayOrder = ["2027-03-15", "2027-03-16", "2027-03-16", "2027-03-17", "2027-03-16", "2027-03-18", "2027-03-15"];
+  const accepted = matches.filter((m) => m.intro?.seeker?.response === "Accepted" && m.intro?.provider?.response === "Accepted");
+  accepted.forEach((m, i) => {
+    if (i % 13 === 7) return; // accepted lately and still waiting for a slot: the "ready to schedule" list
+    const days = [dayOrder[i % dayOrder.length], ...["2027-03-15", "2027-03-16", "2027-03-17", "2027-03-18"]];
+    for (const day of days) {
+      for (const t of times.slice((i * 3) % 7)) {
+        for (const [roomId, rc] of Object.entries(cfg.rooms)) {
+          for (let table = 1; table <= rc.tables; table++) {
+            const req = { matchId: m.id, roomId, table, start: `${day} ${t}`, flagged: dr.apps.find((a) => a.id === m.providerId)?.providerKind === "DFI" };
+            const p = slotProblems(ctx, req);
+            if (p.clashes.length || p.caps.length) continue;
+            const proposedAt = date("2027-02-2" + (2 + (i % 6)), 10, 0);
+            ctx.dealRoom.meetings.push({ id: `mt_${m.id}`, eventId: EV_CA3, matchId: m.id, roomId, table, start: req.start, end: p.end, flagged: req.flagged, status: "Confirmed", proposedAt, confirm: { seeker: addMinutes(proposedAt, 300), provider: addMinutes(proposedAt, 900) }, arrivals: {}, history: [{ at: proposedAt, by: "st_ops1", what: `Proposed ${req.start}` }, { at: addMinutes(proposedAt, 900), by: "provider", what: "Confirmed by both" }] });
+            return;
+          }
+        }
+      }
+    }
+  });
+  const meetings = ctx.dealRoom.meetings;
+
+  // settle each meeting against the clock: 16 March, 10:40
+  const opps: DrOpportunity[] = [];
+  const access: DrAccess[] = [];
+  meetings.forEach((mt, i) => {
+    const match = matches.find((x) => x.id === mt.matchId)!;
+    const seeker = dr.apps.find((a) => a.id === match.seekerId)!;
+    const provider = dr.apps.find((a) => a.id === match.providerId)!;
+    for (const a of [seeker, provider]) {
+      const d = delegates.find((x) => x.id === a.delegateId);
+      if (d && mt.start.slice(0, 10) <= CLOCK.slice(0, 10) && !d.accredited) {
+        d.accredited = true;
+        d.status = "Checked in";
+        d.checkIns = [{ day: mt.start.slice(0, 10) === "2027-03-15" ? 1 : 2, at: "08:40" }];
+      }
+    }
+    access.push({ id: `ac_${mt.id}`, seekerId: seeker.id, item: "profile", viewer: provider.id, action: "view", at: addMinutes(match.intro!.provider!.at, 30) });
+    const deck = seeker.documents.find((d) => d.kind === "Pitch deck");
+    if (deck && i % 2 === 0) access.push({ id: `ac_${mt.id}_d`, seekerId: seeker.id, item: deck.id, viewer: provider.id, action: i % 4 === 0 ? "download" : "view", at: addMinutes(match.intro!.provider!.at, 45) });
+    const arrive = addMinutes(mt.start, -15);
+    if (mt.end <= CLOCK) {
+      if (i % 12 === 5) {
+        mt.status = "No-show";
+        mt.noShow = "provider";
+        mt.arrivals = { seeker: arrive };
+        mt.history.push({ at: addMinutes(mt.start, 11), by: "st_ops1", what: "No-show: provider" });
+        return;
+      }
+      mt.status = "Held";
+      mt.arrivals = { seeker: arrive, provider: addMinutes(arrive, 5) };
+      const cat = (["Positive", "Follow-up needed", "Follow-up needed", "Positive", "Not a fit"] as const)[i % 5];
+      const owner = seeker.assignee ?? "st_rev1";
+      const due = addMinutes(mt.start, 60 * 24 * (7 + (i % 10))).slice(0, 10);
+      const next = cat === "Not a fit" ? undefined : (["Send the data room link", "Share audited accounts", "Schedule a site visit", "Send a term sheet outline"] as const)[i % 4];
+      mt.outcome = { category: cat, nextAction: next, owner: next ? owner : undefined, due: next ? due : undefined, notes: cat === "Positive" ? "Strong fit; investor asked for a follow-up within two weeks." : cat === "Not a fit" ? "Stage too early for this investor." : "Interested if the raise is split into two tranches.", sensitive: i % 9 === 0, by: "st_ops1", at: addMinutes(mt.end, 3), clientId: `cl_${mt.id}` };
+      mt.history.push({ at: addMinutes(mt.end, 3), by: "st_ops1", what: `Held: ${cat}` });
+      if (next) {
+        opps.push({ id: `op_${mt.id}`, eventId: EV_CA3, meetingId: mt.id, matchId: mt.matchId, owner, stage: "Follow-up", stageDates: { "Follow-up": addMinutes(mt.end, 3) }, nextAction: next, due, outcomes: cat === "Positive" ? [{ id: `oo_${mt.id}`, kind: "Interest", date: mt.start.slice(0, 10), evidence: "Meeting outcome", by: "st_ops1", at: addMinutes(mt.end, 3) }] : [], updates: [], requests: [], reviews: [], history: [{ at: addMinutes(mt.end, 3), by: "st_ops1", what: "Opened from the meeting outcome" }] });
+      }
+      return;
+    }
+    if (mt.start <= CLOCK) {
+      mt.status = "In progress";
+      mt.arrivals = { seeker: arrive, provider: arrive };
+      mt.history.push({ at: mt.start, by: "door", what: "In progress" });
+      return;
+    }
+    if (mt.start.slice(0, 10) === CLOCK.slice(0, 10)) {
+      // later today: most have checked in; a few have not, and the board will flag them as the slot nears
+      if (i % 4 !== 1) mt.arrivals = { seeker: date("2027-03-16", 8, 50), provider: i % 4 === 2 ? undefined : date("2027-03-16", 9, 5) };
+      return;
+    }
+    // later in the week: two still to confirm, one asked to move
+    if (i % 15 === 3) {
+      mt.status = "Proposed";
+      mt.proposedAt = date("2027-03-14", 16, 0);
+      mt.confirm = { seeker: date("2027-03-15", 9, 0) };
+      mt.history = [{ at: mt.proposedAt, by: "st_ops2", what: `Proposed ${mt.start}` }];
+    } else if (i % 15 === 8) {
+      mt.status = "Change requested";
+      mt.change = { by: "provider", reason: "Our partner lands at noon; any slot after 14:00.", at: date("2027-03-15", 20, 15) };
+      mt.history.push({ at: mt.change.at, by: "provider", what: `Asked to move: ${mt.change.reason}` });
+    }
+  });
+  dr.meetings = meetings;
+  dr.opportunities = opps;
+  dr.access = access.sort((a, b) => b.at.localeCompare(a.at));
+
+  // Device B lost its connection on day 1 and still holds two records: one already synced, one recorded differently
+  const held = meetings.filter((m) => m.status === "Held" && m.outcome);
+  const queue: DrQueued[] = [];
+  if (held[0]?.outcome) queue.push({ device: "Device B, Deal floor A", meetingId: held[0].id, attendance: "Held", outcome: { ...held[0].outcome } });
+  if (held[1]?.outcome) queue.push({ device: "Device B, Deal floor A", meetingId: held[1].id, attendance: "Held", outcome: { ...held[1].outcome, category: "Positive", notes: "Captured on the tablet: wants a site visit in April.", clientId: `cl_devb_${held[1].id}` } });
+  dr.queue = queue;
+  dr.incidents = [{ id: "inc_1", startedAt: "2027-03-15 14:05", endedAt: "2027-03-15 14:32", cause: "Venue Wi-Fi dropped on the Deal floor", synced: 6, duplicates: 1, conflicts: 0 }];
+  dr.liveWindow = { declaredAt: "2027-03-14 18:00", by: "admin", rota: ["Kevin (Algotech), on call", "Faith (Algotech), back-up"] };
+  dr.outbox.unshift({ id: "msg_s5", eventId: EV_CA3, at: "2027-03-15 19:00", to: "st_lead", channel: "Email", subject: "Daily Deal Room report, Mon 15 Mar", link: "/dealroom/reports?day=2027-03-15", status: "Delivered" });
 }

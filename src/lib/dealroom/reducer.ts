@@ -31,8 +31,11 @@ import type {
   Layer,
   Readiness,
 } from "./types";
+import { exception, note, patchApp, portal, send, uid, withDr } from "./util";
+import { drMeetReducer, type DrMeetAction } from "./meetings";
 
 export type DrAction =
+  | DrMeetAction
   | { type: "dr/clock"; clock: string }
   | { type: "dr/actAs"; staffId: string }
   | { type: "dr/config"; eventId: string; patch: Partial<DrConfig>; note: string }
@@ -69,29 +72,6 @@ export type DrAction =
   | { type: "dr/grantSupport"; appId: string; to: string; reason: string; hours: number }
   | { type: "dr/supportView"; appId: string; viewer: string }
   | { type: "dr/exception"; kind: DrException["kind"]; reason: string; ref: string };
-
-/* ---------- helpers ---------- */
-
-const uid = (p: string, at: string) => `${p}_${at.replace(/\D/g, "").slice(-8)}${Math.floor(Math.random() * 1e4).toString(36)}`;
-
-function withDr(state: AppState, dr: DealRoomState): AppState {
-  return { ...state, dealRoom: dr };
-}
-
-function patchApp(dr: DealRoomState, id: string, fn: (a: DrApplication) => DrApplication): DealRoomState {
-  return { ...dr, apps: dr.apps.map((a) => (a.id === id ? fn(a) : a)) };
-}
-
-function note(a: DrApplication, by: string, what: string, at: string): DrApplication {
-  return { ...a, history: [...a.history, { at, by, what }] };
-}
-
-/** A message names the action and the date only, never private data, and links into the platform (PRD Notifications). */
-function send(dr: DealRoomState, eventId: string, to: string, subject: string, link: string, channel: "Email" | "SMS" | "Email and SMS" = "Email and SMS"): DealRoomState {
-  return { ...dr, outbox: [{ id: uid("msg", dr.clock) + dr.outbox.length, eventId, at: dr.clock, to, channel, subject, link, status: "Delivered" as const }, ...dr.outbox].slice(0, 400) };
-}
-
-const portal = (a: DrApplication) => `/dr/${a.id}`;
 
 /** An approved seeker or a verified provider becomes a platform delegate with a Deal Room badge. */
 function issueBadge(state: AppState, app: DrApplication): AppState {
@@ -133,10 +113,6 @@ function revokeBadge(state: AppState, app: DrApplication): AppState {
   return { ...state, delegates: state.delegates.map((d) => (d.id === app.delegateId ? { ...d, status: "Cancelled", cancelled: true } : d)) };
 }
 
-function exception(dr: DealRoomState, eventId: string, by: string, kind: DrException["kind"], reason: string, ref: string): DealRoomState {
-  return { ...dr, exceptions: [{ id: uid("ex", dr.clock) + dr.exceptions.length, eventId, at: dr.clock, by, kind, reason, ref }, ...dr.exceptions] };
-}
-
 const STAFF_ACTIONS = new Set([
   "dr/config", "dr/import", "dr/invite", "dr/assign", "dr/startReview", "dr/score", "dr/requestInfo", "dr/rfiExpiry", "dr/recommend", "dr/decide",
   "dr/confirmSecond", "dr/meetCondition", "dr/confirmDecisionMaker", "dr/readiness", "dr/approveTeaser", "dr/reReviewDone", "dr/checkKyc", "dr/sanctions",
@@ -158,9 +134,23 @@ export function drReducer(state: AppState, action: DrAction): AppState {
   const cfg = app ? dr.configs[app.eventId] : undefined;
 
   switch (action.type) {
-    case "dr/clock":
+    case "dr/clock": {
       // the clock only moves forward, so nothing recorded can predate it
-      return action.clock > dr.clock ? withDr(state, { ...dr, clock: action.clock }) : state;
+      if (action.clock <= dr.clock) return state;
+      let next = { ...dr, clock: action.clock };
+      // the daily summit report goes to the lead at 19:00 each evening of summit week (DL-9)
+      for (const c of Object.values(dr.configs)) {
+        const ev = state.events.find((e) => e.id === c.eventId);
+        if (!ev) continue;
+        for (let d = ev.startDate; d <= ev.endDate; d = new Date(new Date(d + "T12:00:00Z").getTime() + 86400000).toISOString().slice(0, 10)) {
+          const seven = `${d} 19:00`;
+          if (dr.clock < seven && action.clock >= seven) next = send(next, c.eventId, "st_lead", `Daily Deal Room report, ${new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}`, `/dealroom/reports?day=${d}`, "Email");
+        }
+      }
+      // tracking ends on the conversion end date: the Deal Room becomes read-only (DA-8)
+      for (const c of Object.values(dr.configs)) if (!next.archivedAt && action.clock.slice(0, 10) > c.rules.conversionEnd) next = { ...next, archivedAt: `${c.rules.conversionEnd} 23:59` };
+      return withDr(state, next);
+    }
 
     case "dr/actAs":
       return dr.staff.some((s) => s.id === action.staffId && s.active) ? withDr(state, { ...dr, actingStaffId: action.staffId }) : state;
@@ -527,7 +517,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
     }
 
     default:
-      return state;
+      return drMeetReducer(state, action as DrMeetAction);
   }
 }
 

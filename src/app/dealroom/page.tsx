@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Meter, PageHeader, Section, Stat } from "@/components/ui";
-import { FLAGS, funnel, medianDays, missionName, qualified, type FlagKey } from "@/lib/dealroom/logic";
+import { FLAGS, bothAccepted, funnel, medianDays, missionName, occupies, qualified, type FlagKey } from "@/lib/dealroom/logic";
 import { fmtStamp } from "@/lib/time";
 import { useDr } from "./bits";
 
@@ -16,8 +16,8 @@ export default function DealRoomDashboard() {
 
   const targets = [
     { label: "Qualified counterparties", value: f.qualified, target: 150, due: "2027-01-31", href: q("qualified"), sub: `${f.qualifiedSeekers} seekers approved, ${f.verified} providers verified` },
-    { label: "Deal Room Ready", value: f.ready, target: 60, due: "2027-02-20", href: q("ready"), sub: "Seekers ready; both-sides confirmation counts once matching opens" },
-    { label: "Booked meetings", value: dr.meetings.filter((m) => !["Cancelled", "Proposed"].includes(m.status)).length, target: 200, due: "2027-03-18", href: "/dealroom", sub: "Summit week, 15 to 18 March" },
+    { label: "Deal Room Ready, both sides", value: dr.matches.filter(bothAccepted).length, target: 60, due: "2027-02-20", href: "/dealroom/matching", sub: `${f.ready} seekers ready; pairs counted once both accept` },
+    { label: "Booked meetings", value: dr.meetings.filter((m) => occupies(m, cfg, now) || m.status === "Held").length, target: 200, due: "2027-03-18", href: "/dealroom/meetings", sub: `${dr.meetings.filter((m) => m.status === "Held").length} held so far, summit week 15 to 18 March` },
   ];
 
   const attention = (Object.keys(FLAGS) as FlagKey[])
