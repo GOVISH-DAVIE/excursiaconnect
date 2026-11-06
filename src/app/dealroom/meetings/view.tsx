@@ -107,6 +107,9 @@ function Ready() {
   );
 }
 
+/** Short names for the status groups the reports link with. */
+const STATUS_NAMES: Record<string, string> = { "Confirmed,In progress,Proposed,Change requested": "Booked, not yet held", "Confirmed,In progress": "Confirmed" };
+
 /** The day grid. A drill-down can open it on a day, on one meeting, or with one participant's meetings or one status picked out. */
 function Grid(props: { day?: string; meeting?: string; who?: string; status?: string }) {
   const { state } = useStore();
@@ -156,7 +159,7 @@ function Grid(props: { day?: string; meeting?: string; who?: string; status?: st
           )}
           {statuses.length > 0 && (
             <span className="pill bg-paper-200 text-ink">
-              {statuses.join(" or ")}
+              {STATUS_NAMES[status] ?? statuses.join(" or ")}
               <button className="ml-1 text-slate hover:text-ink" aria-label="Clear the status" onClick={() => setStatus("")}>
                 ×
               </button>

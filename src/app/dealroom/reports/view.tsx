@@ -3,15 +3,16 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
-import { PageHeader, Section, Tabs } from "@/components/ui";
+import { PageHeader, Section, Stat, Tabs } from "@/components/ui";
 import { useStore } from "@/lib/store";
-import { DR_ZONE, ticketBand, compact, conversionValues, decisionOf, drCan, matchStage, medianDays, missionName, occupies, oppOpen, oppOverdue, oppParties, qualified, staffName, type MatchStage } from "@/lib/dealroom/logic";
+import { DR_ZONE, bothAccepted, funnel, ticketBand, compact, conversionValues, decisionOf, drCan, matchStage, medianDays, missionName, occupies, oppOpen, oppOverdue, oppParties, qualified, staffName, type MatchStage } from "@/lib/dealroom/logic";
 import type { DrApplication, DrMeeting, DrOpportunity } from "@/lib/dealroom/types";
 import { downloadCsv, row } from "@/lib/csv";
 import { addMinutes, fmtStamp } from "@/lib/time";
 import { Refusal, useDr } from "../bits";
+import { ChartCard, HBars, StackedColumns } from "./charts";
 
-const allTabs = ["Mobilisation", "Qualification", "Verification", "Matchmaking", "Meetings", "Daily", "Conversion"] as const;
+const allTabs = ["Overview", "Mobilisation", "Qualification", "Verification", "Matchmaking", "Meetings", "Daily", "Conversion"] as const;
 type Tab = (typeof allTabs)[number];
 
 /** PRD Reporting: one table per area, each broken down and exportable. Role limits apply (req. 5): reviewers see
@@ -22,7 +23,7 @@ export default function Reports() {
   const review = drCan(me, "review");
   const ops = drCan(me, "schedule");
   // conversion values are the lead's alone (PRD Reporting req. 5)
-  const tabs = allTabs.filter((t) => (t === "Conversion" ? drCan(me, "conversion") : ["Mobilisation", "Qualification", "Verification", "Matchmaking"].includes(t) ? review : ops || me?.role === "Lead"));
+  const tabs = allTabs.filter((t) => (t === "Overview" ? true : t === "Conversion" ? drCan(me, "conversion") : ["Mobilisation", "Qualification", "Verification", "Matchmaking"].includes(t) ? review : ops || me?.role === "Lead"));
   const [picked, setTab] = useState<Tab | null>(null);
   const asked = allTabs.find((t) => t === q.get("tab"));
   const tab = picked ?? (asked && tabs.includes(asked) ? asked : tabs[0]);
@@ -32,8 +33,9 @@ export default function Reports() {
 
   return (
     <>
-      <PageHeader title="Reports" kicker="Every table breaks down and downloads as CSV. What you see depends on your role." />
+      <PageHeader title="Reports" kicker="Graphs on the Overview; every bar, segment and count opens the records behind it. Tables break down and download as CSV. What you see depends on your role." />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
+      {tab === "Overview" && <Overview />}
       {tab === "Mobilisation" && <Mobilisation apps={apps} />}
       {tab === "Qualification" && <Qualification apps={apps} />}
       {tab === "Verification" && <VerificationReport apps={apps} />}
@@ -407,6 +409,89 @@ function Conversion() {
             { h: "Due", v: (o) => fmtStamp(o.due, false), csv: (o) => o.due },
           ]}
         />
+      </div>
+    </>
+  );
+}
+
+/** The graphs: each answers one question, each mark opens the records it counts, each card links its table. What a role sees follows PRD Reporting req. 5. */
+function Overview() {
+  const { dr, cfg, me, now, can, event } = useDr();
+  if (!cfg) return null;
+  const f = funnel(dr, cfg.eventId);
+  const days = Array.from({ length: event.days }, (_, i) => addMinutes(`${event.startDate} 00:00`, i * 1440).slice(0, 10));
+  const lead = can("conversion");
+  const opps = dr.opportunities.filter((o) => o.eventId === cfg.eventId && (lead || o.owner === me?.id));
+  const stages = STAGES.map((st) => ({ st, n: dr.matches.filter((m) => matchStage(m, cfg, now) === st).length }));
+  const usd = conversionValues(dr, dr.opportunities.filter((o) => o.eventId === cfg.eventId)).USD ?? { sought: 0, promised: 0, committed: 0, received: 0 };
+  const booked = (m: DrMeeting) => ["Confirmed", "In progress", "Proposed", "Change requested"].includes(m.status) && occupies(m, cfg, now);
+  return (
+    <>
+      <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat label="Qualified, of 150" value={f.qualified} href="/dealroom/applications?flag=qualified" />
+        <Stat label="Ready on both sides, of 60" value={dr.matches.filter(bothAccepted).length} href="/dealroom/matching?tab=By%20mission&mission=All&stage=Accepted" />
+        <Stat label="Meetings booked or held, of 200" value={dr.meetings.filter((m) => occupies(m, cfg, now) || m.status === "Held").length} href="/dealroom/meetings?tab=Schedule" />
+        <Stat label={lead ? "Opportunities open" : "Your opportunities open"} value={opps.filter(oppOpen).length} href="/dealroom/opportunities" />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        {can("review") && (
+          <ChartCard title="From lead to Deal Room Ready" sub="Applications at each step. Click a bar for the list." table={{ href: "/dealroom/reports?tab=Mobilisation", label: "As a table" }}>
+            <HBars
+              rows={[
+                { label: "Leads and invitations", value: f.leads, href: "/dealroom/applications?flag=leads" },
+                { label: "Started", value: f.started, href: "/dealroom/applications" },
+                { label: "Submitted", value: f.submitted, href: "/dealroom/applications?flag=submitted" },
+                { label: "Decided", value: f.decided, href: "/dealroom/applications?flag=decided" },
+                { label: "Qualified", value: f.qualified, href: "/dealroom/applications?flag=qualified" },
+                { label: "Deal Room Ready", value: f.ready, href: "/dealroom/applications?flag=ready" },
+              ]}
+            />
+          </ChartCard>
+        )}
+        {can("match") && (
+          <ChartCard title="Pairs by stage" sub="Every seeker and provider pair the team has looked at. Click a bar for the pairs." table={{ href: "/dealroom/reports?tab=Matchmaking", label: "As a table" }}>
+            <HBars rows={stages.map(({ st, n }) => ({ label: st, value: n, href: `/dealroom/matching?${qs({ tab: "By mission", mission: "All", stage: st })}` }))} />
+          </ChartCard>
+        )}
+        {(can("schedule") || me?.role === "Lead") && (
+          <ChartCard title="Meetings by summit day" sub="Click a segment for that day's meetings on the schedule." table={{ href: "/dealroom/reports?tab=Meetings", label: "As a table" }}>
+            <StackedColumns
+              series={[
+                { key: "Held", label: "Held" },
+                { key: "Booked", label: "Booked, not yet held" },
+                { key: "No-show", label: "No-show" },
+              ]}
+              columns={days.map((d) => {
+                const ms = dr.meetings.filter((m) => m.start.slice(0, 10) === d);
+                return {
+                  label: fmtStamp(d, false),
+                  segments: [
+                    { key: "Held", value: ms.filter((m) => m.status === "Held").length, href: `/dealroom/meetings?${qs({ tab: "Schedule", day: d, status: "Held" })}` },
+                    { key: "Booked", value: ms.filter(booked).length, href: `/dealroom/meetings?${qs({ tab: "Schedule", day: d, status: "Confirmed,In progress,Proposed,Change requested" })}` },
+                    { key: "No-show", value: ms.filter((m) => m.status === "No-show").length, href: `/dealroom/meetings?${qs({ tab: "Schedule", day: d, status: "No-show" })}` },
+                  ],
+                };
+              })}
+            />
+          </ChartCard>
+        )}
+        {(lead || me?.role === "Reviewer") && (
+          <ChartCard title={lead ? "Opportunities by stage" : "Your opportunities by stage"} sub="Click a bar for the opportunities." table={lead ? { href: "/dealroom/reports?tab=Conversion", label: "As a table" } : undefined}>
+            <HBars rows={(["Follow-up", "Diligence", "Negotiation", "Closed – won", "Closed – lost"] as const).map((st) => ({ label: st, value: opps.filter((o) => o.stage === st).length, href: `/dealroom/opportunities?${qs({ stage: st })}` }))} />
+          </ChartCard>
+        )}
+        {lead && (
+          <ChartCard title="Value at each stage of evidence" sub="US dollars. Counted where the evidence is, never added across stages. Click a bar for the opportunities." table={{ href: "/dealroom/reports?tab=Conversion", label: "As a table" }}>
+            <HBars
+              rows={[
+                { label: "Sought", value: usd.sought, shown: compact(usd.sought), href: "/dealroom/opportunities" },
+                { label: "Promised", value: usd.promised, shown: compact(usd.promised), href: "/dealroom/opportunities?has=Promise" },
+                { label: "Committed", value: usd.committed, shown: compact(usd.committed), href: "/dealroom/opportunities?has=Commitment" },
+                { label: "Received", value: usd.received, shown: compact(usd.received), href: `/dealroom/opportunities?has=${encodeURIComponent("Funds received")}` },
+              ]}
+            />
+          </ChartCard>
+        )}
       </div>
     </>
   );

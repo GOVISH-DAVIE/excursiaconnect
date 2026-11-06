@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useReducer, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from "react";
 import { seed } from "./seed";
 import { overlaps } from "./time";
 import { drReducer, type DrAction } from "./dealroom/reducer";
@@ -409,9 +409,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setHydrated();
   }, []);
 
+  // another tab saved: take its state, so this tab never writes an older copy over newer work.
+  // The save that this hydrate triggers is skipped, or two tabs would echo the same state back and forth.
+  const fromOtherTab = useRef(false);
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY) return;
+      try {
+        if (!e.newValue) {
+          fromOtherTab.current = true;
+          dispatch({ type: "reset" });
+          return;
+        }
+        const saved = JSON.parse(e.newValue) as AppState & { __v?: number };
+        if (saved.__v !== SEED_VERSION) return;
+        fromOtherTab.current = true;
+        dispatch({ type: "hydrate", state: saved });
+      } catch {}
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   // saving waits for typing to settle: the whole state is written each time
   useEffect(() => {
     if (!hydrated) return;
+    if (fromOtherTab.current) {
+      fromOtherTab.current = false;
+      return;
+    }
     const t = setTimeout(() => {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, __v: SEED_VERSION }));

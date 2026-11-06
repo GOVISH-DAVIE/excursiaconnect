@@ -39,14 +39,14 @@ export function HBars({ rows }: { rows: BarRow[] }) {
       {rows.map((r) => {
         const body = (
           <>
-            <span className="truncate text-[13px] text-slate group-hover:text-ink">{r.label}</span>
+            <span className="text-[13px] leading-tight text-slate group-hover:text-ink">{r.label}</span>
             <span className="relative h-5">
               <span className="absolute inset-y-0 left-0 rounded-r-[4px] transition-opacity group-hover:opacity-80 group-focus-visible:opacity-80" style={{ width: `${(r.value / max) * 100}%`, minWidth: r.value ? 2 : 0, background: SERIES[0], maxHeight: 24 }} />
             </span>
             <span className="num text-right text-[13px] font-medium">{r.shown ?? r.value.toLocaleString("en")}</span>
           </>
         );
-        const cls = "group grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_minmax(3.5rem,auto)] items-center gap-3 rounded-md px-1 py-1";
+        const cls = "group grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_minmax(3rem,auto)] sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)_minmax(3.5rem,auto)] items-center gap-3 rounded-md px-1 py-1";
         return (
           <li key={r.label}>
             {r.href && r.value > 0 ? (
@@ -137,8 +137,10 @@ export function StackedColumns({ series, columns, height = 180 }: { series: { ke
           <span />
           <div className="mt-1.5 flex justify-around text-[12px] text-slate">
             {columns.map((c) => (
-              <span key={c.label} className="flex w-6 justify-center whitespace-nowrap">
-                {c.label}
+              <span key={c.label} className="flex w-6 flex-col items-center whitespace-nowrap leading-tight">
+                {/* "Mon 15 Mar" on two lines, so four days fit a phone */}
+                <span>{c.label.split(" ")[0]}</span>
+                <span>{c.label.split(" ").slice(1).join(" ")}</span>
               </span>
             ))}
           </div>
