@@ -48,6 +48,8 @@ export function TierEditor({ eventId, tier, onClose }: { eventId: string; tier?:
   const [t, setT] = useState<Tier>(tier ?? { id: uid("t"), eventId, name: "", price: 0, currency: "KES", cap: 100, sold: 0, visibility: "public", approval: "auto", entitlements: ["all-days", ...zones.filter((z) => z.id !== "z_vip").map((z) => z.id)], description: "" });
   const toggle = (e: string) => setT({ ...t, entitlements: t.entitlements.includes(e) ? t.entitlements.filter((x) => x !== e) : [...t.entitlements, e] });
   const moneyChange = !!tier && event.state === "Live" && (tier.price !== t.price || tier.currency !== t.currency);
+  const minCap = Math.max(1, tier?.sold ?? 0);
+  const bad = t.cap < minCap ? `Capacity must be at least ${minCap}` : t.saleFrom && t.saleTo && t.saleTo < t.saleFrom ? "The sale must end after it starts" : undefined;
 
   return (
     <Section title={tier ? `Edit ${tier.name}` : "New ticket tier"} className="mb-4">
@@ -55,7 +57,7 @@ export function TierEditor({ eventId, tier, onClose }: { eventId: string; tier?:
         className="grid gap-4 sm:grid-cols-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!t.name) return;
+          if (!t.name || bad) return;
           dispatch({ type: "upsertTier", tier: t });
           onClose();
         }}
@@ -72,9 +74,10 @@ export function TierEditor({ eventId, tier, onClose }: { eventId: string; tier?:
         <F label="Currency">
           <select className="input" value={t.currency} onChange={(e) => setT({ ...t, currency: e.target.value as Tier["currency"] })}><option>KES</option><option>USD</option></select>
         </F>
-        <F label="Capacity" help={tier ? `${tier.sold} sold so far` : undefined}><input type="number" min={tier?.sold ?? 0} className="input" value={t.cap} onChange={(e) => setT({ ...t, cap: Number(e.target.value) })} /></F>
+        <F label="Capacity" help={tier ? `${tier.sold} sold so far` : undefined}><input type="number" min={minCap} required className="input" value={t.cap} onChange={(e) => setT({ ...t, cap: Number(e.target.value) })} /></F>
         <F label="On sale from" help="Empty: now"><input type="date" className="input" value={t.saleFrom ?? ""} onChange={(e) => setT({ ...t, saleFrom: e.target.value || undefined })} /></F>
-        <F label="On sale until" help="Empty: the first day of the event"><input type="date" className="input" value={t.saleTo ?? ""} onChange={(e) => setT({ ...t, saleTo: e.target.value || undefined })} /></F>
+        <F label="On sale until" help="Empty: the first day of the event"><input type="date" min={t.saleFrom} className="input" value={t.saleTo ?? ""} onChange={(e) => setT({ ...t, saleTo: e.target.value || undefined })} /></F>
+        {bad && <p className="sm:col-span-3 text-[13px] text-bad">{bad}</p>}
         <F label="Confirmation">
           <select className="input" value={t.approval} onChange={(e) => setT({ ...t, approval: e.target.value as Tier["approval"] })}>
             <option value="auto">Automatic on payment</option>
@@ -230,20 +233,23 @@ export function ZoneEditor({ eventId, zone, onClose }: { eventId: string; zone?:
   const { state, dispatch } = useStore();
   const [z, setZ] = useState<Zone>(zone ?? { id: uid("z"), eventId, name: "", capacity: 100, occupancy: 0 });
   const hasRooms = state.rooms.some((r) => r.zoneId === z.id);
+  const inside = zone?.occupancy ?? 0;
+  const bad = z.capacity < Math.max(1, inside) ? `${inside} people are inside now; capacity cannot go below that` : z.window && !/^\d{2}:\d{2}[–-]\d{2}:\d{2}$/.test(z.window) ? "Window as HH:MM–HH:MM, for example 12:30–14:00" : undefined;
   return (
     <Section title={zone ? `Edit ${zone.name}` : "New zone"} className="mb-4">
       <form
         className="grid gap-4 sm:grid-cols-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!z.name) return;
+          if (!z.name || bad) return;
           dispatch({ type: "upsertZone", zone: z });
           onClose();
         }}
       >
         <F label="Name" span={2}><input className="input" required value={z.name} onChange={(e) => setZ({ ...z, name: e.target.value })} placeholder="Exhibition" /></F>
-        <F label="Capacity" help="Scanners warn at 90% and stop at 100% unless overridden"><input type="number" min={1} className="input" value={z.capacity} onChange={(e) => setZ({ ...z, capacity: Number(e.target.value) })} /></F>
+        <F label="Capacity" help={inside ? `${inside} inside now. Scanners warn at 90% and stop at 100%` : "Scanners warn at 90% and stop at 100% unless overridden"}><input type="number" min={Math.max(1, inside)} className="input" value={z.capacity} onChange={(e) => setZ({ ...z, capacity: Number(e.target.value) })} /></F>
         <F label="Opening window" span={2} help="Empty: all day. The door refuses outside it, as 12:30–14:00 for lunch."><input className="input" value={z.window ?? ""} onChange={(e) => setZ({ ...z, window: e.target.value || undefined })} placeholder="12:30–14:00" /></F>
+        {bad && <p className="sm:col-span-3 text-[13px] text-bad">{bad}</p>}
         <p className="sm:col-span-3 text-[13px] text-slate">Which tickets may enter is set on each tier&apos;s entitlements; a delegate can also be granted this zone by hand on their record.</p>
         <Foot onClose={onClose} save={zone ? "Save zone" : "Add zone"} onDelete={zone ? () => { dispatch({ type: "removeZone", zoneId: zone.id }); onClose(); } : undefined} deleteLabel="Remove zone" deleteBlocked={hasRooms ? "Remove its rooms first" : zone?.occupancy ? "People are inside" : undefined} />
       </form>
@@ -255,14 +261,17 @@ export function RoomEditor({ eventId, room, onClose }: { eventId: string; room?:
   const { state, dispatch } = useStore();
   const zones = state.zones.filter((z) => z.eventId === eventId);
   const [r, setR] = useState<Room>(room ?? { id: uid("r"), zoneId: zones.find((z) => z.id === "z_breakout")?.id ?? zones[0]?.id ?? "", name: "", capacity: 40 });
-  const inUse = state.sessions.filter((s) => s.roomId === r.id).length;
+  const using = state.sessions.filter((s) => s.roomId === r.id);
+  const inUse = using.length;
+  const biggest = using.reduce((m, s) => Math.max(m, s.capacity ?? 0, s.enrolled), 0);
+  const bad = biggest && r.capacity < biggest ? `Sessions in this room already offer ${biggest} seats; cut their seats first` : undefined;
   return (
     <Section title={room ? `Edit ${room.name}` : "New room"} className="mb-4">
       <form
         className="grid gap-4 sm:grid-cols-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!r.name) return;
+          if (!r.name || bad) return;
           dispatch({ type: "upsertRoom", room: r });
           onClose();
         }}
@@ -271,7 +280,8 @@ export function RoomEditor({ eventId, room, onClose }: { eventId: string; room?:
         <F label="Inside zone">
           <select className="input" value={r.zoneId} onChange={(e) => setR({ ...r, zoneId: e.target.value })}>{zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}</select>
         </F>
-        <F label="Seats"><input type="number" min={1} className="input" value={r.capacity} onChange={(e) => setR({ ...r, capacity: Number(e.target.value) })} /></F>
+        <F label="Seats" help={biggest ? `Sessions here offer up to ${biggest}` : undefined}><input type="number" min={Math.max(1, biggest)} className="input" value={r.capacity} onChange={(e) => setR({ ...r, capacity: Number(e.target.value) })} /></F>
+        {bad && <p className="sm:col-span-3 text-[13px] text-bad">{bad}</p>}
         <Foot onClose={onClose} save={room ? "Save room" : "Add room"} onDelete={room ? () => { dispatch({ type: "removeRoom", roomId: room.id }); onClose(); } : undefined} deleteLabel="Remove room" deleteBlocked={inUse ? `${inUse} session${inUse > 1 ? "s" : ""} use this room` : undefined} />
       </form>
     </Section>

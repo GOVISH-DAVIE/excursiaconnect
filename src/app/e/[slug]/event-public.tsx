@@ -84,7 +84,7 @@ export function EventPublic({ slug }: { slug: string }) {
     const s = sessions.find((x) => x.speakers.includes(name))!;
     const p = state.speakerProfiles.find((x) => x.eventId === event.id && x.name === name);
     const d = state.delegates.find((x) => x.eventId === event.id && x.name === name && x.status !== "Cancelled");
-    return { name, title: s.title, when: `Day ${s.day}, ${s.start}, ${whereIs(s, rooms)}`, photo: p?.photo, who: [p?.jobTitle, p?.organisation].filter(Boolean).join(", "), delegateId: d?.id, links: p?.links };
+    return { name, title: s.title, when: `Day ${s.day}, ${s.start}, ${whereIs(s, rooms)}`, photo: p?.photo, who: [p?.jobTitle, p?.organisation].filter(Boolean).join(", "), delegateId: d?.id, bookable: !!d?.bookable && !!d?.slots?.length, links: p?.links };
   });
   // meetings and messages happen from a delegate's badge; the prototype has no sign-in, so the demo badge stands in
   const badge = `/badge/${state.currentDelegateId ?? "d_demo"}`;
@@ -134,7 +134,7 @@ export function EventPublic({ slug }: { slug: string }) {
     </Link>
   ) : (
     <span className="pill" style={{ background: "var(--surface)", color: "var(--muted)" }}>
-      Registration opens soon
+      {event.state === "Suspended" ? "Registration paused" : event.state === "Closed" ? "This event has ended" : "Registration opens soon"}
     </span>
   );
 
@@ -382,14 +382,20 @@ export function EventPublic({ slug }: { slug: string }) {
                     <p>{sp.title}</p>
                     <p className="person__when">{sp.when}</p>
                     <div className="person__actions">
-                      <a href={`${badge}?tab=People&q=${encodeURIComponent(sp.name)}`}>
-                        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2" /><path d="M2 7h12M5.5 1.5v3M10.5 1.5v3" /></svg>
-                        Book a meeting
-                      </a>
-                      <a href={sp.delegateId ? `${badge}?tab=Messages&with=${sp.delegateId}` : `${badge}?tab=People&q=${encodeURIComponent(sp.name)}`}>
-                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6a1.5 1.5 0 0 1-1.5 1.5H6l-3.5 3v-3A1.5 1.5 0 0 1 2 9.5z" /></svg>
-                        Message
-                      </a>
+                      {/* meetings and messages need the speaker on the delegate list; a speaker who is not there, or not taking meetings, gets no dead link */}
+                      {sp.delegateId && sp.bookable && (
+                        <a href={`${badge}?tab=People&q=${encodeURIComponent(sp.name)}`}>
+                          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2" /><path d="M2 7h12M5.5 1.5v3M10.5 1.5v3" /></svg>
+                          Book a meeting
+                        </a>
+                      )}
+                      {sp.delegateId && (
+                        <a href={`${badge}?tab=Messages&with=${sp.delegateId}`}>
+                          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6a1.5 1.5 0 0 1-1.5 1.5H6l-3.5 3v-3A1.5 1.5 0 0 1 2 9.5z" /></svg>
+                          Message
+                        </a>
+                      )}
+                      {!sp.delegateId && <span className="person__note">Not taking meetings</span>}
                       {SOCIAL_KEYS.filter((k) => sp.links?.[k.key]).map((k) => (
                         <a key={k.key} href={sp.links![k.key]} target="_blank" rel="noreferrer">
                           {k.label}
@@ -653,7 +659,7 @@ export function EventPublic({ slug }: { slug: string }) {
               </Link>
             ) : (
               <span className="pill" style={{ background: "var(--surface)", color: "var(--muted)" }}>
-                Registration opens soon
+                {event.state === "Suspended" ? "Registration paused" : event.state === "Closed" ? "This event has ended" : "Registration opens soon"}
               </span>
             )}
           </div>

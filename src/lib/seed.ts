@@ -94,6 +94,7 @@ const countries = ["Kenya", "Kenya", "Kenya", "Kenya", "Uganda", "Tanzania", "Rw
 const cats: Delegate["category"][] = ["General Delegate", "General Delegate", "General Delegate", "General Delegate", "General Delegate", "Speaker", "Sponsor", "Exhibitor", "VIP", "Panelist"];
 const statuses: Delegate["status"][] = ["Confirmed", "Confirmed", "Confirmed", "Confirmed", "Confirmed", "Confirmed", "Checked in", "Checked in", "Awaiting payment", "Pending", "Cancelled"];
 
+const seatsTaken: Record<string, number> = {};
 for (let i = 0; i < 212; i++) {
   const first = pick(firstNames);
   const last = pick(lastNames);
@@ -102,7 +103,14 @@ for (let i = 0; i < 212; i++) {
   const status = pick(statuses);
   const id = `d_${(1000 + i).toString(36)}`;
   const day1 = status === "Checked in";
-  const enrolled = tier.entitlements.includes("breakouts") ? sessions.filter((s) => s.kind === "breakout" && rand() < 0.35).map((s) => s.id) : [];
+  // breakouts at random, never two in the same slot, never past the room's seats
+  const enrolled = tier.entitlements.includes("breakouts")
+    ? sessions
+        .filter((s) => s.kind === "breakout" && rand() < 0.35 && (seatsTaken[s.id] ?? 0) < (s.capacity ?? 0))
+        .reduce<Session[]>((acc, s) => (acc.some((o) => o.day === s.day && o.start < s.end && s.start < o.end) ? acc : [...acc, s]), [])
+        .slice(0, 3)
+        .map((s) => { seatsTaken[s.id] = (seatsTaken[s.id] ?? 0) + 1; return s.id; })
+    : [];
   delegates.push({
     id,
     eventId: EV,
@@ -154,6 +162,12 @@ orders.push(
   { id: "o_demo", eventId: EV, delegateId: "d_demo", tierId: "t_full", gross: 12000, discount: 0, gatewayFee: 180, commission: 600, net: 11400, method: "mpesa", reference: "RKJ3M8Q2TX", status: "paid", at: "2026-10-02" },
   { id: "o_vip", eventId: EV, delegateId: "d_vip", tierId: "t_vip", gross: 25000, discount: 0, gatewayFee: 375, commission: 1250, net: 23750, method: "card", reference: "PSK_7f21c0ab", status: "paid", at: "2026-09-28" },
 );
+// a session's counter is the roster: the number of delegates who hold a seat
+for (const s of sessions) {
+  if (s.kind !== "breakout") continue;
+  s.enrolled = delegates.filter((d) => d.sessions.includes(s.id)).length;
+  s.attended = Math.min(s.attended, s.enrolled);
+}
 delegates[2] = { ...delegates[2], id: "d_cancel", name: "Terry Maina", email: "terry.maina@mkopa.com", status: "Cancelled", badgeCode: "EXC-CANC-0007", cancelled: true };
 
 let inside = 0;

@@ -6,6 +6,7 @@ export type EventState =
   | "Approved"
   | "Live"
   | "Closed"
+  | "Suspended"
   | "Rejected";
 
 export type DelegateStatus =
@@ -37,6 +38,7 @@ export interface Organiser {
   payoutAccount: string;
   licenceFee: number;
   commissionPct: number;
+  dpaSigned?: { by: string; at: string }; // the data processing agreement, e-signed once (OR-1)
 }
 
 export interface Tier {
@@ -157,6 +159,7 @@ export interface EventRecord {
   endDate: string;
   days: number;
   state: EventState;
+  stateBefore?: EventState; // the state a live event left when it went back for review or was suspended; restored on approval
   reviewNote?: string;
   commissionPct: number;
   oneOffFee: number;

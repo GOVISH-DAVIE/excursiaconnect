@@ -17,7 +17,9 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
   const base = `/organiser/events/${event.id}`;
   const roster = state.delegates.filter((d) => d.sessions.includes(s.id));
   const scannedIn = roster.filter((d) => d.checkIns.length > 0);
-  const fill = s.capacity ? Math.round((s.enrolled / s.capacity) * 100) : 0;
+  // the counter is the roster: one number for the stat, the meter and the list
+  const enrolled = roster.length;
+  const fill = s.capacity ? Math.round((enrolled / s.capacity) * 100) : 0;
   const isBreakout = s.kind === "breakout";
 
   const controls = (
@@ -60,8 +62,8 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
       {isBreakout ? (
         <>
           <div className="grid gap-4 sm:grid-cols-4 mb-4">
-            <Stat label="Enrolled" value={s.enrolled} sub={`of ${s.capacity} seats, ${fill}% full`} tone={fill >= 100 ? "bad" : undefined} />
-            <Stat label={s.status === "ended" ? "Attended" : "Scanned in so far"} value={s.status === "ended" ? s.attended : scannedIn.length} sub={s.enrolled ? `${Math.round(((s.status === "ended" ? s.attended : scannedIn.length) / s.enrolled) * 100)}% of enrolled` : undefined} tone="ok" />
+            <Stat label="Enrolled" value={enrolled} sub={`of ${s.capacity} seats, ${fill}% full`} tone={fill >= 100 ? "bad" : undefined} />
+            <Stat label={s.status === "ended" ? "Attended" : "Scanned in so far"} value={s.status === "ended" ? s.attended : scannedIn.length} sub={enrolled ? `${Math.round(((s.status === "ended" ? s.attended : scannedIn.length) / enrolled) * 100)}% of enrolled` : undefined} tone="ok" />
             <Stat label="Rating" value={s.rating ? s.rating.toFixed(1) : "–"} sub={s.rating ? `${s.comments?.length ?? 0} comments` : "Opens when the session ends"} />
             <Stat label="Walk-ins" value={s.walkIns ? "Allowed" : "Enrolled only"} sub={<button className="text-coral font-medium" onClick={() => dispatch({ type: "updateSession", sessionId: s.id, patch: { walkIns: !s.walkIns } })}>{s.walkIns ? "Restrict to enrolled" : "Allow walk-ins"}</button>} />
           </div>
@@ -108,7 +110,7 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
               <Section title="Room">
                 <KV rows={[["Room", room?.name ?? "–"], ["Zone", zone?.name ?? "–"], ["Seats", String(room?.capacity ?? "–")], ["Session cap", String(s.capacity ?? "–")], ["Door rule", s.walkIns ? "Enrolled plus walk-ins" : "Enrolled delegates only"]]} />
                 <div className="mt-3">
-                  <Meter value={s.enrolled} max={s.capacity ?? 1} warnAt={0.8} badAt={1} />
+                  <Meter value={enrolled} max={s.capacity ?? 1} warnAt={0.8} badAt={1} />
                 </div>
               </Section>
               <Section title="Feedback" flush>

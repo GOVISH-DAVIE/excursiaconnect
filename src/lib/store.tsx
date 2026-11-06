@@ -6,6 +6,11 @@ import type { AppState, Capability, Category, Delegate, EventState, FormField, O
 
 const STORAGE_KEY = "excursiaconnect-proto-v1";
 
+/** Two sessions on the same day whose times cross. */
+export function overlaps(a: Pick<Session, "day" | "start" | "end">, b: Pick<Session, "day" | "start" | "end">) {
+  return a.day === b.day && a.start < b.end && b.start < a.end;
+}
+
 export type ScanVerdict = { verdict: "allow" | "deny"; reason?: string; delegate?: Delegate };
 
 type Action =
@@ -24,6 +29,7 @@ type Action =
   | { type: "updateDelegate"; delegateId: string; patch: Partial<Delegate> }
   | { type: "setCurrentDelegate"; delegateId: string }
   | { type: "verifyKyc"; organiserId: string }
+  | { type: "signDpa"; organiserId: string; by: string }
   | { type: "updateSession"; sessionId: string; patch: Partial<Session> }
   | { type: "grantZone"; delegateId: string; zoneId: string; on: boolean }
   | { type: "refund"; delegateId: string }
@@ -83,16 +89,30 @@ function reducer(state: AppState, action: Action): AppState {
       const tiers = state.tiers.map((t) => (t.id === action.delegate.tierId && action.delegate.status === "Confirmed" ? { ...t, sold: t.sold + 1 } : t));
       return { ...state, tiers, delegates: [action.delegate, ...state.delegates], orders: action.order ? [action.order, ...state.orders] : state.orders, currentDelegateId: action.delegate.id };
     }
-    case "approveRegistration":
-      return { ...state, delegates: state.delegates.map((d) => (d.id === action.delegateId ? { ...d, status: action.approve ? "Confirmed" : "Cancelled" } : d)) };
+    case "approveRegistration": {
+      // a paid tier still has to be paid: approval opens the order, Mark paid (or the gateway) confirms it
+      return {
+        ...state,
+        delegates: state.delegates.map((d) => {
+          if (d.id !== action.delegateId) return d;
+          if (!action.approve) return { ...d, status: "Cancelled" };
+          const paid = (state.tiers.find((t) => t.id === d.tierId)?.price ?? 0) > 0 && !state.orders.some((o) => o.delegateId === d.id && o.status === "paid");
+          return { ...d, status: paid ? "Awaiting payment" : "Confirmed" };
+        }),
+      };
+    }
     case "setEventState":
       return {
         ...state,
-        events: state.events.map((e) =>
-          e.id === action.eventId
-            ? { ...e, ...action.pricing, state: action.state, reviewNote: action.note ?? e.reviewNote, history: [...(e.history ?? []), { at: stamp(), what: action.state + (action.note ? `: ${action.note}` : "") }] }
-            : e,
-        ),
+        events: state.events.map((e) => {
+          if (e.id !== action.eventId) return e;
+          // a live event that goes back for review, or is suspended, remembers it was live; approval returns it there
+          const leavingLive = e.state === "Live" && (action.state === "Under review" || action.state === "Suspended");
+          const restore = action.state === "Approved" && e.stateBefore === "Live";
+          const next = restore ? "Live" : action.state;
+          const what = restore ? "Approved on the new terms; registration continues" : action.state + (action.note ? `: ${action.note}` : "");
+          return { ...e, ...action.pricing, state: next, stateBefore: leavingLive ? "Live" : restore || action.state === "Live" ? undefined : e.stateBefore, reviewNote: action.note ?? e.reviewNote, history: [...(e.history ?? []), { at: stamp(), what }] };
+        }),
       };
     case "addEvent":
       return { ...state, events: [...state.events, action.event] };
@@ -163,7 +183,7 @@ function reducer(state: AppState, action: Action): AppState {
       const moneyChanged = old && (old.price !== action.tier.price || old.currency !== action.tier.currency);
       const events = state.events.map((e) =>
         e.id === action.tier.eventId && e.state === "Live" && moneyChanged
-          ? { ...e, state: "Under review" as const, reviewNote: `${action.tier.name} price changed from ${old!.price} to ${action.tier.price}; registration continues on the approved terms`, history: [...(e.history ?? []), { at: stamp(), what: `Under review: ${action.tier.name} price changed to ${action.tier.currency} ${action.tier.price}` }] }
+          ? { ...e, state: "Under review" as const, stateBefore: "Live" as const, reviewNote: `${action.tier.name} price changed from ${old!.price} to ${action.tier.price}; registration continues on the approved terms`, history: [...(e.history ?? []), { at: stamp(), what: `Under review: ${action.tier.name} price changed to ${action.tier.currency} ${action.tier.price}` }] }
           : e,
       );
       return { ...state, tiers, events };
@@ -215,6 +235,12 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
     case "enrol": {
+      if (action.on) {
+        // one seat per slot: a session that overlaps something already enrolled on the same day is refused
+        const me = state.delegates.find((d) => d.id === action.delegateId);
+        const target = state.sessions.find((s) => s.id === action.sessionId);
+        if (me && target && me.sessions.some((id) => { const o = state.sessions.find((s) => s.id === id); return o && o.id !== target.id && overlaps(o, target); })) return state;
+      }
       return {
         ...state,
         sessions: state.sessions.map((s) => (s.id === action.sessionId ? { ...s, enrolled: Math.max(0, s.enrolled + (action.on ? 1 : -1)) } : s)),
@@ -246,6 +272,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "verifyKyc":
       return { ...state, organisers: state.organisers.map((o) => (o.id === action.organiserId ? { ...o, kycStatus: "Verified" } : o)) };
+    case "signDpa":
+      return { ...state, organisers: state.organisers.map((o) => (o.id === action.organiserId ? { ...o, dpaSigned: { by: action.by, at: stamp() } } : o)) };
     case "refund": {
       // the seat goes back to the tier, so the waitlist can take it (OS-7)
       const d = state.delegates.find((x) => x.id === action.delegateId);
@@ -353,6 +381,7 @@ export function money(n: number, currency = "KES") {
 export function scanVerdict(state: AppState, code: string, zoneId: string, direction: "in" | "out"): ScanVerdict {
   const delegate = state.delegates.find((d) => d.badgeCode.toLowerCase() === code.trim().toLowerCase() || d.id === code.trim());
   if (!delegate || delegate.cancelled || delegate.status === "Cancelled" || delegate.status === "Refunded") return { verdict: "deny", reason: "Invalid or cancelled badge", delegate };
+  if (state.events.find((e) => e.id === delegate.eventId)?.state === "Suspended") return { verdict: "deny", reason: "Event suspended by Algotech", delegate };
   if (delegate.status === "Pending" || delegate.status === "Awaiting payment") return { verdict: "deny", reason: "Registration not paid", delegate };
   if (delegate.status === "Waitlisted" || delegate.status === "Refund requested") return { verdict: "deny", reason: delegate.status === "Waitlisted" ? "On the waitlist, no seat yet" : "Refund requested", delegate };
   if (direction === "out") return { verdict: "allow", delegate };

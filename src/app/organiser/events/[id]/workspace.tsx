@@ -20,6 +20,7 @@ export function EventWorkspace({ id }: { id: string }) {
   const router = useRouter();
   const tab = (tabs.find((t) => t === search.get("tab")) ?? "Overview") as Tab;
   const [editor, setEditor] = useState<{ kind: "tier"; tier?: Tier } | { kind: "field"; field?: FormField } | { kind: "session"; session?: Session } | { kind: "zone"; zone?: Zone } | { kind: "room"; room?: Room } | { kind: "brand" } | null>(null);
+  const [closing, setClosing] = useState(false);
   const closeEditor = () => setEditor(null);
   const setTab = (t: Tab) => router.replace(`/organiser/events/${id}${t === "Overview" ? "" : `?tab=${encodeURIComponent(t)}`}`);
 
@@ -63,10 +64,17 @@ export function EventWorkspace({ id }: { id: string }) {
                 Open registration
               </button>
             )}
-            {event.state === "Live" && (
-              <button className="btn-secondary" onClick={() => { if (confirm("Close the event? Registration stops and the post-event report is issued.")) dispatch({ type: "closeEvent", eventId: id }); }}>
+            {event.state === "Live" && !closing && (
+              <button className="btn-secondary" onClick={() => setClosing(true)}>
                 Close event
               </button>
+            )}
+            {event.state === "Live" && closing && (
+              <span className="inline-flex items-center gap-2 rounded-md bg-warn-50 px-3 py-1.5 text-[13px] text-warn">
+                Registration stops and the report is issued.
+                <button className="btn-primary btn-sm" onClick={() => { dispatch({ type: "closeEvent", eventId: id }); setClosing(false); }}>Close it</button>
+                <button className="btn-quiet" onClick={() => setClosing(false)}>Keep open</button>
+              </span>
             )}
             {event.state === "Closed" && (
               <button className="btn-primary" onClick={() => exportWorkbook(event, delegates, orders, tiers)}>

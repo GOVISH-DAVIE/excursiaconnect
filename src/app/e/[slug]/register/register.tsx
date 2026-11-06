@@ -17,8 +17,9 @@ export function Register({ slug }: { slug: string }) {
   const search = useSearchParams();
   const event = state.events.find((e) => e.slug === slug)!;
   const organiser = state.organisers.find((o) => o.id === event.organiserId);
-  const tiers = state.tiers.filter((t) => t.eventId === event.id && t.visibility !== "hidden");
   const chosen = search.get("tier") ?? "";
+  // public tiers, plus a hidden or invite-only one when its link was followed
+  const tiers = state.tiers.filter((t) => t.eventId === event.id && (t.visibility === "public" || t.id === chosen));
   const [tierId, setTierId] = useState(chosen);
   const [step, setStep] = useState(() => (chosen && tiers.some((t) => t.id === chosen) ? 1 : 0));
   const [form, setForm] = useState({ name: "", email: "", phone: "+254", organisation: "", jobTitle: "", country: "Kenya", category: "General Delegate" as Category, dietary: "", promo: "" });
@@ -152,6 +153,8 @@ export function Register({ slug }: { slug: string }) {
             className="surface p-6 space-y-5"
             onSubmit={(e) => {
               e.preventDefault();
+              // M-Pesa settles in shillings only: a dollar ticket pays by card unless the buyer picks the bank
+              if (tier.currency === "USD" && method === "mpesa") setMethod("card");
               setStep(2);
             }}
           >
@@ -174,8 +177,8 @@ export function Register({ slug }: { slug: string }) {
                 <input id="email" required type="email" className="input" value={form.email} onChange={set("email")} />
               </div>
               <div>
-                <label className="label" htmlFor="phone">Phone (M-Pesa)</label>
-                <input id="phone" required className="input" value={form.phone} onChange={set("phone")} />
+                <label className="label" htmlFor="phone">{tier.currency === "KES" && tier.price > 0 ? "Phone (M-Pesa)" : "Phone"}</label>
+                <input id="phone" required type="tel" inputMode="tel" pattern="\+?[0-9 ]{9,15}" title="Digits only, with the country code: +254 7XX XXX XXX" className="input" value={form.phone} onChange={set("phone")} />
               </div>
               <div>
                 <label className="label" htmlFor="org">Organisation</label>
@@ -235,8 +238,8 @@ export function Register({ slug }: { slug: string }) {
                 </div>
                 {extras.map((x, i) => (
                   <div key={i} className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_180px_auto] items-center">
-                    <input className="input" placeholder="Full name" aria-label="Colleague name" value={x.name} onChange={(e) => setExtras(extras.map((y, j) => (j === i ? { ...y, name: e.target.value } : y)))} />
-                    <input className="input" type="email" placeholder="Email" aria-label="Colleague email" value={x.email} onChange={(e) => setExtras(extras.map((y, j) => (j === i ? { ...y, email: e.target.value } : y)))} />
+                    <input className="input" required placeholder="Full name" aria-label="Colleague name" value={x.name} onChange={(e) => setExtras(extras.map((y, j) => (j === i ? { ...y, name: e.target.value } : y)))} />
+                    <input className="input" required type="email" placeholder="Email" aria-label="Colleague email" value={x.email} onChange={(e) => setExtras(extras.map((y, j) => (j === i ? { ...y, email: e.target.value } : y)))} />
                     <select className="input" aria-label="Colleague ticket" value={x.tierId} onChange={(e) => setExtras(extras.map((y, j) => (j === i ? { ...y, tierId: e.target.value } : y)))}>
                       {tiers.filter((t) => t.approval !== "organiser" && t.cap - t.sold > 0).map((t) => (
                         <option key={t.id} value={t.id}>{t.name}, {t.price === 0 ? "free" : money(t.price, t.currency)}</option>
@@ -304,7 +307,7 @@ export function Register({ slug }: { slug: string }) {
                       ["bank", "Bank transfer", "Pro-forma invoice"],
                     ] as const
                   ).map(([m, label, sub]) => (
-                    <button key={m} type="button" disabled={tier.currency === "USD" && m === "mpesa"} aria-pressed={method === m} onClick={() => setMethod(m)} className="tile tile--choice disabled:opacity-40" style={{ padding: "var(--s-4)" }}>
+                    <button key={m} type="button" disabled={tier.currency === "USD" && m === "mpesa"} aria-pressed={method === m} aria-label={`Pay with ${label}`} onClick={() => setMethod(m)} className="tile tile--choice disabled:opacity-40" style={{ padding: "var(--s-4)" }}>
                       <span className="font-medium text-[15px]">{label}</span>
                       <span className="tile__meta">{sub}</span>
                     </button>
@@ -341,7 +344,7 @@ export function Register({ slug }: { slug: string }) {
               <button className="btn btn-secondary" onClick={() => setStep(1)} disabled={paying !== "idle"}>
                 Back
               </button>
-              <button className="btn btn-primary btn-cta" onClick={pay} disabled={paying !== "idle"}>
+              <button className="btn btn-primary btn-cta" onClick={pay} disabled={paying !== "idle" || (tier.currency === "USD" && method === "mpesa")}>
                 {payLabel}
               </button>
             </div>

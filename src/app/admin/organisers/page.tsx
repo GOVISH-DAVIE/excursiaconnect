@@ -49,7 +49,7 @@ export default function AdminOrganisers() {
             </div>
             <div>
               <label className="label" htmlFor="o-com">Commission %</label>
-              <input id="o-com" type="number" step="0.5" className="input" value={form.commissionPct} onChange={(e) => setForm({ ...form, commissionPct: Number(e.target.value) })} />
+              <input id="o-com" type="number" step="0.5" min={0} max={100} className="input" value={form.commissionPct} onChange={(e) => setForm({ ...form, commissionPct: Math.min(100, Math.max(0, Number(e.target.value))) })} />
             </div>
             <div className="sm:col-span-6 flex justify-end gap-2">
               <button type="button" className="btn-secondary" onClick={() => setAdding(false)}>Cancel</button>

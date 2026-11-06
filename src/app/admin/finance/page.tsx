@@ -14,6 +14,7 @@ export default function AdminFinance() {
   const open = state.exceptions.filter((x) => !x.resolved);
   const [resolving, setResolving] = useState<string | null>(null);
   const [how, setHow] = useState("Ledger corrected");
+  const [confirmRun, setConfirmRun] = useState(false);
 
   const run = state.organisers.map((o) => {
     const scheduled = payoutsFor(state, o.id).find((p) => p.status === "Scheduled");
@@ -32,14 +33,23 @@ export default function AdminFinance() {
             className="btn btn-primary"
             disabled={blocked || runnable.length === 0}
             title={blocked ? "Clear every reconciliation exception first" : undefined}
-            onClick={() => {
-              if (confirm(`Pay ${runnable.length} organiser${runnable.length === 1 ? "" : "s"}, ${money(runnable.reduce((a, r) => a + (r.payout?.net ?? 0), 0))} in all? Statements are emailed.`)) dispatch({ type: "runPayouts", payoutIds: runnable.map((r) => r.payout!.id) });
-            }}
+            onClick={() => setConfirmRun(true)}
           >
             Run Friday payouts
           </button>
         }
       />
+      {confirmRun && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warn bg-warn-50 px-4 py-3 text-[14px]">
+          <span>
+            Pay {runnable.length} organiser{runnable.length === 1 ? "" : "s"}, <strong className="font-medium">{money(runnable.reduce((a, r) => a + (r.payout?.net ?? 0), 0))}</strong> in all. Statements are emailed to each.
+          </span>
+          <span className="flex gap-2">
+            <button className="btn-quiet" onClick={() => setConfirmRun(false)}>Not now</button>
+            <button className="btn-primary" onClick={() => { dispatch({ type: "runPayouts", payoutIds: runnable.map((r) => r.payout!.id) }); setConfirmRun(false); }}>Confirm and pay</button>
+          </span>
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-4 mb-4">
         <Stat label="Gross processed" value={money(gross)} />
         <Stat label="Commission" value={money(commission)} tone="coral" />

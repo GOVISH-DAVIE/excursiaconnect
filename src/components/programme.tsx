@@ -56,6 +56,8 @@ export function Programme({
                 const room = rooms.find((r) => r.id === s.roomId);
                 const isIn = enrolled.includes(s.id);
                 const full = s.capacity !== undefined && s.enrolled >= s.capacity && !isIn;
+                // one seat per slot: another enrolled session at the same time blocks this one
+                const clash = !isIn ? sessions.find((o) => o.id !== s.id && enrolled.includes(o.id) && o.day === s.day && o.start < s.end && s.start < o.end) : undefined;
                 const where = [room?.name ?? (s.kind === "plenary" ? "Main hall" : null), s.track].filter(Boolean).join(", ");
                 const title = linkBase ? (
                   <Link href={`${linkBase}/${s.id}`} className="prog__title">
@@ -77,11 +79,19 @@ export function Programme({
                         <span className={full ? "text-bad" : ""}>
                           {s.enrolled} of {s.capacity} seats{full ? ", full" : ""}
                         </span>
-                        {canEnrol && (
-                          <button onClick={() => onEnrol?.(s.id, !isIn)} disabled={full} className={`prog__enrol ${isIn ? "is-in" : ""}`}>
-                            {isIn ? "Enrolled, leave" : full ? "Join waitlist" : "Enrol"}
+                        {canEnrol && (isIn ? (
+                          <button onClick={() => onEnrol?.(s.id, false)} className="prog__enrol is-in">
+                            Enrolled, leave
                           </button>
-                        )}
+                        ) : clash ? (
+                          <span className="prog__note">Clashes with {clash.title}</span>
+                        ) : full ? (
+                          <span className="prog__note">Full</span>
+                        ) : (
+                          <button onClick={() => onEnrol?.(s.id, true)} className="prog__enrol">
+                            Enrol
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>

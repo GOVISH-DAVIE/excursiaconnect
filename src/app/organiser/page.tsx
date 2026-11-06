@@ -154,6 +154,8 @@ export default function OrganiserEvents() {
                     </Link>
                     {e.reviewNote && e.state === "Changes requested" && <p className="mt-2 ml-12 rounded bg-coral-50 px-2 py-1 text-[13px] text-coral-600">Algotech: {e.reviewNote}</p>}
                     {e.reviewNote && e.state === "Rejected" && <p className="mt-2 ml-12 rounded bg-bad-50 px-2 py-1 text-[13px] text-bad">Rejected: {e.reviewNote}</p>}
+                    {e.reviewNote && e.state === "Suspended" && <p className="mt-2 ml-12 rounded bg-bad-50 px-2 py-1 text-[13px] text-bad">Suspended by Algotech: {e.reviewNote}. Registration and scanning are paused; payouts held.</p>}
+                    {e.reviewNote && e.state === "Under review" && e.stateBefore === "Live" && <p className="mt-2 ml-12 rounded bg-warn-50 px-2 py-1 text-[13px] text-warn">Back with Algotech: {e.reviewNote}</p>}
                   </td>
                   <td className="td text-slate whitespace-nowrap">
                     {fmtDate(e.startDate, { day: "numeric", month: "short" })} to {fmtDate(e.endDate)}

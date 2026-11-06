@@ -13,6 +13,9 @@ export default function AdminQueue() {
   const org = open ? state.organisers.find((o) => o.id === open.organiserId) : null;
   const [form, setForm] = useState<Partial<EventRecord>>({});
   const [note, setNote] = useState("");
+  const [suspending, setSuspending] = useState(false);
+  const hasNote = note.trim().length > 0;
+  const clamp = (v: string, lo: number, hi = Number.POSITIVE_INFINITY) => Math.min(hi, Math.max(lo, Number(v) || 0));
 
   const queue = state.events.filter((e) => ["Submitted", "Under review", "Changes requested"].includes(e.state));
   const live = state.events.filter((e) => e.state === "Live");
@@ -39,7 +42,7 @@ export default function AdminQueue() {
               const o = state.organisers.find((x) => x.id === e.organiserId);
               return (
                 <li key={e.id}>
-                  <button onClick={() => { setOpenId(e.id); setForm({}); setNote(""); }} className={`w-full text-left px-5 py-3 border-b border-line border-l-[3px] hover:bg-paper ${openId === e.id ? "border-l-coral bg-paper" : "border-l-transparent"}`}>
+                  <button onClick={() => { setOpenId(e.id); setForm({}); setNote(""); setSuspending(false); }} className={`w-full text-left px-5 py-3 border-b border-line border-l-[3px] hover:bg-paper ${openId === e.id ? "border-l-coral bg-paper" : "border-l-transparent"}`}>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium text-sm leading-tight">{e.name}</span>
                       <EventPill state={e.state} />
@@ -115,15 +118,15 @@ export default function AdminQueue() {
               <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <label className="label">Commission %</label>
-                  <input type="number" className="input" value={f("commissionPct")} onChange={(e) => setF("commissionPct", Number(e.target.value))} />
+                  <input type="number" min={0} max={100} step={0.5} className="input" value={f("commissionPct")} onChange={(e) => setF("commissionPct", clamp(e.target.value, 0, 100))} />
                 </div>
                 <div>
                   <label className="label">One-off fee (KES)</label>
-                  <input type="number" className="input" value={f("oneOffFee")} onChange={(e) => setF("oneOffFee", Number(e.target.value))} />
+                  <input type="number" min={0} className="input" value={f("oneOffFee")} onChange={(e) => setF("oneOffFee", clamp(e.target.value, 0))} />
                 </div>
                 <div>
                   <label className="label">Licence fee (KES)</label>
-                  <input type="number" className="input" value={f("licenceFee")} onChange={(e) => setF("licenceFee", Number(e.target.value))} />
+                  <input type="number" min={0} className="input" value={f("licenceFee")} onChange={(e) => setF("licenceFee", clamp(e.target.value, 0))} />
                 </div>
                 <div>
                   <label className="label">Gateway fees borne by</label>
@@ -134,41 +137,62 @@ export default function AdminQueue() {
                 </div>
                 <div>
                   <label className="label">On-site staff (per day)</label>
-                  <input type="number" className="input" value={f("staffCount")} onChange={(e) => setF("staffCount", Number(e.target.value))} />
+                  <input type="number" min={0} max={50} className="input" value={f("staffCount")} onChange={(e) => setF("staffCount", clamp(e.target.value, 0, 50))} />
                 </div>
                 <div>
                   <label className="label">Accreditation stations</label>
-                  <input type="number" className="input" value={f("stations")} onChange={(e) => setF("stations", Number(e.target.value))} />
+                  <input type="number" min={0} max={20} className="input" value={f("stations")} onChange={(e) => setF("stations", clamp(e.target.value, 0, 20))} />
                 </div>
                 <div className="sm:col-span-3">
-                  <label className="label">Note to organiser</label>
-                  <textarea className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Shown to the organiser on Changes requested or Rejected" />
+                  <label className="label">Note to organiser{open.state !== "Live" && open.state !== "Suspended" && open.state !== "Closed" ? " (needed to reject or request changes)" : ""}</label>
+                  <textarea className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Shown to the organiser on Changes requested, Rejected or Suspended" />
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2 justify-end">
-                {open.state !== "Live" && open.state !== "Closed" && (
+                {open.state !== "Live" && open.state !== "Suspended" && open.state !== "Closed" && (
                   <>
-                    <button className="btn-secondary text-bad" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Rejected", note })}>
+                    <button className="btn-secondary text-bad" disabled={!hasNote} title={hasNote ? undefined : "Write the note to the organiser first"} onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Rejected", note })}>
                       Reject
                     </button>
-                    <button className="btn-secondary" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Changes requested", note })}>
+                    <button className="btn-secondary" disabled={!hasNote} title={hasNote ? undefined : "Write the note to the organiser first"} onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Changes requested", note })}>
                       Request changes
                     </button>
                     <button className="btn-secondary" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Under review" })}>
                       Mark under review
                     </button>
                     <button className="btn-primary" disabled={org.kycStatus !== "Verified"} onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Approved", pricing: form })}>
-                      Approve with these terms
+                      {open.stateBefore === "Live" ? "Approve and keep live" : "Approve with these terms"}
                     </button>
                   </>
                 )}
-                {open.state === "Live" && (
-                  <button className="btn-secondary text-bad" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Rejected", note: "Suspended by Algotech" })}>
+                {open.state === "Live" && !suspending && (
+                  <button className="btn-secondary text-bad" onClick={() => setSuspending(true)}>
                     Suspend event
                   </button>
                 )}
+                {open.state === "Suspended" && (
+                  <button className="btn-primary" onClick={() => dispatch({ type: "setEventState", eventId: open.id, state: "Live", note: "Suspension lifted" })}>
+                    Lift suspension
+                  </button>
+                )}
               </div>
-              <p className="mt-2 text-right text-[13px] text-slate">Approval is logged with your name and time; the terms become the event's pricing and staffing record.</p>
+              {open.state === "Live" && suspending && (
+                <div className="mt-3 rounded-lg border border-bad bg-bad-50 p-3 text-[14px]">
+                  <p className="font-medium text-bad">Suspend {open.name}?</p>
+                  <p className="mt-1 text-slate">Registration and scanning stop at once, the public page says the event is paused, and the organiser is told why. Payouts are held until it is lifted.</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 justify-end">
+                    {!hasNote && <span className="mr-auto text-[13px] text-bad">Write the reason in the note above first.</span>}
+                    <button className="btn-quiet" onClick={() => setSuspending(false)}>Cancel</button>
+                    <button className="btn-primary" disabled={!hasNote} onClick={() => { dispatch({ type: "setEventState", eventId: open.id, state: "Suspended", note }); setSuspending(false); }}>
+                      Suspend now
+                    </button>
+                  </div>
+                </div>
+              )}
+              <p className="mt-2 text-right text-[13px] text-slate">
+                {open.stateBefore === "Live" && open.state === "Under review" ? "This event was live; approving the new terms returns it to Live and registration continues. " : ""}
+                Approval is logged with your name and time; the terms become the event&apos;s pricing and staffing record.
+              </p>
             </Section>
           </div>
         ) : (

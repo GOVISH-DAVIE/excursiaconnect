@@ -40,6 +40,7 @@ const eventTone: Record<EventState, string> = {
   Approved: "bg-ok-50 text-ok",
   Live: "bg-ok text-white",
   Closed: "bg-ink text-white",
+  Suspended: "bg-bad text-white",
   Rejected: "bg-bad-50 text-bad",
 };
 export function EventPill({ state }: { state: EventState }) {

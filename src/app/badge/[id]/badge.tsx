@@ -21,6 +21,7 @@ export function Badge({ id }: { id: string }) {
   const [query, setQuery] = useState(() => search.get("q") ?? "");
   const [editing, setEditing] = useState(false);
   const [profile, setProfile] = useState({ name: "", organisation: "", jobTitle: "", phone: "" });
+  const [refunding, setRefunding] = useState(false);
 
   const me = state.delegates.find((d) => d.id === id);
   if (!me) return <div className="p-10 text-slate">{hydrated ? "Badge not found." : "Loading…"}</div>;
@@ -133,9 +134,17 @@ export function Badge({ id }: { id: string }) {
                     )}
                     {(me.status === "Confirmed" || me.status === "Checked in") && tier.price > 0 && (
                       refundOpen ? (
-                        <button className="link" onClick={() => { if (confirm(`Refund ${tier.name} in full to the original payment method? Your badge is cancelled.`)) dispatch({ type: "requestRefund", delegateId: me.id }); }}>
-                          Request a refund
-                        </button>
+                        refunding ? (
+                          <span className="inline-flex flex-wrap items-center gap-2 text-slate">
+                            Refund {tier.name} in full to the original payment method? Your badge is cancelled.
+                            <button className="btn-primary btn-sm" onClick={() => { dispatch({ type: "requestRefund", delegateId: me.id }); setRefunding(false); }}>Yes, refund me</button>
+                            <button className="btn-quiet" onClick={() => setRefunding(false)}>Keep my ticket</button>
+                          </span>
+                        ) : (
+                          <button className="link" onClick={() => setRefunding(true)}>
+                            Request a refund
+                          </button>
+                        )
                       ) : (
                         <span className="text-slate">Refunds closed since {refundBy}.</span>
                       )
