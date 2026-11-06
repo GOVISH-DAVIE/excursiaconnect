@@ -177,8 +177,8 @@ body {
 @media (min-width: 1024px) {
   .site .span-2 { grid-column: span 2; } .site .span-3 { grid-column: span 3; } .site .span-4 { grid-column: span 4; }
   .site .span-5 { grid-column: span 5; } .site .span-6 { grid-column: span 6; } .site .span-7 { grid-column: span 7; } .site .span-8 { grid-column: span 8; }
-  .site .begin-7 { grid-column-start: 7; } .site .begin-8 { grid-column-start: 8; }
-  .site .begin-7.span-6 { grid-column: 7 / span 6; } .site .begin-8.span-5 { grid-column: 8 / span 5; }
+  .site .begin-7 { grid-column-start: 7; } .site .begin-8 { grid-column-start: 8; } .site .begin-9 { grid-column-start: 9; }
+  .site .begin-7.span-6 { grid-column: 7 / span 6; } .site .begin-8.span-5 { grid-column: 8 / span 5; } .site .begin-9.span-4 { grid-column: 9 / span 4; }
 }
 @media (min-width: 640px) and (max-width: 1023px) {
   .site .grid > :is(.span-2, .span-3, .span-4) { grid-column: span 6; }
@@ -188,21 +188,15 @@ body {
   .site .grid > .tile.tile--wide { grid-column: 1 / -1; }
 }
 
-/* the section box: exactly one or two screens, the h2 --padt under the top */
+/* the section box: sized by its content, the same air above every h2; only the hero fills the screen */
 .site main > section, .site footer.closing {
   position: relative; box-sizing: border-box;
-  height: calc(var(--h, 1) * 100svh);
-  padding-top: var(--padt); padding-bottom: calc(var(--padb) + var(--bar));
+  padding-top: var(--padt); padding-bottom: var(--padb);
   background: var(--bg); color: var(--ink);
 }
-.site main > section > .wrap, .site footer.closing > .wrap { position: relative; z-index: 1; height: 100%; }
-@media (min-width: 640px) and (max-width: 1279px) {
-  .site main > section, .site footer.closing { height: auto; min-height: calc(var(--h, 1) * 100svh); }
-}
-@media (max-width: 639px) {
-  .site main > section:not(.hero), .site footer.closing { height: calc(var(--hm, var(--h, 1)) * 100lvh); }
-}
-.site .hero { --h: 1; --hm: 1; padding-top: calc(var(--nav) + var(--hgap)); padding-bottom: calc(var(--hpadb) + var(--bar)); }
+.site footer.closing { padding-bottom: calc(var(--padb) + var(--bar)); }
+.site main > section > .wrap, .site footer.closing > .wrap { position: relative; z-index: 1; }
+.site .hero { min-height: 100svh; display: flex; flex-direction: column; padding-top: calc(var(--nav) + var(--hgap)); padding-bottom: calc(var(--hpadb) + var(--bar)); }
 
 /* grounds a band may take */
 .ground-inverse {
@@ -488,23 +482,92 @@ a.prog__title:hover { text-decoration: underline; text-underline-offset: 4px; }
 .plan--image img { width: 100%; height: 100%; object-fit: contain; display: block; }
 @media (max-width: 639px) { .plan { min-height: 420px; } .plan__zone { padding: var(--s-2) var(--s-3); } }
 
-/* the band hero: the banner across the wrap under the header, then the words on the left and the
-   tickets on the right, all on the first screen */
-.site .hero--band { padding-top: calc(var(--nav) + var(--s-5)); }
-.hero__band { height: clamp(220px, 40svh, 380px); border-radius: var(--r-lg); overflow: hidden; background: var(--surface); margin-bottom: var(--s-6); }
-.hero__band > img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 45%; display: block; }
-.hero--band .hero-text.hero__grid { height: auto; grid-template-rows: auto; align-content: start; align-items: start; }
-.hero--band h1 { font-size: clamp(32px, 2.2vw + 24px, 54px); letter-spacing: var(--display-tracking); max-width: 16ch; }
-.hero--band .hero-facts { display: none; }
-.hero--band .hero__text > .btn-row { margin-top: var(--s-5); }
-.hero__tickets { display: grid; gap: var(--s-3); align-content: start; }
-.hero__tickets-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-4); }
-.rows--quick > li { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--s-2) var(--s-5); padding-block: var(--s-3); }
+/* ============================================================================
+   The event page, third pass: the anatomy every conference site shares. A full-screen hero
+   with the photograph behind (a dark ground until one is uploaded), the name, the date and the
+   venue, the ticket panel; a facts bar; about and the gallery; programme; speakers; pricing
+   cards; sponsors; venue; questions; the close. Sections take the height of their content.
+   ========================================================================== */
+.site .hero { position: relative; isolation: isolate; }
+.site .hero > .wrap { flex: 1; display: grid; grid-template-rows: minmax(0, 1fr) auto; row-gap: var(--s-7); }
+.hero__bg { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: var(--inv-bg); }
+.hero__bg > img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 40%; display: block; }
+.hero__bg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(14, 14, 16, 0.92) 0%, rgba(14, 14, 16, 0.62) 45%, rgba(14, 14, 16, 0.3) 100%); }
+.hero--photo, .hero--dark {
+  --bg: var(--inv-bg); --surface: color-mix(in oklab, #fff 10%, transparent); --ink: #fff; --muted: rgba(255, 255, 255, 0.72);
+  --line: rgba(255, 255, 255, 0.18); --line-strong: rgba(255, 255, 255, 0.32);
+  color: #fff;
+}
+.hero--dark .hero__bg::after { background: radial-gradient(120% 90% at 85% 10%, color-mix(in oklab, var(--accent) 38%, transparent), transparent 60%); }
+.hero--photo .btn-secondary, .hero--dark .btn-secondary { background: rgba(255, 255, 255, 0.14); color: #fff; backdrop-filter: blur(8px); }
+.hero--photo .btn-secondary:hover, .hero--dark .btn-secondary:hover { background: rgba(255, 255, 255, 0.22); }
+.hero-text.hero__grid { height: auto; grid-template-rows: auto; align-items: end; align-content: end; }
+.hero__text > .hero__kicker { margin-top: 0; }
+.hero__kicker { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); font-size: var(--t-small); font-weight: 500; color: var(--ink); }
+.hero__kicker > span + span::before { content: "·"; margin-right: var(--s-4); color: var(--muted); }
+.hero h1 { max-width: 14ch; }
+.hero__lead { color: var(--ink); opacity: 0.88; }
+.hero__panel { --bg: #fff; --card: #fff; --surface: #f1efea; --ink: #1c1c1e; --muted: #6b6f76; --line: rgba(0, 0, 0, 0.1); --line-strong: rgba(0, 0, 0, 0.18);
+  display: grid; gap: var(--s-3); align-content: start; padding: var(--s-5); border-radius: var(--r-lg); background: var(--card); color: var(--ink); box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.5); }
+.hero__panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-4); }
+.hero__panel > .btn { width: 100%; margin-top: var(--s-2); }
+.hero__panel .rows > li:last-child { border-bottom: 0; padding-bottom: 0; }
+.rows--quick > li { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--s-2) var(--s-4); padding-block: var(--s-3); }
 .rows--quick .rows__name { display: grid; gap: 2px; }
 .rows--quick .rows__name small { font-size: var(--t-label); font-weight: 400; color: var(--muted); }
 .rows--quick .rows__value { grid-column: 2; grid-row: 1; }
 .rows--quick .rows__act { grid-column: 3; grid-row: 1; font-size: var(--t-small); font-weight: 500; color: var(--ink); text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--line-strong); }
 .rows--quick .rows__act:hover { text-decoration-color: currentColor; }
 .rows--quick .rows__act--off { color: var(--muted); text-decoration: none; }
-@media (max-width: 1023px) { .hero--band .hero-text.hero__grid { display: grid; gap: var(--s-6); } .hero__tickets { display: none; } }
+/* the facts bar at the foot of the first screen */
+.hero__facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-4) var(--gutter); margin: 0; padding-top: var(--s-5); border-top: 1px solid var(--line); }
+.hero__facts > div { display: grid; gap: 4px; min-width: 0; }
+.hero__facts dt { font-size: var(--t-label); color: var(--muted); }
+.hero__facts dd { margin: 0; font-size: var(--t-lead); font-weight: 500; line-height: 1.3; }
+@media (max-width: 1023px) {
+  .hero-text.hero__grid { display: grid; gap: var(--s-6); }
+  .hero__panel { display: none; }
+  .hero__facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 639px) {
+  .hero__facts dd { font-size: var(--t-body); }
+  .hero__kicker > span + span::before { content: none; }
+}
+
+/* about: the lead, the numbers, the photographs */
+.about__lead { font-size: clamp(22px, 1.2vw + 16px, 30px); line-height: 1.35; letter-spacing: -0.015em; font-weight: var(--display-weight); max-width: 30ch; text-wrap: pretty; }
+.about__stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-6) var(--gutter); align-content: start; }
+.about__stats .stat { padding-left: 0; border-left: 0; padding-top: var(--s-4); border-top: 1px solid var(--line-strong); }
+.gallery { list-style: none; margin: var(--s-8) 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 220px; grid-auto-flow: dense; gap: var(--s-3); }
+.gallery > li { overflow: hidden; border-radius: var(--r-md); background: var(--surface); }
+.gallery > li:first-child { grid-column: span 2; grid-row: span 2; }
+.gallery img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 600ms var(--m-ease); }
+.gallery > li:hover img { transform: scale(1.03); }
+@media (max-width: 1023px) { .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 180px; } .gallery > li:first-child { grid-column: 1 / -1; grid-row: span 1; } }
+@media (max-width: 639px) { .gallery { grid-auto-rows: 140px; gap: var(--s-2); } .about__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* a speaker without a photograph: the initials on the surface, the same square */
+.person__avatar { width: 100%; aspect-ratio: 1; display: grid; place-items: center; border-radius: var(--r-md); background: var(--surface); color: var(--muted); font-size: clamp(28px, 3vw, 44px); font-weight: 500; letter-spacing: -0.02em; }
+@media (max-width: 639px) {
+  .site .grid > .person.span-3 { grid-column: 1 / -1; display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: var(--s-4); align-items: start; }
+  .person__avatar { border-radius: 50%; font-size: 22px; }
+}
+
+/* tickets as pricing cards: the price set large, what it includes ticked, the lead tier marked */
+.prices { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--card-gap); }
+.price { display: flex; flex-direction: column; gap: var(--s-4); padding: var(--s-6); border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--card); color: var(--ink); transition: transform 180ms var(--m-ease), border-color var(--m-in) var(--m-ease); }
+.price:hover { transform: translateY(-2px); border-color: var(--ink); }
+.price--lead { border-color: var(--action); box-shadow: inset 0 0 0 1px var(--action); }
+.price__head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); }
+.price h3 { font-size: 20px; }
+.price__tag { font-size: var(--t-label); font-weight: 500; padding: 4px 10px; border-radius: 999px; background: var(--action); color: var(--action-ink); }
+.price__amount { font-size: clamp(30px, 2vw + 16px, 40px); line-height: 1; font-weight: var(--display-weight); letter-spacing: var(--display-tracking); font-variant-numeric: tabular-nums; }
+.price__per { display: block; margin-top: var(--s-2); font-size: var(--t-small); color: var(--muted); }
+.price__list { list-style: none; margin: 0; padding: var(--s-4) 0 0; border-top: 1px solid var(--line); display: grid; gap: var(--s-3); font-size: var(--t-small); }
+.price__list > li { position: relative; padding-left: 24px; }
+.price__list > li::before { content: ""; position: absolute; left: 2px; top: 0.4em; width: 11px; height: 6px; border-left: 1.5px solid var(--action); border-bottom: 1.5px solid var(--action); transform: rotate(-45deg); }
+.price__list b { font-weight: 500; }
+.price__left { margin-top: auto; padding-top: var(--s-2); font-size: var(--t-small); color: var(--muted); }
+.price > .btn { width: 100%; }
+.price > .btn-secondary { background: color-mix(in oklab, var(--ink) 8%, var(--bg)); }
 @media (max-width: 639px) { .hero__band { height: clamp(180px, 30svh, 240px); margin-bottom: var(--s-5); } }

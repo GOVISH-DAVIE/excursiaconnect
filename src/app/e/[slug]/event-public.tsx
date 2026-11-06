@@ -9,14 +9,18 @@ import { useToday } from "@/lib/use-today";
 import { SOCIAL_KEYS, type Room, type Session, type Tier, type Zone } from "@/lib/types";
 
 /*
-  The public event site. Kind: an event people buy tickets to (flat colour, type and the hover
-  layer; no effects). Dealt: hero split, nav-split, footer-columns, close-type, rhythm dark-band
-  (the speakers), buttons pill, radius soft, Rethink Sans. No photographs exist for this event, so
-  every section shows what the system holds: the programme, the speakers, the tiers, the zones.
-  The accent is the organiser's brand colour; the label on it is chosen for contrast.
+  The public event site, third pass: the anatomy every conference site shares, in this order.
+  A full-screen hero with the photograph behind (a dark ground with the organiser's colour until
+  one is uploaded): the date and venue, the event's name, its line, the two actions and a ticket
+  panel; a facts bar at its foot. Then about (the lead, the numbers, the photographs the organiser
+  adds), the programme by day, the speakers on the dark band, tickets as pricing cards, the
+  sponsors by tier, the venue with its plan, the questions, and the close. Every section takes
+  the height of its content. The accent is the organiser's brand colour; the label on it is chosen
+  for contrast. Nothing is shown that the system does not hold.
 */
 
 const NAV = [
+  ["about", "About"],
   ["programme", "Programme"],
   ["speakers", "Speakers"],
   ["tickets", "Tickets"],
@@ -58,6 +62,8 @@ function includes(t: Tier, zones: Zone[], days: number): [string, string][] {
   ];
 }
 
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+
 export function EventPublic({ slug }: { slug: string }) {
   const { state } = useStore();
   const [open, setOpen] = useState(false);
@@ -82,9 +88,10 @@ export function EventPublic({ slug }: { slug: string }) {
   });
   // meetings and messages happen from a delegate's badge; the prototype has no sign-in, so the demo badge stands in
   const badge = `/badge/${state.currentDelegateId ?? "d_demo"}`;
-  const hasPhotos = speakers.some((sp) => sp.photo);
   const banner = state.banners[event.id];
   const floorPlan = state.floorPlans[event.id];
+  const gallery = state.galleries[event.id] ?? [];
+  const shown = gallery.length >= 9 ? 9 : gallery.length >= 5 ? 5 : gallery.length;
   const sponsors = state.sponsors.filter((s) => s.eventId === event.id);
   const tiers_ = ["Headline", "Gold", "Silver", "Partner"] as const;
 
@@ -97,26 +104,25 @@ export function EventPublic({ slug }: { slug: string }) {
   const dining = zones.find((z) => z.id === "z_dining");
   const breakoutRooms = rooms.filter((r) => zones.find((z) => z.id === r.zoneId)?.id === "z_breakout");
   const mainHall = zones.find((z) => z.id === "z_main");
+  const breakouts = sessions.filter((s) => s.kind === "breakout").length;
+  const exhibition = zones.some((z) => z.id === "z_exhib");
 
   const accent = event.brand.primary;
   const accentInk = readableOn(accent);
   const register = `/e/${event.slug}/register`;
   const action = "Get a ticket";
-  const dateSpan = `${fmtDate(event.startDate, { day: "numeric" })} to ${fmtDate(event.endDate, { day: "numeric", month: "long", year: "numeric" })}`;
+  const sameMonth = event.startDate.slice(0, 7) === event.endDate.slice(0, 7);
+  const dateRange = sameMonth
+    ? `${fmtDate(event.startDate, { day: "numeric" })} to ${fmtDate(event.endDate, { day: "numeric", month: "long", year: "numeric" })}`
+    : `${fmtDate(event.startDate, { day: "numeric", month: "long" })} to ${fmtDate(event.endDate, { day: "numeric", month: "long", year: "numeric" })}`;
+  const dateShort = dateRange.replace(/ \d{4}$/, "");
   const directions = `https://www.openstreetmap.org/search?query=${encodeURIComponent(`${event.venue} ${event.city}`)}`;
+  const offSale = (t: Tier) => !!t.paused || (!!today && !!t.saleFrom && t.saleFrom > today);
+  const leftLine = (t: Tier) => {
+    const left = t.cap - t.sold;
+    return t.paused ? "Sales paused" : !!today && !!t.saleFrom && t.saleFrom > today ? `On sale from ${fmtDate(t.saleFrom, { day: "numeric", month: "long" })}` : left <= 0 ? "Sold out, waitlist open" : `${left} of ${t.cap} places left`;
+  };
 
-  // the live fact: a block in the programme window's flow (never over a row); a float only over the banner photograph
-  const fact = lead ? (
-    <div className="ly-float">
-      <div className="ly-float__row">
-        <span className="ly-live">{live ? "Selling now" : "Not on sale yet"}</span>
-        <span>{lead.name}</span>
-      </div>
-      <div className="ly-float__title">
-        {Math.max(0, lead.cap - lead.sold)} of {lead.cap} places left
-      </div>
-    </div>
-  ) : null;
   const mark = (
     <span className="mark" style={{ background: accent, color: accentInk }} aria-hidden="true">
       {initials(organiser?.name ?? event.name)}
@@ -175,107 +181,155 @@ export function EventPublic({ slug }: { slug: string }) {
       </header>
 
       <main>
-        {/* ---- hero: split. The words on five columns, the Day 1 programme as the live window on six. */}
-        <section className={`hero ${banner ? "hero--band" : ""}`} id="top" aria-labelledby="hero-h">
-          <div className="wrap">
+        {/* ---- hero: the photograph behind, the name, the date and venue, the ticket panel, the facts bar. */}
+        <section className={`hero ${banner ? "hero--photo" : "hero--dark"}`} id="top" aria-labelledby="hero-h">
+          <div className="hero__bg" aria-hidden="true">
             {banner && (
-              <div className="hero__band">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={banner} alt="" fetchPriority="high" />
-              </div>
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={banner} alt="" fetchPriority="high" />
             )}
+          </div>
+          <div className="wrap">
             <div className="hero-text grid hero__grid">
-              <div className={`hero__text ${banner ? "span-6" : "span-5"}`}>
-                <h1 id="hero-h">Brand and PR conference in {event.city}</h1>
-                <p className="hero__lead">
-                  {numberWord(event.days)[0].toUpperCase() + numberWord(event.days).slice(1)} days of plenaries, breakouts and an exhibition at {event.venue}, {dateSpan}.{from ? ` Tickets from ${from}.` : ""}
-                </p>
+              <div className="hero__text span-7">
+                <div className="hero__kicker">
+                  <span>{dateRange}</span>
+                  <span>
+                    {event.venue}, {event.city}
+                  </span>
+                  {from && <span>Tickets from {from}</span>}
+                </div>
+                <h1 id="hero-h">{event.name}</h1>
+                <p className="hero__lead">{event.tagline}</p>
                 <div className="btn-row">
                   {cta}
                   <a className="btn btn-secondary" href="#programme">
                     See the programme
                   </a>
                 </div>
-                <dl className="hero-facts">
-                  <div>
-                    <dt>Doors</dt>
-                    <dd>{doors} each day</dd>
-                  </div>
-                  <div>
-                    <dt>Where</dt>
-                    <dd>{event.venue}, {event.city}</dd>
-                  </div>
-                  <div>
-                    <dt>Who</dt>
-                    <dd>
-                      {confirmed} registered, {speakers.length} speakers
-                    </dd>
-                  </div>
-                  {banner && lead && (
-                    <div>
-                      <dt>{lead.name}</dt>
-                      <dd>{Math.max(0, lead.cap - lead.sold)} of {lead.cap} places left</dd>
-                    </div>
-                  )}
-                </dl>
               </div>
-              {banner && (
-                <div className="hero__tickets span-5 begin-8">
-                  <div className="hero__tickets-head"><span className="t-label">Tickets</span><a className="link" href="#tickets">What each includes</a></div>
-                  <ul className="rows rows--quick">
-                    {tiers.map((t) => {
-                      const left = t.cap - t.sold;
-                      const off = !!t.paused || (!!today && !!t.saleFrom && t.saleFrom > today);
-                      return (
-                        <li key={t.id}>
-                          <span className="rows__name">
-                            {t.name}
-                            <small>{t.paused ? "Sales paused" : off ? `On sale from ${t.saleFrom}` : left <= 0 ? "Sold out, waitlist open" : `${left} left`}</small>
-                          </span>
-                          <span className="rows__value">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
-                          {live && !off ? <Link href={`${register}?tier=${t.id}`} className="rows__act">{left <= 0 ? "Waitlist" : "Choose"}</Link> : <span className="rows__act rows__act--off">–</span>}
-                        </li>
-                      );
-                    })}
-                  </ul>
+              {tiers.length > 0 && (
+              <aside className="hero__panel span-4 begin-9" aria-label="Tickets">
+                <div className="hero__panel-head">
+                  <span className="t-label">Tickets</span>
+                  <a className="link" href="#tickets">
+                    What each includes
+                  </a>
                 </div>
-              )}
-              {!banner && (
-              <div className="hero__media span-6 begin-7" aria-label={`Day 1 programme, ${dayDate(event.startDate, 1)}`}>
-                {(
-                <div className="window">
-                  <div className="window__head">
-                    <span className="t-label">Programme, day 1</span>
-                    <span className="t-label muted">{dayDate(event.startDate, 1)}</span>
-                  </div>
-                  {fact}
-                  <ul className="rows rows--programme">
-                    {sessions
-                      .filter((s) => s.day === 1)
-                      .map((s) => (
-                        <li key={s.id}>
-                          <span className="rows__time">{s.start}</span>
-                          <span className="rows__name">{s.title}</span>
-                          <span className="rows__meta">{meta(s, rooms)}</span>
-                        </li>
-                      ))}
-                  </ul>
-                </div>
+                <ul className="rows rows--quick">
+                  {tiers.map((t) => {
+                    const left = t.cap - t.sold;
+                    const off = offSale(t);
+                    return (
+                      <li key={t.id}>
+                        <span className="rows__name">
+                          {t.name}
+                          <small>{t.paused ? "Sales paused" : off ? `On sale from ${t.saleFrom}` : left <= 0 ? "Sold out, waitlist open" : `${left} left`}</small>
+                        </span>
+                        <span className="rows__value">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
+                        {live && !off ? (
+                          <Link href={`${register}?tier=${t.id}`} className="rows__act">
+                            {left <= 0 ? "Waitlist" : "Choose"}
+                          </Link>
+                        ) : (
+                          <span className="rows__act rows__act--off">–</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {live && (
+                  <Link href={register} className="btn btn-primary btn-cta">
+                    {action}
+                  </Link>
                 )}
-              </div>
+              </aside>
               )}
             </div>
+            <dl className="hero__facts">
+              <div>
+                <dt>When</dt>
+                <dd>{dateRange}</dd>
+              </div>
+              <div>
+                <dt>Where</dt>
+                <dd>
+                  {event.venue}, {event.city}
+                </dd>
+              </div>
+              <div>
+                <dt>Doors</dt>
+                <dd>{doors} each day</dd>
+              </div>
+              <div>
+                <dt>Who</dt>
+                <dd>
+                  {confirmed} registered, {speakers.length} speakers
+                </dd>
+              </div>
+            </dl>
           </div>
         </section>
 
-        {/* ---- programme: the three days as three ruled lists, one screen (two on a phone). */}
-        <section className="section" id="programme" aria-labelledby="programme-h" style={{ "--h": 1, "--hm": 2 } as React.CSSProperties}>
+        {/* ---- about: the lead, the numbers, the organiser's photographs. */}
+        <section className="section" id="about" aria-labelledby="about-h">
+          <div className="wrap">
+            <div className="grid">
+              <div className="span-7">
+                <h2 id="about-h" className="t-label muted" style={{ marginBottom: "var(--s-5)" }}>
+                  About the event
+                </h2>
+                <p className="about__lead">
+                  {cap(numberWord(event.days))} days at {event.venue}: {numberWord(sessions.length)} sessions, {speakers.length} speakers
+                  {breakouts ? `, ${numberWord(breakouts)} breakouts you enrol in from your badge` : ""}
+                  {exhibition ? ", and an exhibition floor open all day" : ""}.
+                </p>
+                <p className="measure" style={{ marginTop: "var(--s-5)", fontSize: "var(--t-lead)", lineHeight: 1.5 }}>
+                  {event.tagline} Organised by {organiser?.name}.
+                </p>
+              </div>
+              <div className="span-4 begin-9 about__stats">
+                <div className="stat">
+                  <div className="stat__value">{event.days}</div>
+                  <div className="stat__label">Days</div>
+                  <div className="stat__sub">{dateShort}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat__value">{sessions.length}</div>
+                  <div className="stat__label">Sessions</div>
+                  <div className="stat__sub">{breakouts ? `${breakouts} breakouts` : "Plenaries"}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat__value">{speakers.length}</div>
+                  <div className="stat__label">Speakers</div>
+                  <div className="stat__sub">Plenaries and panels</div>
+                </div>
+                <div className="stat">
+                  <div className="stat__value">{event.expectedAttendance.toLocaleString()}</div>
+                  <div className="stat__label">Delegates expected</div>
+                  <div className="stat__sub">{confirmed} registered so far</div>
+                </div>
+              </div>
+            </div>
+            {shown > 0 && (
+              <ul className="gallery" aria-label="Photographs">
+                {gallery.slice(0, shown).map((src, i) => (
+                  <li key={i}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={src} alt="" loading={i === 0 ? "eager" : "lazy"} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+
+        {/* ---- programme: the days as ruled lists side by side. */}
+        <section className="section" id="programme" aria-labelledby="programme-h">
           <div className="wrap">
             <div className="section-head section-head--row">
               <div>
-                <h2 id="programme-h">
-                  {numberWord(event.days)[0].toUpperCase() + numberWord(event.days).slice(1)} days, {numberWord(sessions.length)} sessions
-                </h2>
+                <h2 id="programme-h">Programme</h2>
               </div>
               <div className="section-head__aside hidden sm:block">Plenaries are open to everyone. Breakouts take enrolment from your badge page once you have registered.</div>
             </div>
@@ -302,23 +356,25 @@ export function EventPublic({ slug }: { slug: string }) {
           </div>
         </section>
 
-        {/* ---- speakers: the dark band. Names and sessions from the programme; no portraits exist. */}
-        <section className="section ground-inverse" id="speakers" aria-labelledby="speakers-h" style={{ "--h": hasPhotos ? 2 : 1, "--hm": 2 } as React.CSSProperties}>
+        {/* ---- speakers: the dark band; a portrait where one is uploaded, the initials where not. */}
+        <section className="section ground-inverse" id="speakers" aria-labelledby="speakers-h">
           <div className="wrap">
             <div className="section-head">
-              <h2 id="speakers-h">
-                {numberWord(speakers.length)[0].toUpperCase() + numberWord(speakers.length).slice(1)} speakers
-              </h2>
+              <h2 id="speakers-h">Speakers</h2>
               <p>
-                Plenaries in the {mainHall?.name.toLowerCase() ?? "main hall"}, breakouts in {breakoutRooms.length ? `${numberWord(breakoutRooms.length)} rooms` : "the breakout wing"}.
+                {cap(numberWord(speakers.length))} speakers across {numberWord(sessions.filter((s) => s.speakers.length).length)} sessions. Plenaries in the {mainHall?.name.toLowerCase() ?? "main hall"}, breakouts in {breakoutRooms.length ? `${numberWord(breakoutRooms.length)} rooms` : "the breakout wing"}.
               </p>
             </div>
             <div className="grid">
               {speakers.map((sp) => (
-                <div key={sp.name} className={`person span-3 ${sp.photo ? "person--photo" : ""}`}>
-                  {sp.photo && (
+                <div key={sp.name} className="person person--photo span-3">
+                  {sp.photo ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img className="person__photo" src={sp.photo} alt="" loading="lazy" />
+                  ) : (
+                    <span className="person__avatar" aria-hidden="true">
+                      {initials(sp.name)}
+                    </span>
                   )}
                   <div className="person__text">
                     <h3>{sp.name}</h3>
@@ -347,9 +403,59 @@ export function EventPublic({ slug }: { slug: string }) {
           </div>
         </section>
 
+        {/* ---- tickets: pricing cards, the lead tier marked, what each includes ticked. */}
+        <section className="section" id="tickets" aria-labelledby="tickets-h">
+          <div className="wrap">
+            <div className="section-head section-head--row">
+              <div>
+                <h2 id="tickets-h">Tickets and prices</h2>
+              </div>
+              <div className="section-head__aside">Pay by M-Pesa, Visa or Mastercard, or ask for a bank invoice. Your badge arrives by email and SMS when payment confirms.</div>
+            </div>
+            <ul className="prices">
+              {tiers.map((t) => {
+                const left = t.cap - t.sold;
+                const off = offSale(t);
+                const isLead = t.id === lead?.id;
+                return (
+                  <li key={t.id} className={`price ${isLead ? "price--lead" : ""}`}>
+                    <div className="price__head">
+                      <h3>{t.name}</h3>
+                      {isLead && <span className="price__tag">Full access</span>}
+                    </div>
+                    <div>
+                      <span className="price__amount">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
+                      <span className="price__per">{t.price === 0 ? "" : "Per person. "}{t.approval === "organiser" ? "Organiser approval required." : t.description}</span>
+                    </div>
+                    <ul className="price__list">
+                      {includes(t, zones, event.days)
+                        .filter(([, v]) => v !== "None")
+                        .map(([k, v]) => (
+                          <li key={k}>
+                            <b>{k}:</b> {v}
+                          </li>
+                        ))}
+                    </ul>
+                    <p className="price__left">{leftLine(t)}</p>
+                    {live && !off ? (
+                      <Link href={`${register}?tier=${t.id}`} className={`btn ${isLead ? "btn-primary" : "btn-secondary"}`}>
+                        {left <= 0 ? "Join the waitlist" : "Choose this ticket"}
+                      </Link>
+                    ) : (
+                      <span className="btn btn-secondary" aria-disabled="true" style={{ opacity: 0.6, pointerEvents: "none" }}>
+                        {live ? "Not on sale" : "Opens soon"}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </section>
+
         {/* ---- sponsors and partners: real logos in their own colours, by tier; a name in type until a logo is uploaded. */}
         {sponsors.length > 0 && (
-          <section className="section" id="sponsors" aria-labelledby="sponsors-h" style={{ "--h": 1, "--hm": 1 } as React.CSSProperties}>
+          <section className="section" id="sponsors" aria-labelledby="sponsors-h">
             <div className="wrap">
               <div className="section-head">
                 <h2 id="sponsors-h">Sponsors and partners</h2>
@@ -388,53 +494,15 @@ export function EventPublic({ slug }: { slug: string }) {
           </section>
         )}
 
-        {/* ---- tickets: the range, one tile per public tier, the secondary button on each. */}
-        <section className="section" id="tickets" aria-labelledby="tickets-h" style={{ "--h": 1, "--hm": 2 } as React.CSSProperties}>
-          <div className="wrap">
-            <div className="section-head section-head--row">
-              <div>
-                <h2 id="tickets-h">Tickets and prices</h2>
-              </div>
-              <div className="section-head__aside">Pay by M-Pesa, Visa or Mastercard, or ask for a bank invoice. Your badge arrives by email and SMS when payment confirms.</div>
-            </div>
-            <ul className="rows rows--tickets">
-              {tiers.map((t) => {
-                const left = t.cap - t.sold;
-                const inc = includes(t, zones, event.days)
-                  .map(([, v]) => v)
-                  .filter((v) => v !== "None")
-                  .join(" · ");
-                return (
-                  <li key={t.id}>
-                    <div className="ticket__what">
-                      <h3>{t.name}</h3>
-                      <p>{inc}</p>
-                    </div>
-                    <div className="ticket__price">
-                      <span className="t-stat">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
-                      <span className="ticket__left">{t.paused ? "Sales paused" : !!today && !!t.saleFrom && t.saleFrom > today ? `On sale from ${fmtDate(t.saleFrom, { day: "numeric", month: "long" })}` : left <= 0 ? "Sold out, waitlist open" : `${left} of ${t.cap} places left`}</span>
-                    </div>
-                    {live && !t.paused && !(!!today && !!t.saleFrom && t.saleFrom > today) ? (
-                      <Link href={`${register}?tier=${t.id}`} className="link">
-                        {left <= 0 ? "Join the waitlist" : "Choose this ticket"}
-                      </Link>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </section>
-
         {/* ---- venue: the facts on five columns, the zones and rooms as a still plan on six. */}
-        <section className="section" id="venue" aria-labelledby="venue-h" style={{ "--h": 1, "--hm": 2 } as React.CSSProperties}>
+        <section className="section" id="venue" aria-labelledby="venue-h">
           <div className="wrap">
             <div className="grid">
               <div className="span-5">
                 <div className="section-head">
                   <h2 id="venue-h">The venue</h2>
                   <p>
-                    {event.venue} in {event.city}, {dayDate(event.startDate, 1, { weekday: "long" })} {dateSpan}.
+                    {event.venue} in {event.city}, {dayDate(event.startDate, 1, { weekday: "long" })} {dateRange}.
                   </p>
                 </div>
                 <ul className="rows rows--spec">
@@ -468,7 +536,7 @@ export function EventPublic({ slug }: { slug: string }) {
                     <span className="rows__name">Directions</span>
                     <span className="rows__value">
                       <a className="link" href={directions} target="_blank" rel="noreferrer">
-                        Get directions
+                        Open in maps
                       </a>
                     </span>
                   </li>
@@ -528,7 +596,7 @@ export function EventPublic({ slug }: { slug: string }) {
         </section>
 
         {/* ---- questions: every answer open. */}
-        <section className="section" id="questions" aria-labelledby="questions-h" style={{ "--h": 1, "--hm": 2 } as React.CSSProperties}>
+        <section className="section" id="questions" aria-labelledby="questions-h">
           <div className="wrap">
             <div className="grid">
               <div className="span-5">
@@ -567,13 +635,13 @@ export function EventPublic({ slug }: { slug: string }) {
         </section>
       </main>
 
-      {/* ---- the close and the footer, one screen. */}
+      {/* ---- the close and the footer. */}
       <footer className="footer closing" id="contact" aria-labelledby="close-h">
         <div className="wrap">
           <div className="closing__cta close--type">
             <div className="section-head">
               <h2 id="close-h">
-                {numberWord(event.days)[0].toUpperCase() + numberWord(event.days).slice(1)} days in {event.city}, {dateSpan.replace(/ \d{4}$/, "")}
+                {cap(numberWord(event.days))} days in {event.city}, {dateShort}
               </h2>
               <p className="t-small muted" style={{ fontSize: "var(--t-small)" }}>
                 {from ? `Tickets from ${from}. ` : ""}Your badge arrives by email and SMS when payment confirms.
@@ -648,7 +716,7 @@ export function EventPublic({ slug }: { slug: string }) {
                   </li>
                   <li>
                     <a href={directions} target="_blank" rel="noreferrer">
-                      Get directions
+                      Open in maps
                     </a>
                   </li>
                 </ul>

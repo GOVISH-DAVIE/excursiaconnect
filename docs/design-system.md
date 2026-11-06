@@ -63,7 +63,7 @@ A real logo keeps its own colours. The icon is never tinted or inverted.
 [`src/app/e/[slug]/event-public.tsx`](../src/app/e/[slug]/event-public.tsx) follows the page contract of the taste skill under `.site`:
 
 - One fixed `header.nav` (72px, 56 on a phone) on the same `.wrap` as everything else: `width: min(100% - 160px, 1280px)`, so every edge sits on x 80 and 1360 at 1440, 24 and 366 at 390.
-- `main > section` is exactly one or two screens tall (`--h`, `--hm` on a phone), the h2 120px under its top. The hero is the first screen alone; `footer.closing` is the last.
+- `main > section` takes the height of its content, the h2 120px under its top (96px on a phone) and 72px of air below. Only the hero fills the first screen: the photograph behind (`.hero--photo`) or a dark ground lit with the organiser's colour (`.hero--dark`), the date and venue, the name, the ticket panel, and the facts bar at its foot. Then about with the numbers and the photo gallery, programme, speakers on the dark band, tickets as pricing cards (`.prices`), sponsors, venue, questions, and `footer.closing`.
 - The 12-column `.grid` with `.span-N` and `.begin-7` / `.begin-8` (not `start-7`: Tailwind owns that name as an inset utility).
 - The dealt parts: hero `split` (words on five columns, the Day 1 programme as a live window on six), `nav-split`, `footer-columns`, close `close-type`, one dark band (`.ground-inverse`, the speakers), pill buttons.
 - Under 640px the words stack first, the secondary becomes a text link, and `nav.actionbar` fixes the main action at the foot (`--bar` keeps content above it).
