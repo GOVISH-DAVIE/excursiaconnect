@@ -9,6 +9,7 @@ import { downloadCsv, row } from "@/lib/csv";
 import { fmtStamp } from "@/lib/time";
 import { Pill, Refusal, typeLabel, useDr } from "../bits";
 import { stageTone } from "../stage";
+import { FitDetail, PairTimeline } from "../pair";
 
 const tabs = ["Find matches", "Suggestions", "By mission"] as const;
 
@@ -103,6 +104,7 @@ function Find() {
 function CandidateRow({ c, now }: { c: ReturnType<typeof candidates>[number]; now: string }) {
   const { dr, cfg, me, dispatch } = useDr();
   const [open, setOpen] = useState(false);
+  const [show, setShow] = useState(false);
   const [note, setNote] = useState("");
   const [override, setOverride] = useState("");
   const blocked = blockedPair(dr, c.seeker.id, c.provider.id, cfg!);
@@ -118,9 +120,10 @@ function CandidateRow({ c, now }: { c: ReturnType<typeof candidates>[number]; no
     <li className="px-5 py-3 border-b border-line last:border-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="font-medium text-[14px]">
-            {c.other.org.name} <span className="font-normal text-slate">· {typeLabel(c.other)}, {c.other.org.country}</span>
-          </div>
+          <button type="button" className="group text-left font-medium text-[14px]" aria-expanded={show} onClick={() => setShow(!show)}>
+            <span className="group-hover:underline underline-offset-4">{c.other.org.name}</span> <span className="font-normal text-slate">· {typeLabel(c.other)}, {c.other.org.country}</span>
+            <span className="ml-2 text-[12px] font-normal text-slate group-hover:text-ink">{show ? "Hide history ▴" : "History ▾"}</span>
+          </button>
           <div className="mt-1 flex flex-wrap gap-1">
             {c.met.map((f) => (
               <span key={f} className="pill bg-ok-50 text-ok">
@@ -149,6 +152,28 @@ function CandidateRow({ c, now }: { c: ReturnType<typeof candidates>[number]; no
           )}
         </div>
       </div>
+      {show && (
+        <div className="mt-3 grid gap-5 rounded-md border border-line p-4 md:grid-cols-2">
+          <div className="min-w-0">
+            <div className="mb-2 text-[13px] font-medium">How they fit</div>
+            <FitDetail seeker={c.seeker} provider={c.provider} />
+          </div>
+          <div className="min-w-0">
+            <div className="mb-2 flex items-baseline justify-between gap-2 text-[13px] font-medium">
+              History
+              {existing && (
+                <Link href={`/dealroom/matches/${existing.id}`} className="link text-[12px] font-normal">
+                  Open the match
+                </Link>
+              )}
+            </div>
+            {existing ? <PairTimeline m={existing} /> : <p className="text-[13px] text-slate">Nothing yet: no one has decided on this pair, and they have not been introduced.</p>}
+            <Link href={`/dealroom/applications/${c.other.id}`} className="link mt-3 inline-block text-[12px]">
+              {c.other.org.name}&apos;s application
+            </Link>
+          </div>
+        </div>
+      )}
       {open && (
         <div className="mt-3 rounded-md bg-paper p-3 grid gap-2">
           {blocked && (

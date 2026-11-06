@@ -662,3 +662,46 @@ export function deletionDate(cfg: DrConfig) {
   d.setUTCMonth(d.getUTCMonth() + cfg.rules.retentionMonths);
   return d.toISOString().slice(0, 10);
 }
+
+/* ---------- the story of one pair ---------- */
+
+export type PairEvent = { at: string; who: string; what: string; kind: "match" | "consent" | "access" | "meeting" | "opportunity"; ref?: string };
+
+/** Everything that happened between one seeker and one provider, oldest first: decisions, the introduction,
+ *  consent, what the provider opened, every meeting step and the opportunity after it. */
+export function pairTimeline(dr: DealRoomState, m: DrMatch): PairEvent[] {
+  const s = dr.apps.find((a) => a.id === m.seekerId);
+  const p = dr.apps.find((a) => a.id === m.providerId);
+  const who = (by: string) =>
+    by === m.seekerId || by === "seeker" ? s?.org.name ?? "Seeker" : by === m.providerId || by === "provider" ? p?.org.name ?? "Provider" : by === "desk" ? "Deal Room desk" : by === "door" ? "Room door" : staffName(dr, by);
+  const doc = (id: string) => (id === "profile" ? "the full profile" : id === "teaser" ? "the teaser" : (s?.documents.find((d) => d.id === id)?.kind ?? "a document").toLowerCase());
+  const out: PairEvent[] = m.history.map((h) => ({ at: h.at, who: who(h.by), what: h.what, kind: "match" }));
+  for (const c of dr.consents.filter((x) => x.seekerId === m.seekerId && x.providerId === m.providerId)) out.push({ at: c.at, who: s?.org.name ?? "Seeker", what: `${c.granted ? "Allowed" : "Withdrew"} ${doc(c.docId)}`, kind: "consent" });
+  for (const a of dr.access.filter((x) => x.seekerId === m.seekerId && x.viewer === m.providerId)) out.push({ at: a.at, who: p?.org.name ?? "Provider", what: `${a.action === "download" ? "Downloaded" : "Opened"} ${doc(a.item)}`, kind: "access" });
+  // meeting steps say what happened; which meeting goes with the date underneath, so the slot is not repeated in every line
+  const step = (what: string) => (/^Proposed/.test(what) ? "Meeting proposed" : what === "In progress" ? "Meeting started" : what);
+  for (const mt of dr.meetings.filter((x) => x.matchId === m.id))
+    for (const h of mt.history) out.push({ at: h.at, who: who(h.by), what: step(h.what), kind: "meeting", ref: `meeting of ${fmtShort(mt.start)}` });
+  for (const o of dr.opportunities.filter((x) => x.matchId === m.id))
+    for (const h of o.history) out.push({ at: h.at, who: who(h.by), what: h.what === "Opened from the meeting outcome" ? "Opportunity opened from the meeting outcome" : h.what, kind: "opportunity", ref: "the opportunity" });
+  return out.sort((a, b) => a.at.localeCompare(b.at));
+}
+const fmtShort = (stamp: string) => `${new Date(stamp.slice(0, 10) + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })} ${stamp.slice(11, 16)}`;
+
+/** Each matching field with what the seeker has and what the provider's mandate asks, so a miss can be read at a glance. */
+export function fitDetail(seeker: DrApplication, provider: DrApplication, cfg: DrConfig) {
+  const m = provider.mandate;
+  const a = seeker.ask;
+  const f = fit(seeker, provider, cfg);
+  const list = (xs?: string[]) => (xs && xs.length ? xs.join(", ") : "none set");
+  return cfg.matching.map(({ field, mandatory }) => {
+    const [has, wants] =
+      field === "sector" ? [seeker.org.sector, list(m?.sectors)]
+      : field === "country" ? [seeker.org.country, list(m?.countries)]
+      : field === "stage" ? [a?.stage ?? "–", list(m?.stages)]
+      : field === "ticket" ? [a ? compact(a.amount, a.currency) : "–", m ? `${compact(m.ticketMin, m.currency)} to ${compact(m.ticketMax, m.currency)}` : "none set"]
+      : field === "instrument" ? [a?.instrument ?? "–", list(m?.instruments)]
+      : [f.exclusionHit ? `Hits “${f.exclusionHit}”` : "No exclusion hit", list(m?.exclusions)];
+    return { field, label: MATCH_LABEL[field], mandatory, ok: f.met.includes(field), has, wants };
+  });
+}

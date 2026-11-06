@@ -6,8 +6,9 @@ import { Empty, KV, PageHeader, Section } from "@/components/ui";
 import { MATCH_LABEL, compact, consentGranted, drCan, introExpiresAt, matchStage, staffName } from "@/lib/dealroom/logic";
 import type { DrApplication, DrMatch } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
-import { Pill, Refusal, When, typeLabel, useDr } from "../../bits";
+import { Pill, Refusal, typeLabel, useDr } from "../../bits";
 import { StagePill } from "../../stage";
+import { FitDetail, PairTimeline } from "../../pair";
 
 export function MatchDetail({ id }: { id: string }) {
   const { dr, cfg, me, now, hydrated } = useDr();
@@ -45,6 +46,10 @@ export function MatchDetail({ id }: { id: string }) {
           ))}
         </div>
         {m.override && <p className="mt-2 text-[13px] text-slate">Re-proposed by {staffName(dr, m.override.by)}: {m.override.reason}</p>}
+        {/* how each field was judged: what the seeker has against what the provider's mandate asks */}
+        <div className="mt-4 border-t border-line pt-4">
+          <FitDetail seeker={s} provider={p} />
+        </div>
       </Section>
       {m.decision === "Approved" && <Brief m={m} />}
       {m.decision === "Approved" && <Introduction m={m} s={s} p={p} />}
@@ -59,16 +64,8 @@ export function MatchDetail({ id }: { id: string }) {
         </Section>
       )}
       {stage !== "Accepted" && !meeting && m.intro && <p className="mt-3 text-[13px] text-slate">A meeting can be scheduled only once both parties accept.</p>}
-      <Section title="History" flush className="mt-4">
-        <ul>
-          {m.history.map((h, i) => (
-            <li key={i} className="grid grid-cols-[170px_160px_1fr] gap-3 px-5 py-2 border-b border-line last:border-0 text-[13px]">
-              <When at={h.at} />
-              <span className="text-slate">{h.by === m.seekerId ? s.org.name : h.by === m.providerId ? p.org.name : staffName(dr, h.by)}</span>
-              <span>{h.what}</span>
-            </li>
-          ))}
-        </ul>
+      <Section title="History" className="mt-4">
+        <PairTimeline m={m} />
       </Section>
     </>
   );
