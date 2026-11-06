@@ -392,8 +392,12 @@ nav.actionbar { display: none; }
 .choice:first-of-type { border-top: 0; padding-top: 0; }
 .choice h3 { grid-column: 1; font-size: 20px; font-weight: 500; letter-spacing: -0.01em; }
 .choice:hover h3, .choice:focus-visible h3 { text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--line-strong); }
-.choice__price { grid-column: 2; grid-row: 1; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.choice__price { grid-column: 2; grid-row: 1; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; justify-self: end; }
+.choice__act { grid-column: 2; grid-row: 2 / span 2; align-self: start; justify-self: end; pointer-events: none; }
+.choice:hover .choice__act, .choice:focus-visible .choice__act { background: var(--ink); color: var(--bg); }
+.choice:disabled .choice__act { opacity: 0.6; }
 .choice p { grid-column: 1; }
+@media (max-width: 639px) { .choice__act { grid-column: 1; grid-row: auto; order: 10; justify-self: start; margin-top: var(--s-2); } }
 .choice .tile__meta { font-size: var(--t-small); color: var(--muted); }
 .choice:disabled { opacity: 0.5; cursor: not-allowed; }
 

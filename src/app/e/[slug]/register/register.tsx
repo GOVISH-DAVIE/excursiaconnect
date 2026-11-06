@@ -125,13 +125,17 @@ export function Register({ slug }: { slug: string }) {
 
         {step === 0 && (
           <div>
-            <h1 className="h1 mb-6">Choose a ticket</h1>
+            <h1 className="h1 mb-2">Choose a ticket</h1>
+            <p className="text-muted mb-6">Pick one to go on to your details. You can add colleagues to the same order on the next step.</p>
             {tiers.map((t) => {
               const left = t.cap - t.sold;
+              const closed = !!t.paused || (!!today && !!t.saleFrom && t.saleFrom > today);
+              const act = closed ? "Not on sale" : left <= 0 ? "Join the waitlist" : "Choose";
               return (
-                <button key={t.id} type="button" disabled={!!t.paused || (!!today && !!t.saleFrom && t.saleFrom > today)} aria-pressed={tierId === t.id} onClick={() => { setTierId(t.id); setStep(1); }} className="choice">
+                <button key={t.id} type="button" disabled={closed} aria-pressed={tierId === t.id} aria-label={`${act}: ${t.name}`} onClick={() => { setTierId(t.id); setStep(1); }} className="choice">
                   <h3>{t.name}</h3>
                   <span className="choice__price">{t.price === 0 ? "Free" : money(t.price, t.currency)}</span>
+                  <span className="choice__act btn btn-secondary btn-sm" aria-hidden="true">{act}{!closed && <span aria-hidden="true"> →</span>}</span>
                   <p>{t.description}</p>
                   <p className="tile__meta">
                     {t.paused ? "Sales paused" : !!today && !!t.saleFrom && t.saleFrom > today ? `On sale from ${t.saleFrom}` : left <= 0 ? "Sold out, join the waitlist: places are offered in order with 24 hours to pay" : `${left} of ${t.cap} places left`}
