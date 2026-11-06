@@ -6,12 +6,13 @@ import { useMemo, useState } from "react";
 import { Programme } from "@/components/programme";
 import { Bars, Empty, EventPill, Meter, PageHeader, Section, Stat, StatusPill, Tabs } from "@/components/ui";
 import { money, useStore } from "@/lib/store";
-import type { Delegate, EventRecord, FormField, Order, Room, Session, Tier, Zone } from "@/lib/types";
+import type { Delegate, EventRecord, FormField, Room, Session, Tier, Zone } from "@/lib/types";
 import { MediaTab } from "./media";
+import { ReportsTab, exportWorkbook, roomFigures } from "./reports";
 import { BrandEditor, FieldEditor, RoomEditor, SessionEditor, TierEditor, ZoneEditor } from "./editors";
 import { readableOn } from "@/lib/brand";
 
-const tabs = ["Overview", "Delegates", "Tickets and form", "Programme", "Media", "Zones and rooms", "Finance"] as const;
+const tabs = ["Overview", "Delegates", "Tickets and form", "Programme", "Media", "Zones and rooms", "Finance", "Reports"] as const;
 type Tab = (typeof tabs)[number];
 
 export function EventWorkspace({ id }: { id: string }) {
@@ -33,6 +34,7 @@ export function EventWorkspace({ id }: { id: string }) {
   const orders = state.orders.filter((o) => o.eventId === id);
   const zones = state.zones.filter((z) => z.eventId === id);
   const sessions = state.sessions.filter((s) => s.eventId === id);
+  const rooms = state.rooms.filter((r) => zones.some((z) => z.id === r.zoneId));
 
   const confirmed = delegates.filter((d) => d.status === "Confirmed" || d.status === "Checked in");
   const checkedIn = delegates.filter((d) => d.checkIns.length > 0);
@@ -76,8 +78,8 @@ export function EventWorkspace({ id }: { id: string }) {
                 <button className="btn-quiet" onClick={() => setClosing(false)}>Keep open</button>
               </span>
             )}
-            {event.state === "Closed" && (
-              <button className="btn-primary" onClick={() => exportWorkbook(event, delegates, orders, tiers)}>
+            {(event.state === "Live" || event.state === "Closed" || event.state === "Suspended") && (
+              <button className={event.state === "Closed" ? "btn-primary" : "btn-secondary"} onClick={() => exportWorkbook(state, event, delegates, orders, tiers, sessions, rooms, zones)}>
                 Download report
               </button>
             )}
@@ -96,7 +98,7 @@ export function EventWorkspace({ id }: { id: string }) {
             <Stat label="Awaiting your approval" value={pending.length} tone={pending.length ? "warn" : undefined} sub="invite-only tiers" href={`${base}?tab=Delegates&status=Pending`} />
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid gap-4 lg:grid-cols-4">
             <Section title="Registrations, last 12 days" className="lg:col-span-2">
               <Bars values={event.registrationsByDay.length ? event.registrationsByDay : [0]} height={120} labels={["12 days ago", "Today"]} />
             </Section>
@@ -148,6 +150,24 @@ export function EventWorkspace({ id }: { id: string }) {
                 </tbody>
               </table>
             </Section>
+            <Section title="Rooms, checked in" flush action={<Link href={`${base}?tab=Reports`} className="text-[13px] font-medium text-coral">Reports</Link>}>
+              <ul>
+                {rooms.map((r) => {
+                  const f = roomFigures(state, r, sessions);
+                  return (
+                    <li key={r.id} className="px-5 py-2.5 border-b border-line last:border-0 text-sm">
+                      <div className="flex justify-between gap-3">
+                        <span className="font-medium truncate">{r.name}</span>
+                        <span className="num text-slate whitespace-nowrap">{f.held ? `${f.checkedIn} in · ${f.attendance}%` : "no session yet"}</span>
+                      </div>
+                      <div className="mt-1.5"><Meter value={f.checkedIn} max={Math.max(1, f.roster)} warnAt={2} badAt={2} /></div>
+                      <div className="mt-1 text-[12px] text-slate">{f.held} of {f.sessions} sessions held, {f.roster} enrolled{f.walkIns ? `, ${f.walkIns} walk-ins` : ""}</div>
+                    </li>
+                  );
+                })}
+                {rooms.length === 0 && <li className="px-5 py-3 text-sm text-slate">No rooms yet.</li>}
+              </ul>
+            </Section>
             <Section title="Breakout fill" flush>
               <ul>
                 {sessions
@@ -191,6 +211,8 @@ export function EventWorkspace({ id }: { id: string }) {
           Closed {event.closedAt}. The figures below are final; the workbook holds every delegate and order.
         </div>
       )}
+
+      {tab === "Reports" && <ReportsTab event={event} base={base} />}
 
       {tab === "Delegates" && <DelegatesTab event={event} delegates={delegates} tiers={tiers} base={base} initialStatus={search.get("status") ?? "All"} tierName={(tid) => tiers.find((t) => t.id === tid)?.name ?? ""} />}
 
@@ -425,19 +447,6 @@ export function EventWorkspace({ id }: { id: string }) {
 }
 
 /** The post-event workbook (OR-17, FI-8): one CSV with every delegate and every order. */
-function exportWorkbook(event: { name: string }, delegates: Delegate[], orders: Order[], tiers: { id: string; name: string }[]) {
-  const tierName = (id: string) => tiers.find((t) => t.id === id)?.name ?? "";
-  const lines = ["Delegates", "Name,Email,Phone,Organisation,Category,Tier,Status,Accredited,Days checked in"];
-  for (const d of delegates) lines.push([d.name, d.email, d.phone, d.organisation, d.category, tierName(d.tierId), d.status, d.accredited ? "Yes" : "No", d.checkIns.length].map((v) => `"${v}"`).join(","));
-  lines.push("", "Orders", "Date,Delegate,Tier,Method,Reference,Gross,Discount,Gateway fee,Commission,Net,Status");
-  for (const o of orders) lines.push([o.at, delegates.find((d) => d.id === o.delegateId)?.name ?? o.delegateId, tierName(o.tierId), o.method, o.reference, o.gross, o.discount, o.gatewayFee, o.commission, o.net, o.status].map((v) => `"${v}"`).join(","));
-  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `${event.name.replace(/\W+/g, "-").toLowerCase()}-report.csv`;
-  a.click();
-}
-
 /** OR-11: a sponsor's invite list as CSV: name, email, phone, organisation[, category]. Badges issued, no payment. */
 function parseCsv(text: string) {
   const rows = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => l.split(",").map((c) => c.replace(/^"|"$/g, "").trim()));

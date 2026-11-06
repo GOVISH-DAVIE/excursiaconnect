@@ -36,7 +36,7 @@ Checked against [stakeholders-and-processes.md](stakeholders-and-processes.md) o
 | OR-14 | Change a live event | Built | A price change on a live tier returns the event to Under review; registration continues at the approved price and the new one takes effect when Algotech approves, which returns the event to Live |
 | OR-15 | Watch the event live | Built | Overview: registrations, attendance, occupancy, revenue, with a drill-down behind every number |
 | OR-16 | Request a payout | Partial | Payouts and statements shown; the weekly run is automatic |
-| OR-17 | Close the event and get the report | Built | Close event on a live event; Download report (workbook of delegates and orders) |
+| OR-17 | Close the event and get the report | Built | Close event on a live event; Download report at any time (delegates, orders, rooms, sessions, zones); the Reports tab shows room performance, session attendance, zone traffic, desk check-ins and tickets |
 
 ## Organiser staff (OS)
 
@@ -89,7 +89,7 @@ Checked against [stakeholders-and-processes.md](stakeholders-and-processes.md) o
 | AZ-3 | Delegate with no badge | Partial | Reissue from the record; no search on the scanner |
 | AZ-4 | Scan at a zone entrance or exit | Built | Allow or deny with the reason; occupancy updated |
 | AZ-5 | Override a deny | Built | PIN and reason, logged |
-| AZ-6 | Scan at a room door | Partial | Rooms are not posts yet |
+| AZ-6 | Scan at a room door | Built | `/scan`: every room is a post; enrolled delegates pass, walk-ins only where the facilitator allows and seats remain; one entry per session |
 | AZ-7 | Keep scanning offline | Partial | A toggle |
 | AZ-8 | Watch occupancy at a post | Built | Live count on the scanner |
 
@@ -114,4 +114,4 @@ The scan verdict now runs all four checks in order: valid badge, entitled here a
 
 ## Still to build for a first paid event
 
-In order of risk: per-message delivery status (OS-5), the abandoned-registration reminder (DE-7, needs a server), and rooms as scanner posts (AZ-6). Everything else in the MVP column of the use-case index now has a working path on mock data.
+In order of risk: per-message delivery status (OS-5) and the abandoned-registration reminder (DE-7, needs a server). Everything else in the MVP column of the use-case index now has a working path on mock data.

@@ -162,11 +162,20 @@ orders.push(
   { id: "o_demo", eventId: EV, delegateId: "d_demo", tierId: "t_full", gross: 12000, discount: 0, gatewayFee: 180, commission: 600, net: 11400, method: "mpesa", reference: "RKJ3M8Q2TX", status: "paid", at: "2026-10-02" },
   { id: "o_vip", eventId: EV, delegateId: "d_vip", tierId: "t_vip", gross: 25000, discount: 0, gatewayFee: 375, commission: 1250, net: 23750, method: "card", reference: "PSK_7f21c0ab", status: "paid", at: "2026-09-28" },
 );
-// a session's counter is the roster: the number of delegates who hold a seat
+// a session's counter is the roster: the number of delegates who hold a seat. An ended session's attendance
+// is its room-door scans, so the seed writes those on the first `attended` people of the roster.
 for (const s of sessions) {
   if (s.kind !== "breakout") continue;
-  s.enrolled = delegates.filter((d) => d.sessions.includes(s.id)).length;
+  const roster = delegates.filter((d) => d.sessions.includes(s.id));
+  s.enrolled = roster.length;
   s.attended = Math.min(s.attended, s.enrolled);
+  if (s.status === "ended" && s.roomId) {
+    const [h, m] = s.start.split(":").map(Number);
+    roster.slice(0, s.attended).forEach((d, i) => {
+      const t = new Date(2026, 0, 1, h, m - 8 + Math.floor((i * 17) % 22));
+      d.roomLog = [...(d.roomLog ?? []), { roomId: s.roomId!, sessionId: s.id, day: s.day, at: `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}`, verdict: "allow" }];
+    });
+  }
 }
 delegates[2] = { ...delegates[2], id: "d_cancel", name: "Terry Maina", email: "terry.maina@mkopa.com", status: "Cancelled", badgeCode: "EXC-CANC-0007", cancelled: true };
 

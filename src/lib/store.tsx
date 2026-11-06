@@ -51,6 +51,7 @@ type Action =
   | { type: "setProfileLock"; eventId: string; locked: boolean }
   | { type: "releaseWaitlist"; delegateId: string }
   | { type: "expireOffer"; delegateId: string }
+  | { type: "roomScan"; delegateId: string; roomId: string; sessionId: string; day: number; verdict: "allow" | "deny" | "override"; reason?: string }
   | { type: "requestRefund"; delegateId: string }
   | { type: "markPaid"; delegateId: string; method?: PaymentMethod }
   | { type: "addOrganiser"; organiser: AppState["organisers"][number] }
@@ -260,6 +261,11 @@ function reducer(state: AppState, action: Action): AppState {
         ),
       };
     }
+    case "roomScan":
+      return {
+        ...state,
+        delegates: state.delegates.map((d) => (d.id === action.delegateId ? { ...d, roomLog: [{ roomId: action.roomId, sessionId: action.sessionId, day: action.day, at: nowTime(), verdict: action.verdict, reason: action.reason }, ...(d.roomLog ?? [])] } : d)),
+      };
     case "enrol": {
       if (action.on) {
         // one seat per slot: a session that overlaps something already enrolled on the same day is refused
@@ -460,6 +466,31 @@ const PERIODS: { id: string; date: string; from: string; to: string; status: "Pa
   { id: "po_3", date: "2026-10-30", from: "2026-10-18", to: "2026-10-24", status: "Paid" },
   { id: "po_4", date: "2026-11-06", from: "2026-10-25", to: "9999-99-99", status: "Scheduled" },
 ];
+
+/** The session a room door is scanning for: the live one, else the next scheduled one that day, else the last ended. */
+export function sessionAtRoom(state: AppState, roomId: string, day: number): Session | undefined {
+  const here = state.sessions.filter((s) => s.roomId === roomId && s.day === day).sort((a, b) => a.start.localeCompare(b.start));
+  return here.find((s) => s.status === "live") ?? here.find((s) => s.status === "scheduled") ?? here[here.length - 1];
+}
+
+/** AZ-6: the room door. Valid, paid and accredited first; then enrolled, or a walk-in where the facilitator allows it. */
+export function roomVerdict(state: AppState, code: string, roomId: string, day: number): ScanVerdict & { session?: Session } {
+  const delegate = state.delegates.find((d) => d.badgeCode.toLowerCase() === code.trim().toLowerCase() || d.id === code.trim());
+  if (!delegate || delegate.cancelled || delegate.status === "Cancelled" || delegate.status === "Refunded") return { verdict: "deny", reason: "Invalid or cancelled badge", delegate };
+  if (delegate.status === "Pending" || delegate.status === "Awaiting payment") return { verdict: "deny", reason: "Registration not paid", delegate };
+  if (delegate.status === "Waitlisted" || delegate.status === "Refund requested") return { verdict: "deny", reason: delegate.status === "Waitlisted" ? "On the waitlist, no seat yet" : "Refund requested", delegate };
+  if (!delegate.accredited) return { verdict: "deny", reason: "Not accredited: go to the desk first", delegate };
+  const session = sessionAtRoom(state, roomId, day);
+  if (!session) return { verdict: "deny", reason: "No session in this room today", delegate };
+  if (session.status === "ended") return { verdict: "deny", reason: `${session.title} has ended`, delegate, session };
+  if ((delegate.roomLog ?? []).some((l) => l.sessionId === session.id && l.verdict !== "deny")) return { verdict: "deny", reason: "Already in this session", delegate, session };
+  const enrolled = delegate.sessions.includes(session.id);
+  if (enrolled) return { verdict: "allow", reason: `Enrolled: ${session.title}`, delegate, session };
+  const seats = state.delegates.filter((d) => (d.roomLog ?? []).some((l) => l.sessionId === session.id && l.verdict !== "deny")).length;
+  const room = state.rooms.find((r) => r.id === roomId);
+  if (session.walkIns && room && seats < room.capacity) return { verdict: "allow", reason: `Walk-in: ${session.title}`, delegate, session };
+  return { verdict: "deny", reason: session.walkIns ? `${room?.name ?? "Room"} is full` : `Not enrolled: ${session.title} is enrolled only`, delegate, session };
+}
 
 export function payoutsFor(state: AppState, organiserId: string): Payout[] {
   const eventIds = state.events.filter((e) => e.organiserId === organiserId).map((e) => e.id);

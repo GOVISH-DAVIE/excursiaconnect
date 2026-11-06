@@ -124,6 +124,7 @@ export interface Delegate {
   accredited: boolean;
   checkIns: { day: number; at: string }[];
   zoneLog: { zoneId: string; direction: "in" | "out"; at: string; verdict: "allow" | "deny" | "override"; reason?: string }[];
+  roomLog?: { roomId: string; sessionId: string; day: number; at: string; verdict: "allow" | "deny" | "override"; reason?: string }[]; // AZ-6: scans at a room door, one per session
   sessions: string[];
   bookable: boolean;
   slots?: { day: number; time: string; location: string; bookedBy?: string }[];

@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { Logo } from "@/components/ui";
-import { scanVerdict, useStore } from "@/lib/store";
+import { roomVerdict, scanVerdict, sessionAtRoom, useStore } from "@/lib/store";
 import type { Delegate } from "@/lib/types";
 
-type Post = { kind: "desk" } | { kind: "zone"; zoneId: string; direction: "in" | "out" };
+type Post = { kind: "desk" } | { kind: "zone"; zoneId: string; direction: "in" | "out" } | { kind: "room"; roomId: string };
+const DAY = 1; // the prototype's event day
 
 export default function Scanner() {
   const { state, dispatch } = useStore();
@@ -21,6 +22,10 @@ export default function Scanner() {
   const [log, setLog] = useState<{ name: string; verdict: string; at: string }[]>([]);
 
   const zone = post.kind === "zone" ? zones.find((z) => z.id === post.zoneId) : null;
+  const rooms = state.rooms.filter((r) => zones.some((z) => z.id === r.zoneId));
+  const room = post.kind === "room" ? rooms.find((r) => r.id === post.roomId) : null;
+  const roomSession = post.kind === "room" ? sessionAtRoom(state, post.roomId, DAY) : undefined;
+  const roomIn = roomSession ? state.delegates.filter((d) => (d.roomLog ?? []).some((l) => l.sessionId === roomSession.id && l.verdict !== "deny")).length : 0;
   const tierOf = (d: Delegate) => state.tiers.find((t) => t.id === d.tierId)?.name;
   const now = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
@@ -33,6 +38,11 @@ export default function Scanner() {
       if (d.status === "Pending" || d.status === "Awaiting payment") return done({ verdict: "deny", reason: "Registration not paid", delegate: d });
       dispatch({ type: "accredit", delegateId: d.id, day: 1 });
       return done({ verdict: "allow", reason: d.accredited ? "Already accredited" : "Accredited, badge printed", delegate: d });
+    }
+    if (post.kind === "room") {
+      const v = roomVerdict(state, c, post.roomId, DAY);
+      if (v.delegate && v.session) dispatch({ type: "roomScan", delegateId: v.delegate.id, roomId: post.roomId, sessionId: v.session.id, day: DAY, verdict: v.verdict, reason: v.reason });
+      return done(v);
     }
     const v = scanVerdict(state, c, post.zoneId, post.direction);
     if (v.delegate) dispatch({ type: "scan", delegateId: v.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: v.verdict, reason: v.reason, day: 1 });
@@ -50,8 +60,13 @@ export default function Scanner() {
   }
 
   function doOverride() {
-    if (!result?.delegate || post.kind !== "zone" || pin.length < 4 || !reason) return;
-    dispatch({ type: "scan", delegateId: result.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: "override", reason, day: 1 });
+    if (!result?.delegate || post.kind === "desk" || pin.length < 4 || !reason) return;
+    if (post.kind === "room") {
+      if (!roomSession) return;
+      dispatch({ type: "roomScan", delegateId: result.delegate.id, roomId: post.roomId, sessionId: roomSession.id, day: DAY, verdict: "override", reason });
+    } else {
+      dispatch({ type: "scan", delegateId: result.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: "override", reason, day: 1 });
+    }
     done({ verdict: "override", reason: `Override: ${reason}`, delegate: result.delegate });
   }
 
@@ -77,10 +92,11 @@ export default function Scanner() {
           <label className="text-[13px] text-white/60">My post</label>
           <select
             className="mt-1 w-full rounded-lg bg-white/10 px-3 py-2.5 text-sm"
-            value={post.kind === "desk" ? "desk" : `${post.zoneId}:${post.direction}`}
+            value={post.kind === "desk" ? "desk" : post.kind === "room" ? `room:${post.roomId}` : `${post.zoneId}:${post.direction}`}
             onChange={(e) => {
               const v = e.target.value;
               if (v === "desk") setPost({ kind: "desk" });
+              else if (v.startsWith("room:")) setPost({ kind: "room", roomId: v.slice(5) });
               else {
                 const [zoneId, direction] = v.split(":");
                 setPost({ kind: "zone", zoneId, direction: direction as "in" | "out" });
@@ -97,7 +113,30 @@ export default function Scanner() {
                 {z.name}, exit
               </option>,
             ])}
+            {rooms.map((r) => (
+              <option key={r.id} value={`room:${r.id}`}>
+                {r.name}, door
+              </option>
+            ))}
           </select>
+          {room && (
+            <div className="mt-2 text-[13px] text-white/60">
+              {roomSession ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="truncate">
+                    {roomSession.status === "live" ? "Live now: " : roomSession.status === "ended" ? "Ended: " : "Next: "}
+                    {roomSession.title}
+                    {roomSession.walkIns ? ", walk-ins allowed" : ", enrolled only"}
+                  </span>
+                  <span className={`tabular-nums font-medium ${roomIn / room.capacity >= 0.9 ? "text-coral" : "text-white"}`}>
+                    {roomIn} / {room.capacity} in
+                  </span>
+                </div>
+              ) : (
+                "No session in this room today"
+              )}
+            </div>
+          )}
           {zone && (
             <div className="mt-2 flex items-center justify-between text-[13px] text-white/60">
               <span>Occupancy</span>
@@ -147,7 +186,7 @@ export default function Scanner() {
                   </div>
                 </div>
               )}
-              {result.verdict === "deny" && result.delegate && post.kind === "zone" && !override && (
+              {result.verdict === "deny" && result.delegate && post.kind !== "desk" && !override && (
                 <button onClick={() => setOverride(true)} className="mt-3 w-full rounded-lg bg-white/20 py-2 text-sm font-medium">
                   Override with PIN
                 </button>

@@ -16,7 +16,10 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
   const zone = room ? state.zones.find((z) => z.id === room.zoneId) : undefined;
   const base = `/organiser/events/${event.id}`;
   const roster = state.delegates.filter((d) => d.sessions.includes(s.id));
-  const scannedIn = roster.filter((d) => d.checkIns.length > 0);
+  // the door: everyone the room scanner let in for this session, enrolled or walk-in
+  const inRoom = (d: { roomLog?: { sessionId: string; verdict: string }[] }) => (d.roomLog ?? []).some((l) => l.sessionId === s.id && l.verdict !== "deny");
+  const scannedIn = state.delegates.filter(inRoom);
+  const walkIns = scannedIn.filter((d) => !d.sessions.includes(s.id));
   // the counter is the roster: one number for the stat, the meter and the list
   const enrolled = roster.length;
   const fill = s.capacity ? Math.round((enrolled / s.capacity) * 100) : 0;
@@ -63,7 +66,7 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
         <>
           <div className="grid gap-4 sm:grid-cols-4 mb-4">
             <Stat label="Enrolled" value={enrolled} sub={`of ${s.capacity} seats, ${fill}% full`} tone={fill >= 100 ? "bad" : undefined} />
-            <Stat label={s.status === "ended" ? "Attended" : "Scanned in so far"} value={s.status === "ended" ? s.attended : scannedIn.length} sub={enrolled ? `${Math.round(((s.status === "ended" ? s.attended : scannedIn.length) / enrolled) * 100)}% of enrolled` : undefined} tone="ok" />
+            <Stat label={s.status === "ended" ? "Attended" : "Scanned in so far"} value={s.status === "ended" ? s.attended : scannedIn.length} sub={`${enrolled ? `${Math.round(((s.status === "ended" ? s.attended : scannedIn.length) / enrolled) * 100)}% of enrolled` : "no roster"}${walkIns.length ? `, ${walkIns.length} walk-in${walkIns.length > 1 ? "s" : ""}` : ""}`} tone="ok" />
             <Stat label="Rating" value={s.rating ? s.rating.toFixed(1) : "–"} sub={s.rating ? `${s.comments?.length ?? 0} comments` : "Opens when the session ends"} />
             <Stat label="Walk-ins" value={s.walkIns ? "Allowed" : "Enrolled only"} sub={<button className="text-coral font-medium" onClick={() => dispatch({ type: "updateSession", sessionId: s.id, patch: { walkIns: !s.walkIns } })}>{s.walkIns ? "Restrict to enrolled" : "Allow walk-ins"}</button>} />
           </div>
@@ -94,7 +97,7 @@ export function SessionDetail({ sessionId, mode }: { sessionId: string; mode: "o
                         </td>
                         <td className="td text-slate">{d.organisation}</td>
                         <td className="td text-slate">{d.category}</td>
-                        <td className="td">{d.checkIns.length ? <Tone tone="ok">In</Tone> : <Tone tone="mute">Not yet</Tone>}</td>
+                        <td className="td">{inRoom(d) ? <Tone tone="ok">In</Tone> : <Tone tone="mute">Not yet</Tone>}</td>
                       </tr>
                     ))}
                   </tbody>
