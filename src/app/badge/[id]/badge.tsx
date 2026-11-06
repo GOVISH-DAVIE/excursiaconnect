@@ -39,7 +39,7 @@ export function Badge({ id }: { id: string }) {
   const people = state.delegates.filter((d) => d.id !== me.id && d.eventId === event.id && d.bookable && (d.status === "Confirmed" || d.status === "Checked in") && (query === "" || `${d.name} ${d.organisation}`.toLowerCase().includes(query.toLowerCase()))).slice(0, 12);
   const threads = [...new Set(state.messages.filter((m) => m.from === me.id || m.to === me.id).map((m) => (m.from === me.id ? m.to : m.from)))];
   const thread = chatWith ? state.messages.filter((m) => (m.from === me.id && m.to === chatWith) || (m.from === chatWith && m.to === me.id)) : [];
-  const catColor: Record<string, string> = { Speaker: "#5B2A86", Panelist: "#5B2A86", Sponsor: "#0A7E8C", Exhibitor: "#0A7E8C", VIP: "#B8860B", "General Delegate": event.brand.primary };
+  const catColor: Record<string, string> = { Speaker: "#5B2A86", Panelist: "#5B2A86", Sponsor: "#0A7E8C", Exhibitor: "#0A7E8C", VIP: "#B8860B", "General Delegate": event.brand.primary, "Deal Room": "#1F2937" };
 
   return (
     <div className="min-h-screen bg-paper">

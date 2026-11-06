@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { Section } from "@/components/ui";
 import { CATEGORIES, useStore } from "@/lib/store";
+import { toMin } from "@/lib/time";
 import { readableOn } from "@/lib/brand";
 import type { Category, EventRecord, FormField, Room, Session, Tier, Zone } from "@/lib/types";
 
@@ -167,7 +168,6 @@ export function FieldEditor({ eventId, field, onClose }: { eventId: string; fiel
 
 /* ---------- sessions ---------- */
 
-const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 
 export function SessionEditor({ eventId, session, onClose }: { eventId: string; session?: Session; onClose: () => void }) {
   const { state, dispatch } = useStore();

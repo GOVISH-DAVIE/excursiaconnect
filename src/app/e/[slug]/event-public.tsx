@@ -150,6 +150,11 @@ export function EventPublic({ slug }: { slug: string }) {
                 {label}
               </a>
             ))}
+            {event.dealRoom?.enabled && (
+              <Link className="nav__link" href={`/e/${event.slug}/deal-room`}>
+                Deal Room
+              </Link>
+            )}
           </nav>
           <a className="nav__logo" href="#top">
             {mark}
@@ -172,6 +177,7 @@ export function EventPublic({ slug }: { slug: string }) {
                   {label}
                 </a>
               ))}
+              {event.dealRoom?.enabled && <Link href={`/e/${event.slug}/deal-room`}>Deal Room</Link>}
               {live && (
                 <Link href={register} className="btn btn-primary btn-cta">
                   {action}

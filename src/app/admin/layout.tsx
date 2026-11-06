@@ -11,6 +11,7 @@ export default function AdminLayout({ children }: LayoutProps<"/admin">) {
         { href: "/admin/performance", label: "Performance" },
         { href: "/admin/organisers", label: "Organisers" },
         { href: "/admin/finance", label: "Commission and payouts" },
+        { href: "/admin/deal-room", label: "Deal Room" },
       ]}
     >
       {children}

@@ -1,3 +1,5 @@
+import type { DealRoomState } from "./dealroom/types";
+
 export type EventState =
   | "Draft"
   | "Submitted"
@@ -25,7 +27,8 @@ export type Category =
   | "Sponsor"
   | "Exhibitor"
   | "VIP"
-  | "General Delegate";
+  | "General Delegate"
+  | "Deal Room"; // issued by the Deal Room on approval or verification; never offered on the public form
 
 export type PaymentMethod = "mpesa" | "card" | "bank";
 
@@ -179,6 +182,7 @@ export interface EventRecord {
   profileLocked?: boolean; // OS-10: delegates can no longer edit their profile
   closedAt?: string; // OR-17
   history?: { at: string; what: string }[]; // approval history
+  dealRoom?: { enabled: boolean; addOnPrice: number; deskStaff: number }; // DA-1: the add-on, fixed on the approval record
 }
 
 /** A reconciliation exception the nightly job raised (PA-6). */
@@ -316,4 +320,5 @@ export interface AppState {
   orders: Order[];
   messages: Message[];
   currentDelegateId?: string;
+  dealRoom: DealRoomState;
 }

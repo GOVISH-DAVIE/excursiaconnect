@@ -1,5 +1,7 @@
 import type { AppState, Delegate, Order, Session, Shift, TeamMember } from "./types";
 import { DEFAULT_GRANTS } from "./roles";
+import { bouer, ca3, ca3Rooms, ca3Tiers, ca3Zones, seedDealRoom } from "./dealroom/seed";
+import { DR_TIER, DR_ZONE } from "./dealroom/logic";
 
 const team: TeamMember[] = [
   { id: "u_owner", organiserId: "org_epic", name: "Njeri Kamande", email: "njeri@epicpr.example", role: "Owner", eventIds: [], status: "Active", lastActive: "Today, 09:12" },
@@ -198,6 +200,11 @@ for (const sess of sessions) {
   if (sess.status === "ended") sess.attended = Math.round(sess.enrolled * 0.78);
 }
 
+// the Deal Room's event: Bouer's Connected Africa 3.0, its participants badged on approval or verification
+const deal = seedDealRoom();
+const ca3TierRows = ca3Tiers.map((t) => (t.id === DR_TIER ? { ...t, sold: deal.delegates.length } : t));
+const ca3ZoneRows = ca3Zones.map((z) => (z.id === DR_ZONE ? { ...z, occupancy: deal.drZoneInside } : z));
+
 const liveIds = new Set(delegates.map((d) => d.id));
 const cleanOrders = orders.filter((o) => liveIds.has(o.delegateId));
 
@@ -234,21 +241,24 @@ export const seed: AppState = {
   organisers: [
     { id: "org_epic", name: "Epic PR & Events Ltd", kycStatus: "Verified", kraPin: "P051234567X", registrationNo: "PVT-2019-44821", payoutAccount: "KCB ****4471", licenceFee: 85000, commissionPct: 5 },
     { id: "org_coast", name: "Coastal Communications", kycStatus: "Pending", kraPin: "P059876543Y", registrationNo: "PVT-2022-11930", payoutAccount: "M-Pesa till 5522118", licenceFee: 60000, commissionPct: 6 },
+    bouer, // after Epic: several screens take organisers[0] as the signed-in organiser
   ],
   events: [
     { id: EV, slug: "nairobi-brand-summit-2026", organiserId: "org_epic", name: "Nairobi Brand & PR Summit 2026", tagline: "Three days on the future of brands, media and events in East Africa.", venue: "Sarit Expo Centre", city: "Nairobi", startDate: "2026-11-25", endDate: "2026-11-27", days: 3, state: "Live", commissionPct: 5, oneOffFee: 0, licenceFee: 85000, gatewayFeesBorneBy: "Algotech", staffCount: 4, stations: 3, expectedAttendance: 500, brand: { primary: "#0F4C81", logoText: "EPIC" }, registrationsByDay: [4, 9, 14, 11, 22, 31, 28, 19, 26, 34, 14, 8] },
     { id: EV2, slug: "coastal-tourism-media-week", organiserId: "org_coast", name: "Coastal Tourism Media Week", tagline: "Mombasa's annual meeting of tourism brands and the press.", venue: "Sarova Whitesands", city: "Mombasa", startDate: "2027-02-10", endDate: "2027-02-11", days: 2, state: "Submitted", commissionPct: 6, oneOffFee: 0, licenceFee: 60000, gatewayFeesBorneBy: "Algotech", staffCount: 2, stations: 2, expectedAttendance: 300, brand: { primary: "#0A7E8C", logoText: "CTMW" }, registrationsByDay: [] },
     { id: EV3, slug: "east-africa-fintech-forum", organiserId: "org_epic", name: "East Africa Fintech Forum", tagline: "Payments, lending and the next 100 million customers.", venue: "Radisson Blu Upper Hill", city: "Nairobi", startDate: "2027-03-18", endDate: "2027-03-18", days: 1, state: "Draft", commissionPct: 5, oneOffFee: 0, licenceFee: 85000, gatewayFeesBorneBy: "Algotech", staffCount: 0, stations: 0, expectedAttendance: 400, brand: { primary: "#5B2A86", logoText: "EAFF" }, registrationsByDay: [] },
+    ca3,
   ],
-  tiers,
-  zones,
-  rooms,
+  tiers: [...tiers, ...ca3TierRows],
+  zones: [...zones, ...ca3ZoneRows],
+  rooms: [...rooms, ...ca3Rooms],
   sessions,
-  delegates,
+  delegates: [...delegates, ...deal.delegates],
   orders: cleanOrders,
   messages: [
     { id: "m1", from: "d_vip", to: "d_demo", body: "Hi Amina, enjoyed your question in the opening plenary. Free for 10 minutes at 16:00?", at: "10:42" },
     { id: "m2", from: "d_demo", to: "d_vip", body: "Yes, VIP lounge works. See you then.", at: "10:51" },
   ],
   currentDelegateId: "d_demo",
+  dealRoom: deal.dr,
 };

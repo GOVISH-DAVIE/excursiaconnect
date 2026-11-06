@@ -70,6 +70,7 @@ export default function AdminQueue() {
                       ["Venue", `${open.venue}, ${open.city}`],
                       ["Expected attendance", String(open.expectedAttendance)],
                       ["Paid tiers", state.tiers.filter((t) => t.eventId === open.id && t.price > 0).map((t) => `${t.name} ${money(t.price, t.currency)}`).join(", ") || "Not set yet"],
+                      ["Deal Room", open.dealRoom?.enabled ? `Add-on ${money(open.dealRoom.addOnPrice)}, desk staff ${open.dealRoom.deskStaff} a day` : "Not included"],
                     ].map(([k, v]) => (
                       <div key={k} className="flex justify-between gap-3 py-1 border-b border-line last:border-0">
                         <dt className="text-slate">{k}</dt>
@@ -142,6 +143,37 @@ export default function AdminQueue() {
                 <div>
                   <label className="label">Accreditation stations</label>
                   <input type="number" min={0} max={20} className="input" value={f("stations")} onChange={(e) => setF("stations", clamp(e.target.value, 0, 20))} />
+                </div>
+                {/* DA-1: the Deal Room add-on, fixed on the approval record with its price and desk staffing */}
+                <div className="sm:col-span-3 rounded-md border border-line p-3">
+                  <label className="flex items-center gap-2 text-[14px] font-medium">
+                    <input type="checkbox" checked={!!f("dealRoom")?.enabled} onChange={(e) => setF("dealRoom", { addOnPrice: 450000, deskStaff: 3, ...(f("dealRoom") ?? {}), enabled: e.target.checked })} />
+                    Deal Room add-on
+                  </label>
+                  {f("dealRoom")?.enabled && (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="label">Add-on price (KES)</label>
+                        <input type="number" min={0} className="input" value={f("dealRoom")!.addOnPrice} onChange={(e) => setF("dealRoom", { ...f("dealRoom")!, addOnPrice: clamp(e.target.value, 0) })} />
+                      </div>
+                      <div>
+                        <label className="label">Deal Room desk staff (per day)</label>
+                        <input type="number" min={0} max={20} className="input" value={f("dealRoom")!.deskStaff} onChange={(e) => setF("dealRoom", { ...f("dealRoom")!, deskStaff: clamp(e.target.value, 0, 20) })} />
+                      </div>
+                    </div>
+                  )}
+                  <p className="mt-2 text-[12px] text-slate">
+                    {state.dealRoom.configs[open.id] ? (
+                      <>
+                        Configured by the organiser&apos;s Deal Room lead.{" "}
+                        <Link href="/admin/deal-room" className="text-coral font-medium">
+                          Staff and support access
+                        </Link>
+                      </>
+                    ) : (
+                      "Saved with the terms when you approve; the organiser's Deal Room lead then configures missions, rubrics and rules."
+                    )}
+                  </p>
                 </div>
                 <div className="sm:col-span-3">
                   <label className="label">Note to organiser{open.state !== "Live" && open.state !== "Suspended" && open.state !== "Closed" ? " (needed to reject or request changes)" : ""}</label>

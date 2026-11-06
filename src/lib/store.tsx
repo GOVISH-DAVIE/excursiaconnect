@@ -2,18 +2,21 @@
 
 import { createContext, useContext, useEffect, useMemo, useReducer, type ReactNode } from "react";
 import { seed } from "./seed";
+import { overlaps } from "./time";
+import { drReducer, type DrAction } from "./dealroom/reducer";
 import type { AppState, Capability, Category, Delegate, EventState, FormField, Order, PaymentMethod, Role, Room, Session, SpeakerProfile, Sponsor, TeamMember, Tier, Zone } from "./types";
 
-const STORAGE_KEY = "excursiaconnect-proto-v1";
+export const STORAGE_KEY = "excursiaconnect-proto-v1";
+/** Bumped whenever the seed gains records in arrays that already exist, so a saved browser resets instead of
+ *  keeping an older copy that lacks them (hydrate only merges top-level keys). */
+export const SEED_VERSION = 2;
 
-/** Two sessions on the same day whose times cross. */
-export function overlaps(a: Pick<Session, "day" | "start" | "end">, b: Pick<Session, "day" | "start" | "end">) {
-  return a.day === b.day && a.start < b.end && b.start < a.end;
-}
+export { overlaps };
 
 export type ScanVerdict = { verdict: "allow" | "deny"; reason?: string; delegate?: Delegate };
 
 type Action =
+  | DrAction
   | { type: "reset" }
   | { type: "addGallery"; eventId: string; images: string[] }
   | { type: "removeGallery"; eventId: string; index: number }
@@ -81,6 +84,7 @@ function nowTime() {
 }
 
 function reducer(state: AppState, action: Action): AppState {
+  if (action.type.startsWith("dr/")) return drReducer(state, action as DrAction);
   switch (action.type) {
     case "reset":
       return structuredClone(seed);
@@ -112,7 +116,8 @@ function reducer(state: AppState, action: Action): AppState {
           const leavingLive = e.state === "Live" && (action.state === "Under review" || action.state === "Suspended");
           const restore = action.state === "Approved" && e.stateBefore === "Live";
           const next = restore ? "Live" : action.state;
-          const what = restore ? "Approved on the new terms; registration continues" : action.state + (action.note ? `: ${action.note}` : "");
+          const addOn = action.state === "Approved" && action.pricing?.dealRoom?.enabled ? `, with the Deal Room add-on at KES ${action.pricing.dealRoom.addOnPrice.toLocaleString("en-KE")} and ${action.pricing.dealRoom.deskStaff} desk staff a day` : "";
+          const what = (restore ? "Approved on the new terms; registration continues" : action.state + (action.note ? `: ${action.note}` : "")) + addOn;
           return { ...e, ...action.pricing, state: next, stateBefore: leavingLive ? "Live" : restore || action.state === "Live" ? undefined : e.stateBefore, reviewNote: action.note ?? e.reviewNote, history: [...(e.history ?? []), { at: stamp(), what }] };
         }),
         // the pending price takes effect on approval; a rejection or a request for changes drops it
@@ -232,7 +237,10 @@ function reducer(state: AppState, action: Action): AppState {
     case "upsertRoom":
       return { ...state, rooms: state.rooms.some((r) => r.id === action.room.id) ? state.rooms.map((r) => (r.id === action.room.id ? action.room : r)) : [...state.rooms, action.room] };
     case "removeRoom":
-      return state.sessions.some((s) => s.roomId === action.roomId) ? state : { ...state, rooms: state.rooms.filter((r) => r.id !== action.roomId) };
+      // a room that holds sessions or Deal Room meetings stays
+      return state.sessions.some((s) => s.roomId === action.roomId) || state.dealRoom.meetings.some((m) => m.roomId === action.roomId && m.status !== "Cancelled")
+        ? state
+        : { ...state, rooms: state.rooms.filter((r) => r.id !== action.roomId) };
     case "setBrand":
       return { ...state, events: state.events.map((e) => (e.id === action.eventId ? { ...e, brand: action.brand, tagline: action.tagline ?? e.tagline } : e)) };
     case "accredit":
@@ -373,29 +381,52 @@ function reducer(state: AppState, action: Action): AppState {
   }
 }
 
-const Ctx = createContext<{ state: AppState; dispatch: (a: Action) => void; hydrated: boolean } | null>(null);
+const Ctx = createContext<{ state: AppState; dispatch: (a: Action) => void; hydrated: boolean; storageFull: boolean } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, seed, (s) => structuredClone(s));
   const [hydrated, setHydrated] = useReducer(() => true, false);
 
+  const [storageFull, setStorageFull] = useReducer((_: boolean, v: boolean) => v, false);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) dispatch({ type: "hydrate", state: JSON.parse(raw) });
+      if (raw) {
+        const saved = JSON.parse(raw) as AppState & { __v?: number };
+        // an older save lacks records the seed has since gained: start from the seed instead
+        if (saved.__v === SEED_VERSION) dispatch({ type: "hydrate", state: saved });
+        else localStorage.removeItem(STORAGE_KEY);
+      }
     } catch {}
     setHydrated();
   }, []);
 
+  // saving waits for typing to settle: the whole state is written each time
   useEffect(() => {
     if (!hydrated) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {}
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, __v: SEED_VERSION }));
+        setStorageFull(false);
+      } catch {
+        setStorageFull(true);
+      }
+    }, 250);
+    return () => clearTimeout(t);
   }, [state, hydrated]);
 
-  const value = useMemo(() => ({ state, dispatch, hydrated }), [state, hydrated]);
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  const value = useMemo(() => ({ state, dispatch, hydrated, storageFull }), [state, hydrated, storageFull]);
+  return (
+    <Ctx.Provider value={value}>
+      {children}
+      {storageFull && (
+        <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-lg bg-bad text-white px-4 py-2.5 text-[14px] shadow-lg">
+          This browser&apos;s storage is full, so changes are not being saved. Remove uploaded images or reset the demo data.
+        </div>
+      )}
+    </Ctx.Provider>
+  );
 }
 
 export function useStore() {

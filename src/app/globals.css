@@ -575,3 +575,26 @@ a.prog__title:hover { text-decoration: underline; text-underline-offset: 4px; }
 .price > .btn { width: 100%; }
 .price > .btn-secondary { background: color-mix(in oklab, var(--ink) 8%, var(--bg)); }
 @media (max-width: 639px) { .hero__band { height: clamp(180px, 30svh, 240px); margin-bottom: var(--s-5); } }
+
+/* ============================================================================
+   The public Deal Room page: steps, the self-check and its verdict, on the site contract.
+   ========================================================================== */
+.dr-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gutter); }
+.dr-steps > li { display: grid; gap: var(--s-3); align-content: start; padding-top: var(--s-4); border-top: 1px solid var(--line-strong); }
+.dr-steps__n { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--action); color: var(--action-ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.dr-steps h3 { font-size: 20px; letter-spacing: -0.01em; }
+.dr-steps p { color: var(--ink); max-width: 36ch; }
+@media (max-width: 1023px) { .dr-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--s-6); } }
+@media (max-width: 639px) { .dr-steps { grid-template-columns: minmax(0, 1fr); } }
+
+.dr-toggle { display: inline-flex; padding: 4px; gap: 4px; border-radius: 999px; background: var(--surface); margin-bottom: var(--s-5); }
+.dr-toggle > button { padding: 8px 16px; border-radius: 999px; font-size: var(--t-small); font-weight: 500; color: var(--muted); }
+.dr-toggle > button[aria-selected="true"] { background: var(--ink); color: var(--bg); }
+.dr-form { display: grid; gap: var(--s-4); }
+.dr-form > label { display: grid; gap: 6px; font-size: var(--t-small); font-weight: 500; }
+.dr-check > li { grid-template-columns: minmax(0, 1fr) auto; }
+.dr-check > li > p { grid-column: 1 / -1; font-size: var(--t-small); }
+.dr-check > li[data-ok="yes"] .rows__value { color: var(--color-ok); }
+.dr-check > li[data-ok="no"] .rows__value { color: var(--color-bad); }
+.dr-verdict { margin-top: var(--s-6); display: grid; gap: var(--s-4); justify-items: start; }
+.dr-verdict b { font-weight: 500; }
