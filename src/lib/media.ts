@@ -8,6 +8,7 @@ export const LIMITS = {
   banner: { side: 1800, quality: 0.82 },
   photo: { side: 600, quality: 0.84 },
   logo: { side: 480, quality: 0.9 },
+  gallery: { side: 1400, quality: 0.8 },
 } as const;
 
 export function readImage(file: File, kind: keyof typeof LIMITS): Promise<string> {

@@ -193,6 +193,7 @@ export const seed: AppState = {
   payoutsPaid: [],
   banners: {},
   floorPlans: {},
+  galleries: {},
   speakerProfiles: [
     { eventId: "ev_nairobi_summit", name: "Hassan Abdalla", organisation: "Safaricom", jobTitle: "Chief Brand Officer" },
     { eventId: "ev_nairobi_summit", name: "Esther Njeri", organisation: "Nation Media", jobTitle: "Head of Communications" },

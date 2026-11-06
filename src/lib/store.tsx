@@ -10,6 +10,8 @@ export type ScanVerdict = { verdict: "allow" | "deny"; reason?: string; delegate
 
 type Action =
   | { type: "reset" }
+  | { type: "addGallery"; eventId: string; images: string[] }
+  | { type: "removeGallery"; eventId: string; index: number }
   | { type: "hydrate"; state: AppState }
   | { type: "register"; delegate: Delegate; order?: Order }
   | { type: "approveRegistration"; delegateId: string; approve: boolean }
@@ -285,6 +287,14 @@ function reducer(state: AppState, action: Action): AppState {
       const floorPlans = { ...state.floorPlans };
       if (action.image) floorPlans[action.eventId] = action.image; else delete floorPlans[action.eventId];
       return { ...state, floorPlans };
+    }
+    case "addGallery": {
+      const list = [...(state.galleries[action.eventId] ?? []), ...action.images].slice(0, 12);
+      return { ...state, galleries: { ...state.galleries, [action.eventId]: list } };
+    }
+    case "removeGallery": {
+      const list = (state.galleries[action.eventId] ?? []).filter((_, i) => i !== action.index);
+      return { ...state, galleries: { ...state.galleries, [action.eventId]: list } };
     }
     case "setSpeakerProfile": {
       const rest = state.speakerProfiles.filter((p) => !(p.eventId === action.profile.eventId && p.name === action.profile.name));

@@ -293,6 +293,7 @@ export interface AppState {
   payoutsPaid: string[]; // payout ids the admin has run (PA-7)
   banners: Record<string, string>; // eventId -> image data URL
   floorPlans: Record<string, string>; // eventId -> the venue's own plan; replaces the drawn schematic
+  galleries: Record<string, string[]>; // eventId -> photographs of the event or its last edition, in order
   speakerProfiles: SpeakerProfile[];
   sponsors: Sponsor[];
   team: TeamMember[];

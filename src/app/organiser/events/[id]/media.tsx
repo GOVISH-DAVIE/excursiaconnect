@@ -36,7 +36,7 @@ function LinksFields({ value, onChange, only, compact = false }: { value?: Socia
 }
 
 /** One file button in the system's look. */
-function Upload({ label, kind, onDone, className = "" }: { label: string; kind: "banner" | "photo" | "logo"; onDone: (dataUrl: string) => void; className?: string }) {
+function Upload({ label, kind, onDone, onMany, className = "" }: { label: string; kind: "banner" | "photo" | "logo" | "gallery"; onDone?: (dataUrl: string) => void; onMany?: (dataUrls: string[]) => void; className?: string }) {
   const [busy, setBusy] = useState(false);
   return (
     <label className={`btn btn-secondary cursor-pointer ${busy ? "opacity-60" : ""} ${className}`}>
@@ -44,13 +44,16 @@ function Upload({ label, kind, onDone, className = "" }: { label: string; kind: 
       <input
         type="file"
         accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        multiple={!!onMany}
         className="sr-only"
         onChange={async (e) => {
-          const f = e.target.files?.[0];
-          if (!f) return;
+          const files = Array.from(e.target.files ?? []);
+          if (!files.length) return;
           setBusy(true);
           try {
-            onDone(await readImage(f, kind));
+            const read = await Promise.all(files.map((f) => readImage(f, kind)));
+            if (onMany) onMany(read);
+            else onDone?.(read[0]);
           } finally {
             setBusy(false);
             e.target.value = "";
@@ -66,6 +69,7 @@ export function MediaTab({ eventId }: { eventId: string }) {
   const event = state.events.find((e) => e.id === eventId)!;
   const banner = state.banners[eventId];
   const floorPlan = state.floorPlans[eventId];
+  const gallery = state.galleries[eventId] ?? [];
   const sessions = state.sessions.filter((s) => s.eventId === eventId);
   const speakers = [...new Set(sessions.flatMap((s) => s.speakers))];
   const profile = (name: string) => state.speakerProfiles.find((p) => p.eventId === eventId && p.name === name);
@@ -86,10 +90,29 @@ export function MediaTab({ eventId }: { eventId: string }) {
           </div>
           <div className="space-y-3 text-[14px]">
             <Upload label={banner ? "Replace banner" : "Upload banner"} kind="banner" onDone={(img) => dispatch({ type: "setBanner", eventId, image: img })} />
-            <p className="text-slate">Fills the whole first screen of the public page behind the headline, and is the share image. A landscape photograph of the venue, the stage or last year&apos;s room, 1800 px or wider. The words sit on its left half, so that side must be dark and calm; the subject goes right of centre. Nothing is laid over the picture.</p>
+            <p className="text-slate">The picture behind the first screen of the public page, and the share image. A landscape photograph of the venue, the stage or last year&apos;s room, 1800 px or wider; the headline and the ticket panel sit over a dark wash, so a busy or bright picture still reads.</p>
             {banner && <p className="text-slate">Stored at {sizeOf(banner)}.</p>}
           </div>
         </div>
+      </Section>
+
+      <Section title={`Photo gallery, ${gallery.length}`} action={<Upload label="Add photos" kind="gallery" onMany={(imgs) => dispatch({ type: "addGallery", eventId, images: imgs })} className="btn-sm" />}>
+        {gallery.length === 0 ? (
+          <Empty>No photographs yet. Add up to twelve from last year&apos;s edition or the venue; the public page shows them in a grid under the programme.</Empty>
+        ) : (
+          <ul className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+            {gallery.map((src, i) => (
+              <li key={i} className="group relative rounded-md overflow-hidden bg-paper-200" style={{ aspectRatio: "4 / 3" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt="" className="h-full w-full object-cover" />
+                <button type="button" className="absolute top-1.5 right-1.5 h-7 px-2 rounded-md bg-ink/80 text-paper text-[12px] opacity-0 group-hover:opacity-100 focus:opacity-100" onClick={() => dispatch({ type: "removeGallery", eventId, index: i })}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-[13px] text-slate">The first photograph is shown largest. Landscape pictures 1400 px or wider; people, the room, the stage and the exhibition floor work best. {gallery.length >= 12 && "Twelve is the limit; remove one to add another."}</p>
       </Section>
 
       <Section title="Venue floor plan" action={floorPlan ? <button className="btn-quiet text-bad" onClick={() => dispatch({ type: "setFloorPlan", eventId })}>Remove</button> : null}>
