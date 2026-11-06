@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { Section } from "@/components/ui";
 import { CATEGORIES, useStore } from "@/lib/store";
 import { toMin } from "@/lib/time";
+import { meetingInRoom } from "@/lib/dealroom/logic";
 import { readableOn } from "@/lib/brand";
 import type { Category, EventRecord, FormField, Room, Session, Tier, Zone } from "@/lib/types";
 
@@ -177,7 +178,8 @@ export function SessionEditor({ eventId, session, onClose }: { eventId: string; 
   const [s, setS] = useState<Session>(session ?? { id: uid("s"), eventId, day: 1, start: "09:00", end: "10:30", title: "", kind: "breakout", speakers: [], enrolled: 0, attended: 0, status: "scheduled", walkIns: false, roomId: rooms[0]?.id, capacity: rooms[0]?.capacity });
   const room = rooms.find((r) => r.id === s.roomId);
   const clash = s.kind === "breakout" && s.roomId ? state.sessions.find((o) => o.id !== s.id && o.eventId === eventId && o.roomId === s.roomId && o.day === s.day && toMin(o.start) < toMin(s.end) && toMin(o.end) > toMin(s.start)) : undefined;
-  const bad = toMin(s.end) <= toMin(s.start) ? "End must be after start" : clash ? `Clashes with "${clash.title}", ${clash.start} to ${clash.end} in the same room` : s.capacity && room && s.capacity > room.capacity ? `${room.name} seats ${room.capacity}` : undefined;
+  const meeting = s.kind === "breakout" && s.roomId ? meetingInRoom(state.dealRoom, event.startDate, s.roomId, s.day, s.start, s.end) : undefined;
+  const bad = toMin(s.end) <= toMin(s.start) ? "End must be after start" : clash ? `Clashes with "${clash.title}", ${clash.start} to ${clash.end} in the same room` : meeting ? `The Deal Room has a meeting in this room ${meeting.start.slice(11)} to ${meeting.end.slice(11)}; move it in the Deal Room first` : s.capacity && room && s.capacity > room.capacity ? `${room.name} seats ${room.capacity}` : undefined;
 
   return (
     <Section title={session ? `Edit session` : "New session"} className="mb-4">

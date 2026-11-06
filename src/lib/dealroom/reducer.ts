@@ -19,7 +19,6 @@ import {
   verificationBlockers,
 } from "./logic";
 import type {
-  DealRoomState,
   Decision,
   DocKind,
   DrApplication,

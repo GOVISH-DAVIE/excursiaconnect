@@ -63,7 +63,7 @@ export function draftBrief(dr: DealRoomState, m: DrMatch) {
   const p = dr.apps.find((a) => a.id === m.providerId)!;
   const ask = s.ask ? `${s.ask.currency} ${s.ask.amount.toLocaleString("en")}` : "–";
   return {
-    text: `${s.org.name} (${s.org.sector}, ${s.org.country}) seeks ${ask} in ${s.ask?.instrument.toLowerCase()} for: ${s.ask?.useOfFunds}. ${s.traction?.revenueBand ?? ""}; ${s.traction?.metrics ?? ""}.\n\n${p.org.name} (${p.providerKind}) invests ${p.mandate?.currency} ${p.mandate?.ticketMin.toLocaleString("en")} to ${p.mandate?.ticketMax.toLocaleString("en")} in ${p.mandate?.sectors.join(", ")}, typically deciding in ${p.mandate?.timeline || "weeks"}.\n\nWhy this pair: ${m.note || `meets ${m.met.join(", ")}`}.\n\nDecision-makers: ${s.decisionMaker.name}, ${s.decisionMaker.title}; ${p.decisionMaker.name}, ${p.decisionMaker.title}.`,
+    text: `${s.org.name} (${s.org.sector}, ${s.org.country}) seeks ${ask} in ${s.ask?.instrument.toLowerCase()} for: ${(s.ask?.useOfFunds ?? "").replace(/\.+$/, "")}. ${s.traction?.revenueBand ?? ""}; ${(s.traction?.metrics ?? "").replace(/\.+$/, "")}.\n\n${p.org.name} (${p.providerKind}) invests ${p.mandate?.currency} ${p.mandate?.ticketMin.toLocaleString("en")} to ${p.mandate?.ticketMax.toLocaleString("en")} in ${p.mandate?.sectors.join(", ")}, typically deciding in ${p.mandate?.timeline || "weeks"}.\n\nWhy this pair: ${(m.note || `meets ${m.met.join(", ")}`).replace(/\.+$/, "")}.\n\nDecision-makers: ${s.decisionMaker.name}, ${s.decisionMaker.title}; ${p.decisionMaker.name}, ${p.decisionMaker.title}.`,
     agenda: ["Introductions and the ask, 5 minutes", "The investor's mandate and questions, 10 minutes", "Next step and who follows up, 5 minutes"],
   };
 }

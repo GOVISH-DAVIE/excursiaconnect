@@ -11,7 +11,7 @@ function Card({ title, children, aside }: { title?: string; children: ReactNode;
   return (
     <section className="surface p-5">
       {(title || aside) && (
-        <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 mb-3">
           {title && <h2 className="h2">{title}</h2>}
           {aside}
         </div>
@@ -130,7 +130,7 @@ function Intro({ app, m }: { app: DrApplication; m: DrMatch }) {
   const [viewing, setViewing] = useState<string | null>(null);
   const exp = introExpiresAt(m, cfg)!;
   return (
-    <Card title={side === "seeker" ? `${provider.org.name}, ${provider.providerKind}` : seeker.teaser?.anonymous && stage !== "Accepted" ? seeker.teaser.title : seeker.org.name} aside={<span className={`pill ${stage === "Accepted" ? "bg-ok-50 text-ok" : stage === "Introduced" ? "bg-warn-50 text-warn" : "bg-paper-200 text-slate"}`}>{stage === "Introduced" ? (mine ? "Waiting for the other side" : `Answer by ${fmtStamp(exp)}`) : stage}</span>}>
+    <Card title={side === "seeker" ? `${provider.org.name}, ${provider.providerKind}` : seeker.org.name} aside={<span className={`pill whitespace-nowrap ${stage === "Accepted" ? "bg-ok-50 text-ok" : stage === "Introduced" ? "bg-warn-50 text-warn" : "bg-paper-200 text-slate"}`}>{stage === "Introduced" ? (mine ? "Waiting for the other side" : `Answer by ${fmtStamp(exp)}`) : stage}</span>}>
       <p className="whitespace-pre-line text-[14px] leading-relaxed">{m.brief?.text}</p>
       {m.brief && m.brief.agenda.length > 0 && (
         <ol className="mt-2 list-decimal pl-5 text-[14px] text-slate">
@@ -248,7 +248,7 @@ function Intro({ app, m }: { app: DrApplication; m: DrMatch }) {
 function Preview({ seeker, viewer, item, onClose }: { seeker: DrApplication; viewer: DrApplication; item: string; onClose: () => void }) {
   const { state } = useStore();
   const doc = seeker.documents.find((d) => d.id === item);
-  const mark = `${viewer.decisionMaker.name}, ${viewer.org.name}, ${state.dealRoom.clock}`;
+  const mark = `${viewer.decisionMaker.name}, ${viewer.org.name}, ${fmtStamp(state.dealRoom.clock)}`;
   return (
     <div className="mt-3 relative overflow-hidden rounded-lg border border-line bg-white p-5 min-h-56">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 grid place-content-center gap-10 opacity-[0.10] -rotate-[24deg] select-none">
@@ -314,6 +314,7 @@ export function Meetings({ app }: { app: DrApplication }) {
   const side = app.type;
   const label = (mt: DrMeeting) => {
     if (lapsed(mt, cfg, dr.clock)) return "Lapsed: the slot was released";
+    if (mt.status === "Change requested" && mt.change) return mt.change.by === side ? "You asked to move it" : "The other side asked to move it";
     if (mt.status === "Proposed" || mt.status === "Change requested") return mt.confirm[side] ? "You confirmed; waiting for the other side" : `Please confirm by ${fmtStamp(confirmBy(mt, cfg))}`;
     return mt.status;
   };
@@ -326,11 +327,15 @@ export function Meetings({ app }: { app: DrApplication }) {
         const where = mt.link ? `Online: ${mt.link}` : `${room?.name}${mt.table && (cfg.rooms[mt.roomId!]?.tables ?? 1) > 1 ? `, table ${mt.table}` : ""}`;
         const canConfirm = (mt.status === "Proposed" || mt.status === "Change requested") && !mt.confirm[side] && !lapsed(mt, cfg, dr.clock);
         return (
-          <Card key={mt.id} title={`${fmtStamp(mt.start)} to ${mt.end.slice(11)}`} aside={<span className={`pill ${mt.status === "Confirmed" ? "bg-ok-50 text-ok" : mt.status === "Held" ? "bg-ink text-white" : "bg-warn-50 text-warn"}`}>{label(mt)}</span>}>
+          <Card key={mt.id} title={`${fmtStamp(mt.start)} to ${mt.end.slice(11)}`} aside={<span className={`pill whitespace-nowrap ${mt.status === "Confirmed" ? "bg-ok-50 text-ok" : mt.status === "Held" ? "bg-ink text-white" : "bg-warn-50 text-warn"}`}>{label(mt)}</span>}>
             <p className="text-[15px]">
               With <b className="font-medium">{other.org.name}</b> ({other.decisionMaker.name}), {where}.
             </p>
-            {mt.change && <p className="mt-1 text-[13px] text-slate">The {mt.change.by} asked to move: {mt.change.reason}</p>}
+            {mt.change && mt.status === "Change requested" && (
+              <p className="mt-1 text-[13px] text-slate">
+                {mt.change.by === side ? "You" : other.org.name} asked to move it: {mt.change.reason} The Deal Room team will propose another slot; until then this one stands.
+              </p>
+            )}
             <div className="mt-3 flex flex-wrap gap-2">
               {canConfirm && (
                 <button className="btn-primary btn-sm" onClick={() => dispatch({ type: "dr/confirm", meetingId: mt.id, side })}>
@@ -369,7 +374,7 @@ export function Meetings({ app }: { app: DrApplication }) {
 export function AccessLog({ app }: { app: DrApplication }) {
   const { state } = useStore();
   const dr = state.dealRoom;
-  const rows = dr.access.filter((a) => a.seekerId === app.id);
+  const rows = dr.access.filter((a) => a.seekerId === app.id).sort((a, b) => b.at.localeCompare(a.at));
   const what = (item: string) => (item === "profile" ? "Full profile" : item === "teaser" ? "Teaser" : app.documents.find((d) => d.id === item)?.kind ?? item);
   const who = (id: string) => (id === "admin" ? "Algotech support, under a grant" : dr.apps.find((a) => a.id === id)?.org.name ?? id);
   return (

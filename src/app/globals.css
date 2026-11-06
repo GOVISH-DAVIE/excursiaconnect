@@ -598,3 +598,8 @@ a.prog__title:hover { text-decoration: underline; text-underline-offset: 4px; }
 .dr-check > li[data-ok="no"] .rows__value { color: var(--color-bad); }
 .dr-verdict { margin-top: var(--s-6); display: grid; gap: var(--s-4); justify-items: start; }
 .dr-verdict b { font-weight: 500; }
+
+/* the participant's step tracker: a list on a phone, a row of equal steps from 640px */
+@media (min-width: 640px) {
+  .dr-track { grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
+}

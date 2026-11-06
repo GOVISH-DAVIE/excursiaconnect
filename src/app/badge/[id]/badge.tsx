@@ -216,7 +216,7 @@ export function Badge({ id }: { id: string }) {
                               <span className="num font-medium">Day {Math.round((Date.parse(m.start.slice(0, 10)) - Date.parse(event.startDate)) / 864e5) + 1}, {m.start.slice(11)}</span> with {other?.org.name}
                               <span className="block text-[13px] text-slate">
                                 {room?.name ?? "Online"}
-                                {m.table ? `, table ${m.table}` : ""}
+                                {m.table && (state.dealRoom.configs[m.eventId]?.rooms[m.roomId ?? ""]?.tables ?? 1) > 1 ? `, table ${m.table}` : ""}
                               </span>
                             </span>
                             <span className={`pill shrink-0 ${m.status === "Confirmed" || m.status === "In progress" ? "bg-ok-50 text-ok" : m.status === "Held" ? "bg-paper-200 text-slate" : "bg-warn-50 text-warn"}`}>{m.status === "Proposed" ? "To confirm" : m.status}</span>

@@ -370,7 +370,8 @@ function drSamples(state: AppState, post: Post, eventId: string): string[][] {
       other,
     ];
   }
-  const due = todays.find((m) => m.status === "Confirmed" && m.start > clock && !m.arrivals.seeker);
+  // the first coming meeting someone has still to check in for, so both samples stay on the same meeting
+  const due = todays.find((m) => m.status === "Confirmed" && m.start > clock && (!m.arrivals.seeker || !m.arrivals.provider));
   const busy = new Set(dr.meetings.filter((m) => m.start.slice(0, 10) === today).flatMap((m) => [party(m, "seeker"), party(m, "provider")]));
   const idle = dr.apps.find((a) => a.eventId === eventId && a.delegateId && !busy.has(a.id));
   return [

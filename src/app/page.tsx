@@ -14,11 +14,12 @@ const personas = [
 const dealRoom = [
   { href: "/e/connected-africa-3/deal-room", title: "Deal Room page", desc: "Connected Africa 3.0: who it is for, the eligibility check, how it works, and the two applications." },
   { href: "/dealroom", title: "Deal Room team", desc: "Bouer's lead, reviewers and operations: the queue, scoring with evidence, decisions, settings and reports." },
-  { href: "/dr/dr_cs50", title: "A business raising capital", desc: "Approved and Deal Room Ready: status, decision, teaser and profile, documents, badge." },
-  { href: "/dr/dr_fp20", title: "An investor", desc: "A verified finance provider: KYC, the NDA, the mandate and its re-review." },
+  { href: "/dr/dr_cs54", title: "A business raising capital", desc: "Deal Room Ready: an introduction to answer with consent per document, today's meetings, who opened its file." },
+  { href: "/dr/dr_fp19", title: "An investor", desc: "A verified provider: the teaser directory, introductions with watermarked documents, meetings to confirm." },
   { href: "/dr/dr_cs24", title: "An applicant asked for more", desc: "A seeker with an open information request to answer, before any decision." },
   { href: "/dr/dr_fp10", title: "A provider not yet verified", desc: "Uploading KYC and signing the NDA; nothing else in the Deal Room is visible yet." },
-  { href: "/admin/deal-room", title: "Algotech: Deal Room", desc: "The add-on on the approval record, staff accounts and MFA, support access only under a lead's grant." },
+  { href: "/scan?event=ev_ca3&post=drdesk", title: "Deal Room desk scanner", desc: "Summit day: check participants in against their meetings; Deal Room doors open only for a meeting there." },
+  { href: "/admin/deal-room", title: "Algotech: Deal Room", desc: "The add-on on the approval record, staff and MFA, support access under a grant, the live window and incidents." },
 ];
 
 export default function Home() {

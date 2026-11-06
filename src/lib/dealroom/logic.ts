@@ -485,8 +485,8 @@ export function confirmBy(m: DrMeeting, cfg: DrConfig) {
   return by < m.start ? by : m.start;
 }
 
-/** A proposed slot that lapsed unconfirmed is released: derived from the clock, never stored. */
-export const lapsed = (m: DrMeeting, cfg: DrConfig, now: string) => (m.status === "Proposed" || m.status === "Change requested") && confirmBy(m, cfg) < now;
+/** A proposed slot that lapsed unconfirmed is released: derived from the clock, never stored. A slot both sides confirmed never lapses, even while one asks to move it. */
+export const lapsed = (m: DrMeeting, cfg: DrConfig, now: string) => (m.status === "Proposed" || m.status === "Change requested") && !(m.confirm.seeker && m.confirm.provider) && confirmBy(m, cfg) < now;
 export const occupies = (m: DrMeeting, cfg: DrConfig, now: string) => ACTIVE.includes(m.status) && !lapsed(m, cfg, now);
 
 export const eventDay = (startDate: string, stamp: string) => daysBetween(startDate, stamp) + 1;
@@ -494,6 +494,12 @@ export const eventDay = (startDate: string, stamp: string) => daysBetween(startD
 export type SlotRequest = { matchId: string; roomId?: string; table?: number; link?: string; start: string; flagged?: boolean; ignore?: string };
 
 /** Every reason a slot cannot be booked; empty when it can. Caps are listed apart because operations may override them. */
+/** The other half of the shared room rule: a programme session may not take a room a Deal Room meeting holds. */
+export function meetingInRoom(dr: DealRoomState, eventStart: string, roomId: string, day: number, start: string, end: string): DrMeeting | undefined {
+  const date = addDays(`${eventStart} 00:00`, day - 1).slice(0, 10);
+  return dr.meetings.find((m) => m.roomId === roomId && m.start.slice(0, 10) === date && ACTIVE.includes(m.status) && toMin(m.start.slice(11)) < toMin(end) && toMin(m.end.slice(11)) > toMin(start));
+}
+
 export function slotProblems(
   state: { dealRoom: DealRoomState; events: { id: string; startDate: string; endDate: string }[]; rooms: { id: string; name: string; zoneId: string }[]; delegates: { id: string; sessions: string[] }[]; sessions: { id: string; day: number; start: string; end: string; title: string; eventId: string }[] },
   req: SlotRequest,
@@ -568,6 +574,7 @@ export function readyToSchedule(dr: DealRoomState, cfg: DrConfig) {
 
 /** Live-board flags derived from arrivals and the clock (Flow 4 steps 3 and 4). */
 export function boardFlag(m: DrMeeting, cfg: DrConfig, now: string) {
+  if (m.status === "In progress" && now >= m.end) return { kind: "outcome" as const, missing: [] as ("seeker" | "provider")[] };
   if (m.status !== "Confirmed") return undefined;
   const missing = (["seeker", "provider"] as const).filter((s) => !m.arrivals[s]);
   if (!missing.length) return undefined;
@@ -578,6 +585,8 @@ export function boardFlag(m: DrMeeting, cfg: DrConfig, now: string) {
 
 /** An .ics invite for a confirmed meeting. */
 export function ics(m: DrMeeting, title: string, where: string) {
-  const f = (s: string) => s.replace(/[-: ]/g, "").slice(0, 12) + "00";
-  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//ExcursiaConnect//Deal Room//EN", "BEGIN:VEVENT", `UID:${m.id}@excursiaconnect`, `DTSTART;TZID=Africa/Nairobi:${f(m.start)}`, `DTEND;TZID=Africa/Nairobi:${f(m.end)}`, `SUMMARY:${title}`, `LOCATION:${where}`, "BEGIN:VALARM", "TRIGGER:-PT30M", "ACTION:DISPLAY", "DESCRIPTION:Deal Room meeting in 30 minutes", "END:VALARM", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+  // RFC 5545: local times carry the zone, the stamp is UTC (Nairobi is UTC+3), and commas in text are escaped
+  const f = (s: string) => `${s.slice(0, 10).replace(/-/g, "")}T${s.slice(11, 16).replace(":", "")}00`;
+  const esc = (s: string) => s.replace(/[\\;,]/g, (c) => `\\${c}`);
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//ExcursiaConnect//Deal Room//EN", "BEGIN:VEVENT", `UID:${m.id}@excursiaconnect`, `DTSTAMP:${f(addMinutes(m.proposedAt, -180))}Z`, `DTSTART;TZID=Africa/Nairobi:${f(m.start)}`, `DTEND;TZID=Africa/Nairobi:${f(m.end)}`, `SUMMARY:${esc(title)}`, `LOCATION:${esc(where)}`, "BEGIN:VALARM", "TRIGGER:-PT30M", "ACTION:DISPLAY", "DESCRIPTION:Deal Room meeting in 30 minutes", "END:VALARM", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
 }

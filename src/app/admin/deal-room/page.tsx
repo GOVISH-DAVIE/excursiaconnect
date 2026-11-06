@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Empty, KV, PageHeader, Section } from "@/components/ui";
+import { Empty, KV, PageHeader, Section, Stat } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { EV_CA3, compact, publicStatus } from "@/lib/dealroom/logic";
 import type { DrRole } from "@/lib/dealroom/types";
@@ -20,6 +20,8 @@ export default function AdminDealRoom() {
   const target = dr.apps.find((a) => a.ref?.toLowerCase() === lookup.trim().toLowerCase() || a.id === lookup.trim());
   const grant = target && dr.grants.find((g) => g.appId === target.id && g.to === viewer && g.expires > dr.clock);
   const open = viewing ? dr.apps.find((a) => a.id === viewing) : undefined;
+  const [rota, setRota] = useState(() => dr.liveWindow?.rota ?? ["", ""]);
+  const mins = (a: string, b: string) => Math.round((Date.parse(b.replace(" ", "T") + ":00Z") - Date.parse(a.replace(" ", "T") + ":00Z")) / 60000);
 
   return (
     <>
@@ -148,6 +150,71 @@ export default function AdminDealRoom() {
           </ul>
         </Section>
       </div>
+      <div className="grid gap-4 lg:grid-cols-[340px_1fr] mt-4">
+        {/* DA-6: the summit week runs under a declared live window, with named people on call */}
+        <Section title="Summit live window">
+          {dr.liveWindow ? (
+            <p className="text-[14px]">
+              Declared {fmtStamp(dr.liveWindow.declaredAt)} for 15 to 18 March: 99.95% availability target, changes frozen. On call: {dr.liveWindow.rota.join("; ")}.
+            </p>
+          ) : (
+            <p className="text-[14px] text-slate">Not declared. Declare it before the summit opens: it freezes releases and names who is on call.</p>
+          )}
+          <form
+            className="mt-3 space-y-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const names = rota.map((r) => r.trim()).filter(Boolean);
+              if (names.length) dispatch({ type: "dr/liveWindow", rota: names });
+            }}
+          >
+            <input className="input" aria-label="On call" placeholder="On call, name and role" value={rota[0] ?? ""} onChange={(e) => setRota([e.target.value, rota[1] ?? ""])} />
+            <input className="input" aria-label="Back-up" placeholder="Back-up" value={rota[1] ?? ""} onChange={(e) => setRota([rota[0] ?? "", e.target.value])} />
+            <button className="btn-secondary" disabled={!rota.some((r) => r.trim())}>
+              {dr.liveWindow ? "Update the rota" : "Declare the live window"}
+            </button>
+          </form>
+        </Section>
+
+        {/* DA-7: every loss of connection at the venue, closed with what the sync did */}
+        <Section title="Incidents" flush action={dr.offline ? <span className="pill bg-bad-50 text-bad">Offline now</span> : <span className="pill bg-ok-50 text-ok">Connected</span>}>
+          <div className="grid grid-cols-3 gap-4 px-5 pb-4">
+            <Stat label="Incidents" value={dr.incidents.length} />
+            <Stat label="Records synced" value={dr.incidents.reduce((n, i) => n + i.synced, 0)} />
+            <Stat label="Conflicts for the lead" value={dr.conflicts.filter((c) => !c.resolved).length} tone={dr.conflicts.some((c) => !c.resolved) ? "warn" : undefined} />
+          </div>
+          {dr.incidents.length === 0 ? (
+            <Empty>No incidents.</Empty>
+          ) : (
+            <table className="w-full">
+              <thead>
+                <tr>
+                  <th className="th">Started</th>
+                  <th className="th">Cause</th>
+                  <th className="th-r">Lasted</th>
+                  <th className="th-r">Synced</th>
+                  <th className="th-r">Duplicates</th>
+                  <th className="th-r">Conflicts</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dr.incidents.map((i) => (
+                  <tr key={i.id}>
+                    <td className="td whitespace-nowrap">{fmtStamp(i.startedAt)}</td>
+                    <td className="td">{i.cause}</td>
+                    <td className="td-r">{i.endedAt ? `${mins(i.startedAt, i.endedAt)} min` : <span className="text-bad">ongoing</span>}</td>
+                    <td className="td-r">{i.endedAt ? i.synced : "–"}</td>
+                    <td className="td-r">{i.endedAt ? i.duplicates : "–"}</td>
+                    <td className="td-r">{i.endedAt ? i.conflicts : "–"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="px-5 py-3 text-[12px] text-slate">Opened when a device on the Deal floor loses its connection and closed by the sync, which sends the lead a summary. Duplicates are dropped by record id; conflicts wait for the lead on the live board.</p>
+        </Section>
+      </div>
+
     </>
   );
 }

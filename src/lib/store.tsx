@@ -4,12 +4,13 @@ import { createContext, useContext, useEffect, useMemo, useReducer, type ReactNo
 import { seed } from "./seed";
 import { overlaps } from "./time";
 import { drReducer, type DrAction } from "./dealroom/reducer";
+import { meetingInRoom } from "./dealroom/logic";
 import type { AppState, Capability, Category, Delegate, EventState, FormField, Order, PaymentMethod, Role, Room, Session, SpeakerProfile, Sponsor, TeamMember, Tier, Zone } from "./types";
 
 export const STORAGE_KEY = "excursiaconnect-proto-v1";
 /** Bumped whenever the seed gains records in arrays that already exist, so a saved browser resets instead of
  *  keeping an older copy that lacks them (hydrate only merges top-level keys). */
-export const SEED_VERSION = 3;
+export const SEED_VERSION = 4;
 
 export { overlaps };
 
@@ -226,8 +227,12 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, formFields: state.formFields.some((f) => f.id === action.field.id) ? state.formFields.map((f) => (f.id === action.field.id ? action.field : f)) : [...state.formFields, action.field] };
     case "removeField":
       return { ...state, formFields: state.formFields.filter((f) => f.id !== action.fieldId) };
-    case "upsertSession":
+    case "upsertSession": {
+      const ev = state.events.find((e) => e.id === action.session.eventId);
+      // a session may not take a room a Deal Room meeting holds (the shared clash rule, both ways)
+      if (ev && action.session.roomId && meetingInRoom(state.dealRoom, ev.startDate, action.session.roomId, action.session.day, action.session.start, action.session.end)) return state;
       return { ...state, sessions: state.sessions.some((s) => s.id === action.session.id) ? state.sessions.map((s) => (s.id === action.session.id ? action.session : s)) : [...state.sessions, action.session] };
+    }
     case "removeSession":
       return { ...state, sessions: state.sessions.filter((s) => s.id !== action.sessionId), delegates: state.delegates.map((d) => (d.sessions.includes(action.sessionId) ? { ...d, sessions: d.sessions.filter((x) => x !== action.sessionId) } : d)) };
     case "upsertZone":

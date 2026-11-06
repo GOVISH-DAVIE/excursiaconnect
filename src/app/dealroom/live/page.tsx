@@ -7,7 +7,7 @@ import { useStore } from "@/lib/store";
 import { DR_ZONE, boardFlag, bothAccepted, drCan, occupies, staffName } from "@/lib/dealroom/logic";
 import type { DrMeeting, DrOutcome } from "@/lib/dealroom/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
-import { Pill, Refusal, useDr } from "../bits";
+import { Refusal, useDr } from "../bits";
 import { MeetingPill } from "../meetings/parts";
 
 /** DO-7 to DO-11 and Flow 4: the summit day as it happens, with one tap per status. */
@@ -65,7 +65,8 @@ export default function LiveBoard() {
         <Section title="Conflicts for the lead" className="mb-4">
           {conflicts.map((c) => (
             <div key={c.id} className="py-2 border-b border-line last:border-0 text-[14px]">
-              The meeting at {dr.meetings.find((m) => m.id === c.meetingId)?.start.slice(11)} was recorded twice. Kept: <b className="font-medium">{c.kept.category}</b> ({staffName(dr, c.kept.by)}). From {c.incoming.device}: <b className="font-medium">{c.incoming.category}</b>, &ldquo;{c.incoming.notes}&rdquo;.
+              The meeting of {fmtStamp(dr.meetings.find((m) => m.id === c.meetingId)?.start ?? "")} was recorded twice. Kept: <b className="font-medium">{c.kept.category}</b> ({staffName(dr, c.kept.by)}). From {c.incoming.device}: <b className="font-medium">{c.incoming.category}</b>
+              {c.incoming.notes ? <>, &ldquo;{c.incoming.notes.replace(/\.+$/, "")}&rdquo;.</> : "."}
               {me?.role === "Lead" ? (
                 <span className="ml-2 inline-flex gap-2">
                   <button className="btn-secondary btn-sm" onClick={() => dispatch({ type: "dr/resolveConflict", conflictId: c.id, chose: "kept" })}>
@@ -92,14 +93,14 @@ export default function LiveBoard() {
                 <button className="link" onClick={() => setPick(m.id)}>
                   {m.start.slice(11)}
                 </button>{" "}
-                {f!.kind === "late" ? `starting soon, ${who} not checked in` : `${who} more than ${cfg.rules.lateMin} minutes late: mark a no-show?`}
+                {f!.kind === "outcome" ? `ended: record the outcome of ${dr.apps.find((a) => a.id === mm.seekerId)?.org.name} with ${dr.apps.find((a) => a.id === mm.providerId)?.org.name}` : f!.kind === "late" ? `starting soon, ${who} not checked in` : `${who} more than ${cfg.rules.lateMin} minutes late: mark a no-show?`}
               </div>
             );
           })}
         </div>
       )}
       <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           {rooms.map((r) =>
             Array.from({ length: cfg.rooms[r.id].tables }, (_, i) => i + 1).map((table) => {
               const list = todays.filter((m) => m.roomId === r.id && m.table === table);

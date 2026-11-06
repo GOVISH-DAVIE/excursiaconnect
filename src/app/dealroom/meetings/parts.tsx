@@ -16,7 +16,19 @@ export function SlotPicker({ matchId, ignore, initial, onBook, label }: { matchI
   const { cfg, event, can } = useDr();
   const days = Array.from({ length: event.days }, (_, i) => addMinutes(`${event.startDate} 00:00`, i * 1440).slice(0, 10));
   const rooms = state.rooms.filter((r) => r.zoneId === DR_ZONE && cfg!.rooms[r.id]);
-  const [s, setS] = useState<Slot>({ day: initial?.day ?? days.find((d) => d >= state.dealRoom.clock.slice(0, 10)) ?? days[0], time: initial?.time ?? "11:00", roomId: initial?.roomId ?? rooms[0]?.id, table: initial?.table ?? 1, link: "", online: false, flagged: initial?.flagged ?? false });
+  // open on the earliest slot that breaks no rule, so the picker starts from something bookable
+  const [s, setS] = useState<Slot>(() => {
+    const base = { link: "", online: false, flagged: initial?.flagged ?? false };
+    if (initial?.day && initial.time && initial.roomId) return { day: initial.day, time: initial.time, roomId: initial.roomId, table: initial.table ?? 1, ...base };
+    for (const day of days.filter((d) => d >= state.dealRoom.clock.slice(0, 10)))
+      for (const time of slotTimes(cfg!))
+        for (const r of rooms)
+          for (let table = 1; table <= (cfg!.rooms[r.id]?.tables ?? 1); table++) {
+            const p = slotProblems(state, { matchId, ignore, roomId: r.id, table, start: `${day} ${time}`, flagged: base.flagged });
+            if (!p.clashes.length && !p.caps.length) return { day, time, roomId: r.id, table, ...base };
+          }
+    return { day: days[days.length - 1], time: slotTimes(cfg!)[0], roomId: rooms[0]?.id, table: 1, ...base };
+  });
   const [override, setOverride] = useState("");
   const req = { matchId, ignore, roomId: s.online ? undefined : s.roomId, table: s.online ? undefined : s.table, link: s.online ? s.link || undefined : undefined, start: `${s.day} ${s.time}`, flagged: s.flagged };
   const { clashes, caps } = slotProblems(state, req);

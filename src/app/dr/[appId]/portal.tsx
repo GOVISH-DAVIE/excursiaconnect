@@ -135,11 +135,12 @@ function Status({ app }: { app: DrApplication }) {
             </div>
           </div>
         </div>
-        <ol className="mt-4 grid gap-2" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
+        {/* a row of steps from 640px; a short list on a phone, where five labels cannot sit side by side */}
+        <ol className="dr-track mt-4 grid gap-2" style={{ "--n": steps.length } as React.CSSProperties}>
           {steps.map(([label, done]) => (
-            <li key={label as string} className="text-[12px]">
-              <span className={`block h-1.5 rounded-full ${done ? "bg-ok" : "bg-paper-200"}`} />
-              <span className={`mt-1.5 block ${done ? "text-ink" : "text-slate"}`}>{label}</span>
+            <li key={label as string} className="flex items-center gap-2 text-[13px] sm:block sm:text-[12px]">
+              <span className={`block h-1.5 w-6 shrink-0 rounded-full sm:w-auto ${done ? "bg-ok" : "bg-paper-200"}`} />
+              <span className={`block sm:mt-1.5 ${done ? "text-ink" : "text-slate"}`}>{label}</span>
             </li>
           ))}
         </ol>

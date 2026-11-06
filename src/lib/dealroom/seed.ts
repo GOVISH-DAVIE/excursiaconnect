@@ -801,6 +801,7 @@ function seedMatching(dr: DealRoomState, delegates: Delegate[]) {
   // settle each meeting against the clock: 16 March, 10:40
   const opps: DrOpportunity[] = [];
   const access: DrAccess[] = [];
+  let later = 0;
   meetings.forEach((mt, i) => {
     const match = matches.find((x) => x.id === mt.matchId)!;
     const seeker = dr.apps.find((a) => a.id === match.seekerId)!;
@@ -849,13 +850,14 @@ function seedMatching(dr: DealRoomState, delegates: Delegate[]) {
       if (i % 4 !== 1) mt.arrivals = { seeker: date("2027-03-16", 8, 50), provider: i % 4 === 2 ? undefined : date("2027-03-16", 9, 5) };
       return;
     }
-    // later in the week: two still to confirm, one asked to move
-    if (i % 15 === 3) {
+    // later in the week: a few re-proposed this morning and still to confirm (inside 48 hours the window is two hours), one asked to move
+    const k = later++;
+    if (k % 5 === 1) {
       mt.status = "Proposed";
-      mt.proposedAt = date("2027-03-14", 16, 0);
-      mt.confirm = { seeker: date("2027-03-15", 9, 0) };
+      mt.proposedAt = date("2027-03-16", 9, 0);
+      mt.confirm = { seeker: date("2027-03-16", 9, 20) };
       mt.history = [{ at: mt.proposedAt, by: "st_ops2", what: `Proposed ${mt.start}` }];
-    } else if (i % 15 === 8) {
+    } else if (k % 7 === 3) {
       mt.status = "Change requested";
       mt.change = { by: "provider", reason: "Our partner lands at noon; any slot after 14:00.", at: date("2027-03-15", 20, 15) };
       mt.history.push({ at: mt.change.at, by: "provider", what: `Asked to move: ${mt.change.reason}` });

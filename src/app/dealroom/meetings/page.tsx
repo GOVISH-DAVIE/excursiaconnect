@@ -42,7 +42,7 @@ function Ready() {
   const list = readyToSchedule(dr, cfg!);
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
-      <Section title={`${list.length} matches ready to schedule`} flush>
+      <Section title={list.length ? `${list.length} match${list.length === 1 ? "" : "es"} ready to schedule` : "Ready to schedule"} flush>
         {list.length === 0 ? (
           <div className="p-5">
             <Empty>Every match both parties accepted has a slot. New ones appear here as introductions are accepted.</Empty>
