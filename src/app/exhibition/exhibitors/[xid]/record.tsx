@@ -7,7 +7,8 @@ import { activeBookingOf, allowance, bookingStage, boothNet, boothStatus, extraP
 import type { Booking, Exhibitor, Invoice } from "@/lib/expo/types";
 import { fmtStamp } from "@/lib/time";
 import { Refusal } from "@/app/dealroom/bits";
-import { ExStatusPill, Field, InvoicePill, StagePill, useExpo, ScannerWork } from "../../bits";
+import { ExStatusPill, Field, InvoicePill, StagePill, StatePill, useExpo, ScannerWork } from "../../bits";
+import { brandingState, deliveryStatus, dismantleState } from "@/lib/expo/onsite";
 
 /** EXH-3 to EXH-6, BTH-2, SAL-1 to SAL-7 for one company: the decision, its booth, its money and its people. */
 export function ExhibitorRecord({ id }: { id: string }) {
@@ -34,6 +35,7 @@ export function ExhibitorRecord({ id }: { id: string }) {
         <div className="min-w-0 space-y-4">
           {k ? <BookingCard k={k} e={e} /> : <NoBooking e={e} />}
           {can("money.view") && <Invoices e={e} />}
+          {k?.contract && <StandSummary e={e} />}
           <Staff e={e} />
           {past.length > 0 && (
             <Section title="Earlier bookings" flush>
@@ -336,7 +338,7 @@ function Staff({ e }: { e: Exhibitor }) {
               <Link className="hover:underline" href={`/organiser/events/${e.eventId}/delegates/${d.id}`}>
                 {d.name}
                 <span className="block text-[12px] text-slate">
-                  {d.tierId === "t_exhibitor" ? "Exhibitor pass" : "Sponsor pass"} · {d.badgeCode}
+                  {d.tierId === "t_exhibitor" ? "Exhibitor pass" : d.tierId === "t_contractor" ? "Contractor pass" : "Sponsor pass"} · {d.badgeCode}
                 </span>
               </Link>
               <span className={`pill ${d.status === "Checked in" ? "bg-ok-50 text-ok" : d.status === "Pending" ? "bg-warn-50 text-warn" : d.status === "Cancelled" ? "bg-paper-200 text-slate" : "bg-paper-200 text-ink"}`}>{d.status}</span>
@@ -406,6 +408,39 @@ function History({ e }: { e: Exhibitor }) {
               {fmtStamp(h.at)} · {memberName(state, h.by)}
             </div>
             <div>{h.what}</div>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+/** The stand's services and logistics at a glance (POR-3 to LOG-5), each line opening its queue. */
+function StandSummary({ e }: { e: Exhibitor }) {
+  const { expo, cfg, now } = useExpo();
+  const b = expo.branding.find((x) => x.exhibitorId === e.id);
+  const orders = expo.orders.filter((o) => o.exhibitorId === e.id);
+  const reqs = expo.requirements.filter((r) => r.exhibitorId === e.id);
+  const m = expo.moveIns.find((x) => x.exhibitorId === e.id);
+  const del = expo.deliveries.filter((d) => d.exhibitorId === e.id && !d.cancelled);
+  const d = expo.dismantles.find((x) => x.exhibitorId === e.id);
+  const rows: [string, ReactNode, string][] = [
+    ["Branding", <StatePill key="b" s={brandingState(b)} />, "/exhibition/services?tab=Branding&state=" + encodeURIComponent(brandingState(b))],
+    ["Equipment", orders.length ? `${orders.length} ${orders.length === 1 ? "order" : "orders"}: ${orders.map((o) => o.state.toLowerCase()).join(", ")}` : "None ordered", "/exhibition/services?tab=Orders"],
+    ["Requirements", reqs.length ? `${reqs.length}, ${reqs.filter((r) => !r.ack).length} not yet seen` : "None", "/exhibition/services?tab=Requirements"],
+    ["Move-in", m ? fmtStamp(m.at) : "Not set", "/exhibition/logistics?tab=Schedule"],
+    ["Deliveries", del.length ? del.map((x) => `${fmtStamp(x.slot)} ${deliveryStatus(cfg!, x, now).toLowerCase()}`).join("; ") : "None booked", "/exhibition/logistics?tab=Deliveries"],
+    ["Dismantling", <StatePill key="d" s={dismantleState(d)} />, "/exhibition/logistics?tab=Dismantling"],
+  ];
+  return (
+    <Section title="Stand services and logistics" flush>
+      <ul>
+        {rows.map(([label, value, href]) => (
+          <li key={label} className="border-t border-line">
+            <Link href={href} className="px-5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-[14px] hover:bg-paper">
+              <span className="text-slate">{label}</span>
+              <span className="text-right">{value}</span>
+            </Link>
           </li>
         ))}
       </ul>

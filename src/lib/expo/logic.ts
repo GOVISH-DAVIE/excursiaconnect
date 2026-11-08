@@ -78,8 +78,9 @@ export function boothStatus(expo: ExpoState, booth: Booth, cfg: ExpoConfig, now:
 }
 
 /** Paid in full: every issued invoice of the exhibitor settled. The desk admits its staff only then (OPS-1). */
+/** The booking is paid in full: the stand fee and its passes. Equipment orders are billed apart and do not hold up the stand. */
 export function paidInFull(expo: ExpoState, exhibitorId: string) {
-  return expo.invoices.filter((i) => i.exhibitorId === exhibitorId && i.state === "Issued").every((i) => invoicePaid(expo, i) >= invoiceTotal(i));
+  return expo.invoices.filter((i) => i.exhibitorId === exhibitorId && i.state === "Issued" && !i.orderId).every((i) => invoicePaid(expo, i) >= invoiceTotal(i));
 }
 
 /** Where a booth may go: inside its hall, not over a pillar, not over another booth, its code unique. */
@@ -196,6 +197,13 @@ export function validateExpo(state: AppState): string[] {
     }
   }
   for (const inv of expo.invoices) if (invoicePaid(expo, inv) > invoiceTotal(inv)) out.push(`${inv.number} is paid more than its total`);
+  const slots = new Map<string, number>();
+  for (const d of expo.deliveries) if (!d.cancelled) slots.set(`${d.bayId} ${d.slot}`, (slots.get(`${d.bayId} ${d.slot}`) ?? 0) + 1);
+  for (const [k, n] of slots) {
+    const d = expo.deliveries.find((x) => `${x.bayId} ${x.slot}` === k)!;
+    if (n > expo.configs[d.eventId].vehiclesPerSlot) out.push(`${k} has ${n} vehicles for ${expo.configs[d.eventId].vehiclesPerSlot} places`);
+  }
+  for (const o of expo.orders) if (!expo.invoices.some((i) => i.id === o.invoiceId && i.orderId === o.id)) out.push(`Order ${o.id} has no invoice`);
   const codes = new Map<string, number>();
   for (const d of state.delegates) codes.set(d.badgeCode, (codes.get(d.badgeCode) ?? 0) + 1);
   for (const [c, n] of codes) if (n > 1) out.push(`Badge code ${c} is used ${n} times`);

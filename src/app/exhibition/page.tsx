@@ -7,6 +7,7 @@ import type { BoothStatus } from "@/lib/expo/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
 import { ChartCard, HBars } from "@/app/dealroom/reports/charts";
 import { Refusal } from "@/app/dealroom/bits";
+import { deliveryStatus } from "@/lib/expo/onsite";
 import { ScannerWork, useExpo } from "./bits";
 
 /** The exhibition at a glance: what is sold, what is owed, what needs someone today. Every number opens its records. */
@@ -40,6 +41,14 @@ export default function ExhibitionOverview() {
     { label: "Approved with no booth yet", n: exhibitors.filter((e) => e.status === "Approved" && !activeBookingOf(expo, e.id, cfg, now)).length, href: "/exhibition/exhibitors?status=Approved&booth=none" },
     { label: "Holds ending within 24 hours", n: expo.bookings.filter((k) => bookingStage(expo, k, cfg, now) === "Held" && holdExpiresAt(k, cfg) < addMinutes(now, 1440)).length, href: "/exhibition/sales?stage=Held" },
     { label: "Reserved, first payment not in", n: expo.bookings.filter((k) => bookingStage(expo, k, cfg, now) === "Reserved").length, href: "/exhibition/sales?stage=Reserved" },
+    ...(can("expo.manage") || can("expo.floor")
+      ? [
+          { label: "Branding to approve", n: expo.branding.filter((b) => b.eventId === cfg.eventId && !b.decision).length, href: "/exhibition/services?tab=Branding&state=Waiting%20for%20approval" },
+          { label: "Orders to deliver", n: expo.orders.filter((o) => o.eventId === cfg.eventId && o.state === "Ordered").length, href: "/exhibition/services?tab=Orders" },
+          { label: "Requirements not yet seen", n: expo.requirements.filter((r) => r.eventId === cfg.eventId && !r.ack).length, href: "/exhibition/services?tab=Requirements" },
+          { label: "Deliveries missed", n: expo.deliveries.filter((d) => d.eventId === cfg.eventId && deliveryStatus(cfg, d, now) === "Missed").length, href: "/exhibition/logistics?tab=Deliveries" },
+        ]
+      : []),
     ...(money
       ? [
           { label: "Invoices overdue", n: overdue.length, href: "/exhibition/sales?tab=Invoices&status=Overdue" },

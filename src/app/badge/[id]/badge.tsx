@@ -46,7 +46,7 @@ export function Badge({ id }: { id: string }) {
         .filter((m) => ["Proposed", "Change requested", "Confirmed", "In progress", "Held"].includes(m.status) && state.dealRoom.matches.some((x) => x.id === m.matchId && (x.seekerId === drApp.id || x.providerId === drApp.id)))
         .sort((a, b) => a.start.localeCompare(b.start))
     : [];
-  const catColor: Record<string, string> = { Speaker: "#5B2A86", Panelist: "#5B2A86", Sponsor: "#0A7E8C", Exhibitor: "#0A7E8C", VIP: "#B8860B", "General Delegate": event.brand.primary, "Deal Room": "#1F2937" };
+  const catColor: Record<string, string> = { Speaker: "#5B2A86", Panelist: "#5B2A86", Sponsor: "#0A7E8C", Exhibitor: "#0A7E8C", VIP: "#B8860B", "General Delegate": event.brand.primary, "Deal Room": "#1F2937", Contractor: "#9A3412" };
 
   return (
     <div className="min-h-screen bg-paper">

@@ -115,6 +115,7 @@ export interface Invoice {
   vatPct: number;
   issuedAt: string;
   due: string; // YYYY-MM-DD
+  orderId?: string; // equipment and services ordered from the portal; the stand fee and passes have none
   state: "Draft" | "Issued" | "Void";
   voidReason?: string;
 }
@@ -176,7 +177,100 @@ export interface ExpoConfig {
   dismantle: { from: string; to: string };
   showDays: { date: string; open: string; close: string }[];
   exhibitorOpen: string; // exhibitor passes enter from this time on show days
+  slaMin: Record<IssuePriority, number>; // how long an issue may stay open before it is flagged
   log: ExpoHistory[];
+}
+
+/* ---------- the stand and the logistics around it (cut 2) ---------- */
+
+/** What goes on the fascia board and the stand graphics; the organiser approves or returns it (POR-3, POR-6). */
+export interface Branding {
+  eventId: string;
+  exhibitorId: string;
+  fascia: string; // the name on the fascia board, printed in capitals
+  logo?: ExpoDoc;
+  artwork: ExpoDoc[];
+  submittedAt: string;
+  late: boolean; // sent after the branding deadline: printed if there is still time
+  decision?: { state: "Approved" | "Returned"; by: string; at: string; note?: string };
+  history: ExpoHistory[];
+}
+
+/** Equipment and services from the catalogue (POR-4); each order is invoiced on its own and moved through fulfilment (LOG-4). */
+export interface StandOrder {
+  id: string;
+  eventId: string;
+  exhibitorId: string;
+  lines: { itemId: string; qty: number }[];
+  at: string;
+  by: string;
+  late: boolean; // after the order deadline: surcharged
+  invoiceId?: string;
+  state: "Ordered" | "Delivered" | "Collected";
+  history: ExpoHistory[];
+}
+
+export type RequirementKind = "Access" | "Storage" | "Rigging" | "Other";
+/** Needs the floor team should know about (POR-5); the team acknowledges each. */
+export interface Requirement {
+  id: string;
+  eventId: string;
+  exhibitorId: string;
+  kind: RequirementKind;
+  text: string;
+  at: string;
+  by: string;
+  ack?: { by: string; at: string };
+}
+
+/** The time a company may start building its stand (LOG-1). */
+export interface MoveIn {
+  eventId: string;
+  exhibitorId: string;
+  at: string;
+  by: string;
+}
+
+/** A vehicle booked into a loading bay for a slot, in build-up or dismantling (LOG-3). Missed follows from the clock. */
+export interface Delivery {
+  id: string;
+  eventId: string;
+  exhibitorId: string;
+  bayId: string;
+  slot: string; // YYYY-MM-DD HH:MM, the slot's start
+  vehicle: string;
+  what: string;
+  at: string;
+  by: string;
+  arrived?: { at: string; by: string };
+  cancelled?: { at: string; by: string };
+}
+
+/** The stand's dismantling: the company says what it has done; the floor team signs it off (LOG-5). */
+export interface Dismantle {
+  eventId: string;
+  exhibitorId: string;
+  cleared?: { at: string; by: string };
+  returned?: { at: string; by: string };
+  signedOff?: { at: string; by: string; damage?: string };
+}
+
+export type IssueCategory = "Power" | "Internet" | "Furniture" | "Cleaning" | "Security" | "Other";
+export type IssuePriority = "Low" | "Normal" | "Urgent";
+/** Something wrong on the floor (OPS-4), reported from the portal or by the floor team; resolved in Operations. */
+export interface Issue {
+  id: string;
+  eventId: string;
+  exhibitorId?: string;
+  boothId?: string;
+  category: IssueCategory;
+  priority: IssuePriority;
+  text: string;
+  at: string;
+  by: string;
+  assignee?: string;
+  resolved?: { at: string; by: string; note: string };
+  history: ExpoHistory[];
 }
 
 export interface ExpoMessage {
@@ -201,5 +295,12 @@ export interface ExpoState {
   payments: Payment[];
   bankLines: BankLine[];
   outbox: ExpoMessage[];
+  branding: Branding[];
+  orders: StandOrder[];
+  requirements: Requirement[];
+  moveIns: MoveIn[];
+  deliveries: Delivery[];
+  dismantles: Dismantle[];
+  issues: Issue[];
   seq: { exhibitor: number; invoice: number };
 }

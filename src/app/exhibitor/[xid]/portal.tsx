@@ -1,19 +1,21 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { FloorPlan, PlanLegend } from "@/components/floor-plan";
 import { useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
 import { activeBookingOf, allowance, area, bookingStage, boothNet, boothStatus, gross, holdExpiresAt, holdProblems, invoiceOwed, invoicePaid, invoiceStatus, invoiceTotal, kes, lineText, paidInFull, passesOver, scheduleOnSigning } from "@/lib/expo/logic";
 import type { Booth, BoothStatus, Exhibitor } from "@/lib/expo/types";
 import { fmtStamp } from "@/lib/time";
+import { Card } from "./card";
+import { OnSiteTab, PeopleTab, StandTab } from "./stand";
 
 /*
   The exhibitor's own page (POR-1, BTH-3, SAL-1, SAL-3): where the application stands, the booth to choose
   and hold once approved, the contract to sign, the invoices to pay. It shows only this company's records.
 */
 
-type Tab = "Status" | "Booth" | "Contract" | "Invoices" | "Profile" | "Messages";
+type Tab = "Status" | "Booth" | "Contract" | "Invoices" | "People" | "Stand" | "On site" | "Profile" | "Messages";
 
 export function ExhibitorPortal({ id }: { id: string }) {
   const { state, hydrated } = useStore();
@@ -27,7 +29,8 @@ export function ExhibitorPortal({ id }: { id: string }) {
   const mark = (event.brand.logoText || initials(event.name)).slice(0, 4).toUpperCase();
   const k = activeBookingOf(state.expo, e.id, cfg, state.expo.clock);
   const owed = state.expo.invoices.filter((i) => i.exhibitorId === e.id && invoiceOwed(state.expo, i) > 0).length;
-  const tabs: Tab[] = ["Status", ...(e.status === "Approved" ? (["Booth"] as Tab[]) : []), ...(k ? (["Contract", "Invoices"] as Tab[]) : []), "Profile", "Messages"];
+  // the stand's people, services and logistics open once the contract is signed
+  const tabs: Tab[] = ["Status", ...(e.status === "Approved" ? (["Booth"] as Tab[]) : []), ...(k ? (["Contract", "Invoices"] as Tab[]) : []), ...(k?.contract ? (["People", "Stand", "On site"] as Tab[]) : []), "Profile", "Messages"];
 
   return (
     <div className="min-h-screen bg-paper brand" style={{ "--accent": accent, "--accent-ink": accentInk } as React.CSSProperties}>
@@ -48,7 +51,7 @@ export function ExhibitorPortal({ id }: { id: string }) {
         </div>
         <nav className="mx-auto max-w-3xl px-3 flex gap-1 overflow-x-auto" aria-label="Sections">
           {tabs.map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={`px-3 py-2.5 text-[14px] whitespace-nowrap border-b-2 ${tab === t ? "border-current font-medium" : "border-transparent opacity-75"}`}>
+            <button key={t} onClick={(x) => { setTab(t); x.currentTarget.scrollIntoView({ inline: "nearest", block: "nearest" }); }} className={`px-3 py-2.5 text-[14px] whitespace-nowrap border-b-2 ${tab === t ? "border-current font-medium" : "border-transparent opacity-75"}`}>
               {t}
               {t === "Invoices" && owed > 0 && <span className="ml-1 opacity-70">{owed}</span>}
             </button>
@@ -60,24 +63,13 @@ export function ExhibitorPortal({ id }: { id: string }) {
         {tab === "Booth" && <BoothTab e={e} go={setTab} />}
         {tab === "Contract" && <Contract e={e} go={setTab} />}
         {tab === "Invoices" && <Invoices e={e} />}
+        {tab === "People" && <PeopleTab e={e} />}
+        {tab === "Stand" && <StandTab e={e} toInvoices={() => setTab("Invoices")} />}
+        {tab === "On site" && <OnSiteTab e={e} />}
         {tab === "Profile" && <Profile e={e} />}
         {tab === "Messages" && <Messages e={e} />}
       </main>
     </div>
-  );
-}
-
-function Card({ title, aside, children }: { title?: string; aside?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="surface p-5">
-      {(title || aside) && (
-        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 mb-3">
-          {title && <h2 className="h2">{title}</h2>}
-          {aside}
-        </div>
-      )}
-      {children}
-    </section>
   );
 }
 

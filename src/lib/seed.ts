@@ -253,7 +253,7 @@ export const seed: AppState = {
     { id: EV3, slug: "east-africa-fintech-forum", organiserId: "org_epic", name: "East Africa Fintech Forum", tagline: "Payments, lending and the next 100 million customers.", venue: "Radisson Blu Upper Hill", city: "Nairobi", startDate: "2027-03-18", endDate: "2027-03-18", days: 1, state: "Draft", commissionPct: 5, oneOffFee: 0, licenceFee: 85000, gatewayFeesBorneBy: "Algotech", staffCount: 0, stations: 0, expectedAttendance: 400, brand: { primary: "#5B2A86", logoText: "EAFF" }, registrationsByDay: [] },
     ca3,
   ],
-  tiers: [...tiers, exhibition.exhibitorTier, ...ca3TierRows],
+  tiers: [...tiers, exhibition.exhibitorTier, exhibition.contractorTier, ...ca3TierRows],
   zones: [...zones, ...ca3ZoneRows],
   rooms: [...rooms, ...ca3Rooms],
   sessions: [...sessions, ...ca3Sessions],

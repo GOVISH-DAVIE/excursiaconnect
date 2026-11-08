@@ -82,7 +82,7 @@ export function DocLine({ doc, children }: { doc: DrDocument; children?: ReactNo
 
 let docSeq = 0;
 /** A document record from a picked file, or a sample when the tester cannot drive a file picker. */
-export function makeDoc(kind: DocKind, at: string, file?: File): DrDocument {
+export function makeDoc<K extends string = DocKind>(kind: K, at: string, file?: File): Omit<DrDocument, "kind"> & { kind: K } {
   docSeq++;
   return {
     id: `doc_${at.replace(/\D/g, "").slice(-6)}${docSeq}${Math.floor(Math.random() * 1e4).toString(36)}`,
@@ -95,7 +95,7 @@ export function makeDoc(kind: DocKind, at: string, file?: File): DrDocument {
 }
 
 /** A file button that also offers a sample file. Files over 25 MB are refused (PRD Module req. 4). */
-export function UploadDoc({ kind, at, onDone, label }: { kind: DocKind; at: string; onDone: (d: DrDocument) => void; label?: string }) {
+export function UploadDoc<K extends string = DocKind>({ kind, at, onDone, label, accept = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg" }: { kind: K; at: string; onDone: (d: Omit<DrDocument, "kind"> & { kind: K }) => void; label?: string; accept?: string }) {
   const [err, setErr] = useState("");
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
@@ -103,7 +103,7 @@ export function UploadDoc({ kind, at, onDone, label }: { kind: DocKind; at: stri
         {label ?? "Upload"}
         <input
           type="file"
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg"
+          accept={accept}
           className="sr-only"
           onChange={(e) => {
             const f = e.target.files?.[0];

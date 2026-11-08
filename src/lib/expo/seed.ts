@@ -7,6 +7,7 @@
 import { addMinutes, fmtStamp } from "../time";
 import type { Delegate, Tier } from "../types";
 import { EV_NBS, invoiceNo, invoicesOnSigning, invoiceTotal, exhibitorRef } from "./logic";
+import { seedOnsite } from "./seed-onsite";
 import type { BankLine, Booking, Booth, BoothCategory, Exhibitor, ExpoConfig, ExpoMessage, ExpoState, Hall, Invoice, Payment } from "./types";
 
 export const EXPO_CLOCK = "2026-11-25 10:30";
@@ -54,6 +55,7 @@ export const expoConfig: ExpoConfig = {
     { date: "2026-11-27", open: "09:00", close: "17:00" },
   ],
   exhibitorOpen: "07:30",
+  slaMin: { Urgent: 30, Normal: 120, Low: 480 },
   log: [{ at: "2026-08-01 09:00", by: "u_staff2", what: "Exhibition opened for applications" }],
 };
 
@@ -188,7 +190,7 @@ const slug = (s: string) => s.toLowerCase().replace(/&/g, "and").replace(/[^a-z0
 const stamp = (date: string, h: number, m = 0) => `${date} ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 const day = (base: string, n: number) => addMinutes(`${base} 00:00`, n * 1440).slice(0, 10);
 
-export function seedExpo(delegates: Delegate[], sponsorTier: Tier): { expo: ExpoState; exhibitorTier: Tier } {
+export function seedExpo(delegates: Delegate[], sponsorTier: Tier): { expo: ExpoState; exhibitorTier: Tier; contractorTier: Tier } {
   const rand = pseudo(2611);
   const between = (a: number, b: number) => a + Math.floor(rand() * (b - a + 1));
   const cfg = expoConfig;
@@ -343,6 +345,9 @@ export function seedExpo(delegates: Delegate[], sponsorTier: Tier): { expo: Expo
     description: "Comes with an exhibitor's stand: two passes per 9 m², more on the stand invoice.",
   };
 
+  // the stand and its logistics, after the people are placed so contractors join their companies
+  const onsite = seedOnsite({ cfg, exhibitors, bookings, booths, delegates, invoices, between, pay, msg, nextInvoice: () => ({ number: invoiceNo(++invSeq), id: `inv_${++invId}` }), first, last });
+
   return {
     expo: {
       clock: EXPO_CLOCK,
@@ -356,8 +361,16 @@ export function seedExpo(delegates: Delegate[], sponsorTier: Tier): { expo: Expo
       payments,
       bankLines,
       outbox: outbox.sort((a, b) => b.at.localeCompare(a.at)),
+      branding: onsite.branding,
+      orders: onsite.orders,
+      requirements: onsite.requirements,
+      moveIns: onsite.moveIns,
+      deliveries: onsite.deliveries,
+      dismantles: onsite.dismantles,
+      issues: onsite.issues,
       seq: { exhibitor: exhibitors.length, invoice: invSeq },
     },
     exhibitorTier,
+    contractorTier: onsite.contractorTier,
   };
 }

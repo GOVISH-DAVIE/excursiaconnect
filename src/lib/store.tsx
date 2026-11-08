@@ -11,7 +11,7 @@ import type { AppState, Capability, Category, Delegate, EventState, FormField, O
 export const STORAGE_KEY = "excursiaconnect-proto-v1";
 /** Bumped whenever the seed gains records in arrays that already exist, so a saved browser resets instead of
  *  keeping an older copy that lacks them (hydrate only merges top-level keys). */
-export const SEED_VERSION = 6;
+export const SEED_VERSION = 7;
 
 export { overlaps };
 

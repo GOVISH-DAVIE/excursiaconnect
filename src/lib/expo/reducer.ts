@@ -18,8 +18,11 @@ import {
   placementProblems,
 } from "./logic";
 import type { Booth, Exhibitor, ExpoConfig, ExpoState, Hall, Payment } from "./types";
+import { note, send, withExpo } from "./util";
+import { ONSITE_TYPES, onsiteReducer, type OnsiteAction } from "./onsite-reducer";
+import { windowProblems } from "./onsite";
 
-export type ExpoAction =
+type CoreAction =
   | { type: "expo/clock"; clock: string }
   | { type: "expo/actAs"; memberId: string }
   | { type: "expo/config"; eventId: string; patch: Partial<ExpoConfig>; note: string }
@@ -40,6 +43,8 @@ export type ExpoAction =
   | { type: "expo/cancel"; bookingId: string; reason: string }
   | { type: "expo/remind"; invoiceId: string };
 
+export type ExpoAction = CoreAction | OnsiteAction;
+
 /** What each staff action needs from the organiser's role matrix. Portal and public actions carry `as: "exhibitor"` instead. */
 const NEEDS: Partial<Record<ExpoAction["type"], Capability[]>> = {
   "expo/config": ["expo.manage"],
@@ -56,20 +61,14 @@ const NEEDS: Partial<Record<ExpoAction["type"], Capability[]>> = {
   "expo/remind": ["money.view"],
 };
 
-const withExpo = (state: AppState, expo: ExpoState): AppState => ({ ...state, expo });
-const note = (what: string, by: string, at: string) => ({ at, by, what });
-
-/** A message says what changed and links into the platform; it never carries amounts owed or documents. */
-function send(expo: ExpoState, eventId: string, to: string, subject: string, link: string, channel: "Email" | "SMS" | "Email and SMS" = "Email"): ExpoState {
-  return { ...expo, outbox: [{ id: `xm_${expo.outbox.length + 1}_${expo.clock.replace(/\D/g, "")}`, eventId, at: expo.clock, to, channel, subject, link }, ...expo.outbox].slice(0, 400) };
-}
-
 export function expoReducer(state: AppState, action: ExpoAction): AppState {
   let expo = state.expo;
   const at = expo.clock;
   const me = state.team.find((m) => m.id === expo.actingMemberId);
   const by = "as" in action && action.as === "exhibitor" ? "exhibitor" : me?.id ?? "system";
 
+  // the stand and its logistics have their own reducer, with the same conventions
+  if (ONSITE_TYPES.has(action.type)) return onsiteReducer(state, action as OnsiteAction);
   // a staff action needs one of its capabilities; the portal and the public form act for the exhibitor
   const needs = NEEDS[action.type];
   const asExhibitor = "as" in action && action.as === "exhibitor";
@@ -86,6 +85,8 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
     case "expo/config": {
       const c = expo.configs[action.eventId];
       if (!c) return state;
+      // the build-up and dismantling windows stay around the show (LOG-1)
+      if ((action.patch.buildUp || action.patch.dismantle) && windowProblems(c, action.patch.buildUp ?? c.buildUp, action.patch.dismantle ?? c.dismantle).length) return state;
       return withExpo(state, { ...expo, configs: { ...expo.configs, [c.eventId]: { ...c, ...action.patch, log: [...c.log, note(action.note, by, at)] } } });
     }
 

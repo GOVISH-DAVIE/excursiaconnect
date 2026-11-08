@@ -29,7 +29,8 @@ export type Category =
   | "Exhibitor"
   | "VIP"
   | "General Delegate"
-  | "Deal Room"; // issued by the Deal Room on approval or verification; never offered on the public form
+  | "Deal Room" // issued by the Deal Room on approval or verification; never offered on the public form
+  | "Contractor"; // builds or clears an exhibition stand; registered by the company, never on the public form
 
 export type PaymentMethod = "mpesa" | "card" | "bank";
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useStore } from "@/lib/store";
-import { EV_NBS, actingMember, bookingStage, boothStatus, expoCan, gross, invoiceStatus, kes, type BookingStage, type InvoiceStatus } from "@/lib/expo/logic";
+import { EV_NBS, actingMember, bookingStage, boothStatus, expoCan, gross, invoiceStatus, isActive, kes, type BookingStage, type InvoiceStatus } from "@/lib/expo/logic";
 import type { Booking, Booth, ExhibitorStatus, Invoice } from "@/lib/expo/types";
 import type { Capability } from "@/lib/types";
 import { Pill } from "@/app/dealroom/bits";
@@ -65,3 +65,41 @@ export const ScannerWork = () => (
     </Link>
   </>
 );
+
+const stateTone: Record<string, "ok" | "okSolid" | "warn" | "bad" | "mute" | "coral"> = {
+  Approved: "ok",
+  "Waiting for approval": "warn",
+  Returned: "bad",
+  "Not sent": "mute",
+  Ordered: "coral",
+  Delivered: "ok",
+  Collected: "okSolid",
+  Booked: "coral",
+  Arrived: "ok",
+  Missed: "bad",
+  Cancelled: "mute",
+  "Not started": "mute",
+  "In progress": "warn",
+  "Signed off": "okSolid",
+  Open: "coral",
+  Assigned: "warn",
+  Overdue: "bad",
+  Resolved: "ok",
+  Seen: "ok",
+  New: "coral",
+  Late: "warn",
+};
+/** A pill for the stand and logistics states (branding, orders, deliveries, dismantling, issues). */
+export function StatePill({ s }: { s: string }) {
+  return <Pill tone={stateTone[s] ?? "mute"}>{s}</Pill>;
+}
+
+/** The bookings with a signed contract: the stands the services and logistics are for. */
+export function useStands(eventId = EV_NBS) {
+  const { expo, cfg, now } = useExpo(eventId);
+  if (!cfg) return [];
+  return expo.bookings
+    .filter((k) => k.eventId === eventId && k.contract && isActive(bookingStage(expo, k, cfg, now)))
+    .map((k) => ({ k, e: expo.exhibitors.find((x) => x.id === k.exhibitorId)!, booths: expo.booths.filter((b) => k.boothIds.includes(b.id)) }))
+    .sort((a, b) => a.e.name.localeCompare(b.e.name));
+}

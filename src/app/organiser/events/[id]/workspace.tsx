@@ -676,7 +676,8 @@ function DelegatesTab({ event, delegates, tiers, base, tierName, initialStatus }
             ))}
           </select>
           <select className="input max-w-[180px]" value={cat} onChange={(e) => setCat(e.target.value)}>
-            {["All", "General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP"].map((s) => (
+            {/* categories a module issues (Deal Room, Contractor) are listed only when the event has them */}
+            {["All", "General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP", ...(["Deal Room", "Contractor"] as const).filter((c) => delegates.some((d) => d.category === c))].map((s) => (
               <option key={s}>{s}</option>
             ))}
           </select>

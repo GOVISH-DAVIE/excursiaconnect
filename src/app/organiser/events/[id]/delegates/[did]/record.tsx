@@ -105,8 +105,9 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
               ))}
               <div>
                 <label className="label">Category</label>
-                <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as Category })}>
-                  {["General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP"].map((c) => (
+                {/* a module issues Deal Room and Contractor passes; they are not changed here */}
+                <select className="input" value={form.category} disabled={form.category === "Deal Room" || form.category === "Contractor"} onChange={(e) => setForm({ ...form, category: e.target.value as Category })}>
+                  {["General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP", ...(form.category === "Deal Room" || form.category === "Contractor" ? [form.category] : [])].map((c) => (
                     <option key={c}>{c}</option>
                   ))}
                 </select>
