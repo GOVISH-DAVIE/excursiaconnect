@@ -21,6 +21,7 @@ import type { Booth, Exhibitor, ExpoConfig, ExpoState, Hall, Payment } from "./t
 import { note, send, withExpo } from "./util";
 import { ONSITE_TYPES, onsiteReducer, type OnsiteAction } from "./onsite-reducer";
 import { windowProblems } from "./onsite";
+import { arrivals } from "./ops";
 
 type CoreAction =
   | { type: "expo/clock"; clock: string }
@@ -75,9 +76,18 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
   if (needs && !needs.some((c) => expoCan(state, c))) return state;
 
   switch (action.type) {
-    case "expo/clock":
+    case "expo/clock": {
       // forward only, so nothing recorded can predate the clock
-      return action.clock > expo.clock ? withExpo(state, { ...expo, clock: action.clock }) : state;
+      if (action.clock <= expo.clock) return state;
+      let next = withExpo(state, { ...expo, clock: action.clock });
+      // passing the exhibitors' opening time on a later show day plays that morning's arrivals (OPS-1, OPS-3)
+      for (const cfg of Object.values(expo.configs))
+        cfg.showDays.forEach((d, i) => {
+          const open = `${d.date} ${cfg.exhibitorOpen}`;
+          if (i > 0 && expo.clock < open && action.clock >= open) next = arrivals(next, cfg, i + 1, action.clock);
+        });
+      return next;
+    }
 
     case "expo/actAs":
       return state.team.some((m) => m.id === action.memberId && m.status === "Active") ? withExpo(state, { ...expo, actingMemberId: action.memberId }) : state;

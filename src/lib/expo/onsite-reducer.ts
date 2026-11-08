@@ -47,9 +47,12 @@ export type OnsiteAction =
   | { type: "expo/deliveryState"; id: string; state: "Arrived" | "Cancelled"; as?: "exhibitor" }
   | { type: "expo/dismantleTick"; exhibitorId: string; step: "cleared" | "returned"; as?: "exhibitor" }
   | { type: "expo/signOff"; exhibitorId: string; damage: string }
-  | { type: "expo/issue"; id: string; exhibitorId?: string; boothId?: string; category: IssueCategory; priority: IssuePriority; text: string; as?: "exhibitor" };
+  | { type: "expo/issue"; id: string; exhibitorId?: string; boothId?: string; category: IssueCategory; priority: IssuePriority; text: string; as?: "exhibitor" }
+  | { type: "expo/issueAssign"; id: string; assignee: string }
+  | { type: "expo/issueResolve"; id: string; note: string }
+  | { type: "expo/occupancy"; exhibitorId: string; day: number; staffed: boolean | null };
 
-export const ONSITE_TYPES = new Set<string>(["expo/people", "expo/personRemove", "expo/branding", "expo/brandingDecide", "expo/order", "expo/orderState", "expo/requirement", "expo/requirementAck", "expo/moveIn", "expo/delivery", "expo/deliveryState", "expo/dismantleTick", "expo/signOff", "expo/issue"]);
+export const ONSITE_TYPES = new Set<string>(["expo/people", "expo/personRemove", "expo/branding", "expo/brandingDecide", "expo/order", "expo/orderState", "expo/requirement", "expo/requirementAck", "expo/moveIn", "expo/delivery", "expo/deliveryState", "expo/dismantleTick", "expo/signOff", "expo/issue", "expo/issueAssign", "expo/issueResolve", "expo/occupancy"]);
 
 export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
   let expo = state.expo;
@@ -214,6 +217,31 @@ export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
       // an exhibitor reports for its own stand
       const boothId = action.boothId ?? (action.exhibitorId ? activeBookingOf(expo, action.exhibitorId, cfg, at)?.boothIds[0] : undefined);
       return withExpo(state, { ...expo, issues: [...expo.issues, { id: action.id, eventId, exhibitorId: action.exhibitorId, boothId, category: action.category, priority: action.priority, text: action.text.trim(), at, by, history: [note(`Reported: ${action.priority.toLowerCase()} priority`, by, at)] }] });
+    }
+
+    case "expo/issueAssign": {
+      const i = expo.issues.find((x) => x.id === action.id);
+      const m = state.team.find((x) => x.id === action.assignee && x.status === "Active");
+      if (!i || i.resolved || !m || i.assignee === m.id || !expoCan(state, "expo.floor")) return state;
+      return withExpo(state, { ...expo, issues: expo.issues.map((x) => (x.id === i.id ? { ...x, assignee: m.id, history: [...x.history, note(`Assigned to ${m.name}`, by, at)] } : x)) });
+    }
+
+    case "expo/issueResolve": {
+      const i = expo.issues.find((x) => x.id === action.id);
+      if (!i || i.resolved || !action.note.trim() || !expoCan(state, "expo.floor")) return state;
+      expo = { ...expo, issues: expo.issues.map((x) => (x.id === i.id ? { ...x, resolved: { at, by, note: action.note.trim() }, history: [...x.history, note(`Resolved: ${action.note.trim()}`, by, at)] } : x)) };
+      if (i.exhibitorId) expo = send(expo, i.eventId, i.exhibitorId, `Your ${i.category.toLowerCase()} issue is resolved`, `/exhibitor/${i.exhibitorId}`, "SMS");
+      return withExpo(state, expo);
+    }
+
+    case "expo/occupancy": {
+      // the floor walk: set a stand staffed or not for a show day, or hand it back to the check-ins (null)
+      const c = cfgOf(action.exhibitorId);
+      if (!c || !expoCan(state, "expo.floor") || action.day < 1 || action.day > c.cfg.showDays.length || !signedBooking(expo, c.cfg, c.e.id, at)) return state;
+      // a day not yet started is not walked
+      if (`${c.cfg.showDays[action.day - 1].date} ${c.cfg.exhibitorOpen}` > at) return state;
+      const rest = expo.occupancy.filter((o) => !(o.exhibitorId === c.e.id && o.day === action.day));
+      return withExpo(state, { ...expo, occupancy: action.staffed === null ? rest : [...rest, { eventId: c.e.eventId, exhibitorId: c.e.id, day: action.day, staffed: action.staffed, by, at }] });
     }
   }
   return state;

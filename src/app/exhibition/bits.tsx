@@ -88,6 +88,8 @@ const stateTone: Record<string, "ok" | "okSolid" | "warn" | "bad" | "mute" | "co
   Seen: "ok",
   New: "coral",
   Late: "warn",
+  Staffed: "ok",
+  "Not staffed": "warn",
 };
 /** A pill for the stand and logistics states (branding, orders, deliveries, dismantling, issues). */
 export function StatePill({ s }: { s: string }) {

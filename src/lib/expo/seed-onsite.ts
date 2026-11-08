@@ -15,6 +15,7 @@ export interface OnsiteSeed {
   booths: Booth[];
   delegates: Delegate[];
   invoices: Invoice[];
+  payments: Payment[];
   between: (a: number, b: number) => number;
   pay: (inv: Invoice, at: string, method: Payment["method"]) => Payment;
   msg: (at: string, to: string, subject: string, channel?: ExpoMessage["channel"]) => void;
@@ -176,7 +177,36 @@ export function seedOnsite(c: OnsiteSeed) {
       }
       log(k, office(later(addMinutes(k.contract!.at, 240), "2026-11-18 09:00")), "exhibitor", `2 contractor passes issued`);
     });
+  // they collected their badges at the desk during build-up; no show-day check-in
+  for (const d of contractors) d.accredited = true;
   c.delegates.push(...contractors);
+  /* stand staff (POR-2): every stand has at least two people; on a paid stand most were through the desk this morning */
+  const paidUp = (exhibitorId: string) =>
+    c.invoices.filter((i) => i.exhibitorId === exhibitorId && i.state === "Issued" && !i.orderId).every((i) => c.payments.filter((p) => p.invoiceId === i.id).reduce((n, p) => n + p.amount, 0) >= Math.round(i.lines.reduce((n, l) => n + l.qty * l.unit, 0) * (1 + i.vatPct / 100)));
+  const roles = ["Stand lead", "Sales", "Product specialist", "Marketing", "Business development"];
+  const staff: Delegate[] = [];
+  signed.forEach((k, n) => {
+    const e = exOf(k);
+    const have = c.delegates.filter((d) => d.exhibitorId === e.id && !d.cancelled && d.tierId !== CONTRACTOR_TIER).length;
+    const paid = paidUp(e.id);
+    for (let i = have; i < 2; i++) {
+      const f = c.first[(n * 7 + i * 11 + 3) % c.first.length];
+      const l = c.last[(n * 5 + i * 3 + 1) % c.last.length];
+      const id = `d_st_${slug(e.name)}_${i + 1}`;
+      const code = badgeCodeFor(used, id, "EX");
+      used.add(code);
+      const d = personDelegate(e, id, { name: `${f} ${l}`, email: `${f.toLowerCase()}.${l.toLowerCase()}@${slug(e.name)}.example`, phone: `+2547${String(30000000 + ((n * 7907 + i * 3571) % 69999999))}`, title: roles[(n + i) % roles.length] }, "Staff", code);
+      // most people of a paid stand came through the desk between 07:35 and 09:40; one stand in eight is still empty
+      if (paid && n % 8 !== 3 && (i === 0 || n % 3 !== 1)) {
+        d.accredited = true;
+        d.status = "Checked in";
+        d.checkIns = [{ day: 1, at: addMinutes("2026-11-25 07:35", (n * 13 + i * 29) % 125).slice(11) }];
+      }
+      staff.push(d);
+    }
+  });
+  c.delegates.push(...staff);
+
   const contractorTier: Tier = {
     id: CONTRACTOR_TIER,
     eventId: signed[0].eventId,
@@ -206,5 +236,5 @@ export function seedOnsite(c: OnsiteSeed) {
     ...issue("is_3", "ex_mtandao-isp", "Internet", "Normal", "The stand's wired line does not connect.", "2026-11-25 10:12", "exhibitor"),
   ];
 
-  return { branding, orders, requirements, moveIns, deliveries, dismantles: [], issues, contractorTier };
+  return { branding, orders, requirements, moveIns, deliveries, dismantles: [], issues, contractorTier, staffAdded: staff.length };
 }

@@ -6,12 +6,14 @@ import { Logo } from "@/components/ui";
 import { roomVerdict, scanVerdict, sessionAtRoom, useStore } from "@/lib/store";
 import { DR_ZONE, eventDay } from "@/lib/dealroom/logic";
 import { moduleClock } from "@/lib/clock";
+import { deskProblem } from "@/lib/expo/ops";
 import type { DrMeeting } from "@/lib/dealroom/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
 import type { AppState, Delegate } from "@/lib/types";
 
 type Post = { kind: "desk" } | { kind: "drdesk" } | { kind: "zone"; zoneId: string; direction: "in" | "out" } | { kind: "room"; roomId: string };
-type Verdict = { verdict: "allow" | "deny" | "override"; reason?: string; delegate?: Delegate; meeting?: DrMeeting };
+// `stand` marks a desk refusal under the exhibition's paid-in-full rule: the one desk refusal a PIN may override (OPS-1)
+type Verdict = { verdict: "allow" | "deny" | "override"; reason?: string; delegate?: Delegate; meeting?: DrMeeting; stand?: boolean };
 
 const findBadge = (state: AppState, code: string) => state.delegates.find((d) => d.badgeCode.toLowerCase() === code.trim().toLowerCase() || d.id === code.trim());
 
@@ -103,6 +105,8 @@ export function Scanner() {
   const roomMeetings = drRoom ? dr.meetings.filter((m) => m.roomId === room!.id && m.start.slice(0, 10) === clock.slice(0, 10) && ["Confirmed", "In progress", "Held"].includes(m.status)) : [];
   const tierOf = (d: Delegate) => state.tiers.find((t) => t.id === d.tierId)?.name;
   const now = () => (mod ? fmtStamp(clock) : new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+  // HH:MM on the module's clock for what the store records; the wall clock otherwise
+  const at = mod ? clock.slice(11, 16) : undefined;
 
   function scan(input: string) {
     const c = input.trim();
@@ -110,7 +114,7 @@ export function Scanner() {
     if (post.kind === "drdesk") {
       const v = drDeskVerdict(state, c, event.id);
       if (v.verdict === "allow" && v.delegate) {
-        if (!v.delegate.accredited) dispatch({ type: "accredit", delegateId: v.delegate.id, day: DAY });
+        if (!v.delegate.accredited) dispatch({ type: "accredit", delegateId: v.delegate.id, day: DAY, at });
         dispatch({ type: "dr/arrive", delegateId: v.delegate.id });
       }
       return done(v);
@@ -119,8 +123,11 @@ export function Scanner() {
       const d = findBadge(state, c);
       if (!d || d.cancelled || d.status === "Cancelled" || d.status === "Refunded") return done({ verdict: "deny", reason: "Invalid or cancelled badge", delegate: d });
       if (d.eventId !== event.id) return done({ verdict: "deny", reason: `Badge is for ${state.events.find((e) => e.id === d.eventId)?.name ?? "another event"}`, delegate: d });
+      // stand staff and contractors are accredited once their company's stand is paid in full
+      const stand = deskProblem(state, d);
+      if (stand) return done({ verdict: "deny", reason: stand, delegate: d, stand: true });
       if (d.status === "Pending" || d.status === "Awaiting payment") return done({ verdict: "deny", reason: "Registration not paid", delegate: d });
-      dispatch({ type: "accredit", delegateId: d.id, day: DAY });
+      dispatch({ type: "accredit", delegateId: d.id, day: DAY, at });
       return done({ verdict: "allow", reason: d.accredited ? "Already accredited" : "Accredited, badge printed", delegate: d });
     }
     if (post.kind === "room" && drRoom) {
@@ -141,8 +148,8 @@ export function Scanner() {
       if (v.delegate && v.session) dispatch({ type: "roomScan", delegateId: v.delegate.id, roomId: post.roomId, sessionId: v.session.id, day: DAY, verdict: v.verdict, reason: v.reason });
       return done(v);
     }
-    const v = scanVerdict(state, c, post.zoneId, post.direction);
-    if (v.delegate) dispatch({ type: "scan", delegateId: v.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: v.verdict, reason: v.reason, day: DAY });
+    const v = scanVerdict(state, c, post.zoneId, post.direction, mod?.at);
+    if (v.delegate) dispatch({ type: "scan", delegateId: v.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: v.verdict, reason: v.reason, day: DAY, at });
     done(v);
   }
 
@@ -157,22 +164,38 @@ export function Scanner() {
   }
 
   function doOverride() {
-    if (!result?.delegate || post.kind === "desk" || post.kind === "drdesk" || drRoom || pin.length < 4 || !reason) return;
+    if (!result?.delegate || pin.length < 4 || !reason) return;
+    if (post.kind === "desk") {
+      if (!result.stand) return;
+      dispatch({ type: "accredit", delegateId: result.delegate.id, day: DAY, at, override: reason });
+      return done({ verdict: "override", reason: `Accredited on override: ${reason}`, delegate: result.delegate });
+    }
+    if (post.kind === "drdesk" || drRoom) return;
     if (post.kind === "room") {
       if (!roomSession) return;
       dispatch({ type: "roomScan", delegateId: result.delegate.id, roomId: post.roomId, sessionId: roomSession.id, day: DAY, verdict: "override", reason });
     } else {
-      dispatch({ type: "scan", delegateId: result.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: "override", reason, day: DAY });
+      dispatch({ type: "scan", delegateId: result.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: "override", reason, day: DAY, at });
     }
     done({ verdict: "override", reason: `Override: ${reason}`, delegate: result.delegate });
   }
 
+  // an event with an exhibition adds its stand passes: paid, owing, and a contractor (OPS-1, OPS-2)
+  const stand = (pick: (d: Delegate) => boolean) => state.delegates.find((d) => d.eventId === event.id && !d.cancelled && pick(d))?.badgeCode ?? "";
+  const expoSamples = state.expo.configs[event.id]
+    ? [
+        [stand((d) => d.tierId === "t_exhibitor" && d.status === "Confirmed" && !d.accredited && !deskProblem(state, d)), "Stand staff, paid"],
+        [stand((d) => d.tierId === "t_exhibitor" && d.status === "Confirmed" && !!deskProblem(state, d)?.includes("paid in full")), "Stand staff, owes"],
+        [stand((d) => d.tierId === "t_contractor"), "Contractor"],
+      ]
+    : [];
   const samples = hasDr ? drSamples(state, post, event.id) : [
     ["EXC-DEMO-4821", "Amina, Full"],
     ["EXC-VIP-1001", "Hassan, VIP"],
     ["EXC-CANC-0007", "Cancelled"],
     [state.delegates.find((d) => d.status === "Awaiting payment")?.badgeCode ?? "", "Unpaid"],
-  ];
+    ...expoSamples,
+  ].filter(([code]) => code);
   const changeEvent = (id: string) => {
     setEventId(id);
     setPost({ kind: "desk" });
@@ -305,7 +328,7 @@ export function Scanner() {
                   </div>
                 </div>
               )}
-              {result.verdict === "deny" && result.delegate && post.kind !== "desk" && post.kind !== "drdesk" && !drRoom && !override && (
+              {result.verdict === "deny" && result.delegate && (post.kind === "desk" ? !!result.stand : post.kind !== "drdesk" && !drRoom) && !override && (
                 <button onClick={() => setOverride(true)} className="mt-3 w-full rounded-lg bg-white/20 py-2 text-sm font-medium">
                   Override with PIN
                 </button>
@@ -315,9 +338,9 @@ export function Scanner() {
                   <input className="w-full rounded-lg bg-white/90 text-ink px-3 py-2 text-sm" placeholder="Staff PIN" type="password" value={pin} onChange={(e) => setPin(e.target.value)} />
                   <select className="w-full rounded-lg bg-white/90 text-ink px-3 py-2 text-sm" value={reason} onChange={(e) => setReason(e.target.value)}>
                     <option value="">Reason…</option>
-                    <option>Organiser instruction</option>
-                    <option>Exit scan missed</option>
-                    <option>Manual grant pending sync</option>
+                    {(post.kind === "desk" ? ["Payment confirmed by Finance", "Organiser instruction"] : ["Organiser instruction", "Exit scan missed", "Manual grant pending sync"]).map((r) => (
+                      <option key={r}>{r}</option>
+                    ))}
                   </select>
                   <button onClick={doOverride} className="w-full rounded-lg bg-ink py-2 text-sm font-medium">
                     Confirm override

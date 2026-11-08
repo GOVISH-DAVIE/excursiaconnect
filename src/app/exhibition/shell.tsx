@@ -16,6 +16,8 @@ export function ExhibitionShell({ children }: { children: ReactNode }) {
     { href: "/exhibition/sales", label: "Sales and payments", show: sees("expo.manage", "money.view") },
     { href: "/exhibition/services", label: "Stand services", show: sees("expo.manage", "expo.floor") },
     { href: "/exhibition/logistics", label: "Logistics", show: sees("expo.manage", "expo.floor") },
+    { href: "/exhibition/operations", label: "Operations", show: sees("expo.manage", "expo.floor") },
+    { href: "/exhibition/reports", label: "Reports", show: sees("expo.manage", "money.view") },
     { href: "/exhibition/messages", label: "Messages", show: true },
     { href: "/exhibition/settings", label: "Settings", show: true },
   ];

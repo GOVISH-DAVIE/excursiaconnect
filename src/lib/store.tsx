@@ -5,13 +5,14 @@ import { seed } from "./seed";
 import { overlaps } from "./time";
 import { drReducer, type DrAction } from "./dealroom/reducer";
 import { expoReducer, type ExpoAction } from "./expo/reducer";
+import { deskProblem, doorProblem } from "./expo/ops";
 import { meetingInRoom } from "./dealroom/logic";
 import type { AppState, Capability, Category, Delegate, EventState, FormField, Order, PaymentMethod, Role, Room, Session, SpeakerProfile, Sponsor, TeamMember, Tier, Zone } from "./types";
 
 export const STORAGE_KEY = "excursiaconnect-proto-v1";
 /** Bumped whenever the seed gains records in arrays that already exist, so a saved browser resets instead of
  *  keeping an older copy that lacks them (hydrate only merges top-level keys). */
-export const SEED_VERSION = 7;
+export const SEED_VERSION = 8;
 
 export { overlaps };
 
@@ -27,8 +28,9 @@ type Action =
   | { type: "register"; delegate: Delegate; order?: Order }
   | { type: "approveRegistration"; delegateId: string; approve: boolean }
   | { type: "setEventState"; eventId: string; state: EventState; note?: string; pricing?: Partial<AppState["events"][number]> }
-  | { type: "scan"; delegateId: string; zoneId: string; direction: "in" | "out"; verdict: "allow" | "deny" | "override"; reason?: string; day: number }
-  | { type: "accredit"; delegateId: string; day: number }
+  | { type: "scan"; delegateId: string; zoneId: string; direction: "in" | "out"; verdict: "allow" | "deny" | "override"; reason?: string; day: number; at?: string }
+  // `at` is HH:MM on a module's clock; `override` is the reason the desk accredits a stand that is not paid in full (OPS-1)
+  | { type: "accredit"; delegateId: string; day: number; at?: string; override?: string }
   | { type: "enrol"; delegateId: string; sessionId: string; on: boolean }
   | { type: "book"; hostId: string; slotIndex: number; byId: string }
   | { type: "message"; from: string; to: string; body: string }
@@ -86,7 +88,7 @@ function nowTime() {
   return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
 }
 
-function reducer(state: AppState, action: Action): AppState {
+export function reducer(state: AppState, action: Action): AppState {
   if (action.type.startsWith("dr/")) return drReducer(state, action as DrAction);
   if (action.type.startsWith("expo/")) return expoReducer(state, action as ExpoAction);
   switch (action.type) {
@@ -251,15 +253,27 @@ function reducer(state: AppState, action: Action): AppState {
         : { ...state, rooms: state.rooms.filter((r) => r.id !== action.roomId) };
     case "setBrand":
       return { ...state, events: state.events.map((e) => (e.id === action.eventId ? { ...e, brand: action.brand, tagline: action.tagline ?? e.tagline } : e)) };
-    case "accredit":
+    case "accredit": {
+      const who = state.delegates.find((d) => d.id === action.delegateId);
+      if (!who) return state;
+      // an exhibiting company's people wait for its stand to be paid in full, unless the desk overrides with a reason
+      const problem = deskProblem(state, who);
+      if (problem && !action.override?.trim()) return state;
+      const at = action.at ?? nowTime();
+      const expo =
+        problem && who.exhibitorId
+          ? { ...state.expo, overrides: [...state.expo.overrides, { id: `ov_${state.expo.overrides.length + 1}`, eventId: who.eventId, delegateId: who.id, exhibitorId: who.exhibitorId, reason: `${action.override!.trim()} (${problem})`, day: action.day, at: `${state.expo.clock.slice(0, 11)}${at}` }] }
+          : state.expo;
       return {
         ...state,
+        expo,
         delegates: state.delegates.map((d) =>
           d.id === action.delegateId
-            ? { ...d, accredited: true, status: d.status === "Confirmed" ? "Checked in" : d.status, checkIns: d.checkIns.some((c) => c.day === action.day) ? d.checkIns : [...d.checkIns, { day: action.day, at: nowTime() }] }
+            ? { ...d, accredited: true, status: d.status === "Confirmed" ? "Checked in" : d.status, checkIns: d.checkIns.some((c) => c.day === action.day) ? d.checkIns : [...d.checkIns, { day: action.day, at }] }
             : d,
         ),
       };
+    }
     case "scan": {
       const delta = action.verdict === "deny" ? 0 : action.direction === "in" ? 1 : -1;
       return {
@@ -270,8 +284,8 @@ function reducer(state: AppState, action: Action): AppState {
             ? {
                 ...d,
                 status: action.verdict !== "deny" && d.status === "Confirmed" ? "Checked in" : d.status,
-                checkIns: action.verdict !== "deny" && !d.checkIns.some((c) => c.day === action.day) ? [...d.checkIns, { day: action.day, at: nowTime() }] : d.checkIns,
-                zoneLog: [{ zoneId: action.zoneId, direction: action.direction, at: nowTime(), verdict: action.verdict, reason: action.reason }, ...d.zoneLog],
+                checkIns: action.verdict !== "deny" && !d.checkIns.some((c) => c.day === action.day) ? [...d.checkIns, { day: action.day, at: action.at ?? nowTime() }] : d.checkIns,
+                zoneLog: [{ zoneId: action.zoneId, direction: action.direction, at: action.at ?? nowTime(), verdict: action.verdict, reason: action.reason }, ...d.zoneLog],
               }
             : d,
         ),
@@ -477,7 +491,8 @@ export function money(n: number, currency = "KES") {
   return `${currency} ${n.toLocaleString("en-KE")}`;
 }
 
-export function scanVerdict(state: AppState, code: string, zoneId: string, direction: "in" | "out"): ScanVerdict {
+/** `now`, a full stamp, is a module's clock; without it the zone windows use the wall clock and the hall door rules are not applied. */
+export function scanVerdict(state: AppState, code: string, zoneId: string, direction: "in" | "out", now?: string): ScanVerdict {
   const delegate = state.delegates.find((d) => d.badgeCode.toLowerCase() === code.trim().toLowerCase() || d.id === code.trim());
   if (!delegate || delegate.cancelled || delegate.status === "Cancelled" || delegate.status === "Refunded") return { verdict: "deny", reason: "Invalid or cancelled badge", delegate };
   if (state.events.find((e) => e.id === delegate.eventId)?.state === "Suspended") return { verdict: "deny", reason: "Event suspended by Algotech", delegate };
@@ -494,9 +509,12 @@ export function scanVerdict(state: AppState, code: string, zoneId: string, direc
   // "entitled here, now": a zone with an opening window (the dining hall at lunch) refuses outside it
   if (zone.window) {
     const [from, to] = zone.window.split(/[–-]/).map((t) => t.trim());
-    const now = nowTime();
-    if (from && to && (now < from || now > to)) return { verdict: "deny", reason: `${zone.name} opens ${from} to ${to}`, delegate };
+    const hm = now ? now.slice(11, 16) : nowTime();
+    if (from && to && (hm < from || hm > to)) return { verdict: "deny", reason: `${zone.name} opens ${from} to ${to}`, delegate };
   }
+  // the exhibition halls open to stand staff and contractors at their own hours (OPS-2)
+  const door = now ? doorProblem(state, delegate, zoneId, now) : undefined;
+  if (door) return { verdict: "deny", reason: door, delegate };
   const last = delegate.zoneLog.find((l) => l.zoneId === zoneId);
   if (last && last.direction === "in" && last.verdict !== "deny") return { verdict: "deny", reason: "Anti-passback: already inside", delegate };
   if (zone.occupancy >= zone.capacity) return { verdict: "deny", reason: `Zone full (${zone.capacity})`, delegate };

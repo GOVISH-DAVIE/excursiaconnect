@@ -7,7 +7,7 @@ import type { BoothStatus } from "@/lib/expo/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
 import { ChartCard, HBars } from "@/app/dealroom/reports/charts";
 import { Refusal } from "@/app/dealroom/bits";
-import { deliveryStatus } from "@/lib/expo/onsite";
+import { deliveryStatus, issueStatus } from "@/lib/expo/onsite";
 import { ScannerWork, useExpo } from "./bits";
 
 /** The exhibition at a glance: what is sold, what is owed, what needs someone today. Every number opens its records. */
@@ -46,6 +46,7 @@ export default function ExhibitionOverview() {
           { label: "Branding to approve", n: expo.branding.filter((b) => b.eventId === cfg.eventId && !b.decision).length, href: "/exhibition/services?tab=Branding&state=Waiting%20for%20approval" },
           { label: "Orders to deliver", n: expo.orders.filter((o) => o.eventId === cfg.eventId && o.state === "Ordered").length, href: "/exhibition/services?tab=Orders" },
           { label: "Requirements not yet seen", n: expo.requirements.filter((r) => r.eventId === cfg.eventId && !r.ack).length, href: "/exhibition/services?tab=Requirements" },
+          { label: "Issues past their service time", n: expo.issues.filter((i) => i.eventId === cfg.eventId && issueStatus(cfg, i, now) === "Overdue").length, href: "/exhibition/operations" },
           { label: "Deliveries missed", n: expo.deliveries.filter((d) => d.eventId === cfg.eventId && deliveryStatus(cfg, d, now) === "Missed").length, href: "/exhibition/logistics?tab=Deliveries" },
         ]
       : []),

@@ -346,7 +346,9 @@ export function seedExpo(delegates: Delegate[], sponsorTier: Tier): { expo: Expo
   };
 
   // the stand and its logistics, after the people are placed so contractors join their companies
-  const onsite = seedOnsite({ cfg, exhibitors, bookings, booths, delegates, invoices, between, pay, msg, nextInvoice: () => ({ number: invoiceNo(++invSeq), id: `inv_${++invId}` }), first, last });
+  const onsite = seedOnsite({ cfg, exhibitors, bookings, booths, delegates, invoices, payments, between, pay, msg, nextInvoice: () => ({ number: invoiceNo(++invSeq), id: `inv_${++invId}` }), first, last });
+  // the staff the onsite pass added hold exhibitor passes too
+  exhibitorTier.sold = delegates.filter((d) => d.eventId === EV_NBS && d.tierId === "t_exhibitor" && (d.status === "Confirmed" || d.status === "Checked in")).length;
 
   return {
     expo: {
@@ -368,6 +370,8 @@ export function seedExpo(delegates: Delegate[], sponsorTier: Tier): { expo: Expo
       deliveries: onsite.deliveries,
       dismantles: onsite.dismantles,
       issues: onsite.issues,
+      occupancy: [],
+      overrides: [],
       seq: { exhibitor: exhibitors.length, invoice: invSeq },
     },
     exhibitorTier,

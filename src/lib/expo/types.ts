@@ -273,6 +273,27 @@ export interface Issue {
   history: ExpoHistory[];
 }
 
+/** The floor team's own call on whether a stand is staffed on a show day (OPS-3), over what check-ins say. */
+export interface Occupancy {
+  eventId: string;
+  exhibitorId: string;
+  day: number;
+  staffed: boolean;
+  by: string;
+  at: string;
+}
+
+/** A badge the desk accredited although its company's stand was not paid in full (OPS-1): a PIN and a reason. */
+export interface DeskOverride {
+  id: string;
+  eventId: string;
+  delegateId: string;
+  exhibitorId: string;
+  reason: string;
+  day: number;
+  at: string;
+}
+
 export interface ExpoMessage {
   id: string;
   eventId: string;
@@ -302,5 +323,7 @@ export interface ExpoState {
   deliveries: Delivery[];
   dismantles: Dismantle[];
   issues: Issue[];
+  occupancy: Occupancy[];
+  overrides: DeskOverride[];
   seq: { exhibitor: number; invoice: number };
 }
