@@ -155,6 +155,11 @@ export function EventPublic({ slug }: { slug: string }) {
                 Deal Room
               </Link>
             )}
+            {!!state.expo.configs[event.id] && (
+              <Link className="nav__link" href={`/e/${event.slug}/exhibit`}>
+                Exhibit
+              </Link>
+            )}
           </nav>
           <a className="nav__logo" href="#top">
             {mark}
@@ -178,6 +183,7 @@ export function EventPublic({ slug }: { slug: string }) {
                 </a>
               ))}
               {(event.dealRoom?.enabled && !!state.dealRoom.configs[event.id]) && <Link href={`/e/${event.slug}/deal-room`}>Deal Room</Link>}
+              {!!state.expo.configs[event.id] && <Link href={`/e/${event.slug}/exhibit`}>Exhibit</Link>}
               {live && (
                 <Link href={register} className="btn btn-primary btn-cta">
                   {action}

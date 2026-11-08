@@ -1,4 +1,5 @@
 import type { DealRoomState } from "./dealroom/types";
+import type { ExpoState } from "./expo/types";
 
 export type EventState =
   | "Draft"
@@ -136,6 +137,7 @@ export interface Delegate {
   badgeCode: string; // what the QR encodes
   cancelled?: boolean;
   answers?: Record<string, string>; // custom form fields, by field id
+  exhibitorId?: string; // stand staff and contractors belong to an exhibitor company (Exhibition module)
 }
 
 export interface Order {
@@ -234,7 +236,9 @@ export type Capability =
   | "sessions.own"
   | "sessions.all"
   | "team.invite"
-  | "team.roles";
+  | "team.roles"
+  | "expo.manage"
+  | "expo.floor";
 
 export interface TeamMember {
   id: string;
@@ -321,4 +325,5 @@ export interface AppState {
   messages: Message[];
   currentDelegateId?: string;
   dealRoom: DealRoomState;
+  expo: ExpoState;
 }

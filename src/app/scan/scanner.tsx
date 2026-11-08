@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Logo } from "@/components/ui";
 import { roomVerdict, scanVerdict, sessionAtRoom, useStore } from "@/lib/store";
 import { DR_ZONE, eventDay } from "@/lib/dealroom/logic";
+import { moduleClock } from "@/lib/clock";
 import type { DrMeeting } from "@/lib/dealroom/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
 import type { AppState, Delegate } from "@/lib/types";
@@ -78,9 +79,11 @@ export function Scanner() {
   const event = live.find((e) => e.id === eventId) ?? live[0];
   const dr = state.dealRoom;
   const hasDr = !!dr.configs[event.id] && !!event.dealRoom?.enabled;
-  const clock = dr.clock;
+  // a module with its own demo clock sets the day and the time; any other event is on its first day
+  const mod = moduleClock(state, event.id);
+  const clock = mod?.at ?? dr.clock;
   // a Deal Room event runs on the demo clock; the others on the prototype's day one
-  const DAY = hasDr ? Math.min(Math.max(eventDay(event.startDate, clock), 1), event.days) : 1;
+  const DAY = mod ? Math.min(Math.max(eventDay(event.startDate, clock), 1), event.days) : 1;
   const zones = state.zones.filter((z) => z.eventId === event.id);
   const [post, setPost] = useState<Post>(() => (params.get("post") === "drdesk" ? { kind: "drdesk" } : { kind: "desk" }));
   const [code, setCode] = useState("");
@@ -99,7 +102,7 @@ export function Scanner() {
   const roomIn = roomSession ? state.delegates.filter((d) => (d.roomLog ?? []).some((l) => l.sessionId === roomSession.id && l.verdict !== "deny")).length : 0;
   const roomMeetings = drRoom ? dr.meetings.filter((m) => m.roomId === room!.id && m.start.slice(0, 10) === clock.slice(0, 10) && ["Confirmed", "In progress", "Held"].includes(m.status)) : [];
   const tierOf = (d: Delegate) => state.tiers.find((t) => t.id === d.tierId)?.name;
-  const now = () => (hasDr ? fmtStamp(clock) : new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+  const now = () => (mod ? fmtStamp(clock) : new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
 
   function scan(input: string) {
     const c = input.trim();
@@ -227,7 +230,7 @@ export function Scanner() {
               </option>
             ))}
           </select>
-          {hasDr && <div className="mt-2 text-[13px] text-white/60">Summit day {DAY}, {fmtStamp(clock)} on the Deal Room clock</div>}
+          {mod && <div className="mt-2 text-[13px] text-white/60">Summit day {DAY}, {fmtStamp(clock)} on the {mod.name}</div>}
           {post.kind === "drdesk" && <div className="mt-1 text-[13px] text-white/60">Checks the participant in for every meeting they have today; the live board shows who is here.</div>}
           {drRoom && (
             <div className="mt-1 flex items-center justify-between gap-3 text-[13px] text-white/60">

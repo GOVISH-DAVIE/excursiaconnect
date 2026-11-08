@@ -2,6 +2,7 @@ import type { AppState, Delegate, Order, Session, Shift, TeamMember } from "./ty
 import { DEFAULT_GRANTS } from "./roles";
 import { bouer, ca3, ca3Rooms, ca3Sessions, ca3Tiers, ca3Zones, seedDealRoom } from "./dealroom/seed";
 import { DR_TIER, DR_ZONE } from "./dealroom/logic";
+import { seedExpo } from "./expo/seed";
 
 const team: TeamMember[] = [
   { id: "u_owner", organiserId: "org_epic", name: "Njeri Kamande", email: "njeri@epicpr.example", role: "Owner", eventIds: [], status: "Active", lastActive: "Today, 09:12" },
@@ -200,6 +201,10 @@ for (const sess of sessions) {
   if (sess.status === "ended") sess.attended = Math.round(sess.enrolled * 0.78);
 }
 
+// the Exhibition at the summit: halls, booths, and the companies behind the seeded Exhibitor and Sponsor
+// delegates. It runs here, after every draw on `rand`, with its own generator, so nothing above shifts.
+const exhibition = seedExpo(delegates, tiers[4]);
+
 // the Deal Room's event: Bouer's Connected Africa 3.0, its participants badged on approval or verification
 const deal = seedDealRoom();
 const ca3TierRows = ca3Tiers.map((t) => (t.id === DR_TIER ? { ...t, sold: deal.delegates.length } : t));
@@ -213,7 +218,6 @@ export const seed: AppState = {
     { id: "f_bio", eventId: "ev_nairobi_summit", label: "Short bio", type: "textarea", required: true, showTo: ["Speaker", "Panelist"], help: "Shown in the programme, 60 words at most" },
     { id: "f_headshot", eventId: "ev_nairobi_summit", label: "Headshot (up to 5 MB)", type: "file", required: false, showTo: ["Speaker"] },
     { id: "f_dietary", eventId: "ev_nairobi_summit", label: "Dietary or accessibility needs", type: "text", required: false, showTo: "Everyone" },
-    { id: "f_stand", eventId: "ev_nairobi_summit", label: "Stand number", type: "text", required: false, showTo: ["Exhibitor", "Sponsor"] },
   ],
   exceptions: [
     { ref: "RKJ7Q2M1", issue: "M-Pesa callback received with no matching order, KES 12,000", raised: "2026-11-05 03:10" },
@@ -249,7 +253,7 @@ export const seed: AppState = {
     { id: EV3, slug: "east-africa-fintech-forum", organiserId: "org_epic", name: "East Africa Fintech Forum", tagline: "Payments, lending and the next 100 million customers.", venue: "Radisson Blu Upper Hill", city: "Nairobi", startDate: "2027-03-18", endDate: "2027-03-18", days: 1, state: "Draft", commissionPct: 5, oneOffFee: 0, licenceFee: 85000, gatewayFeesBorneBy: "Algotech", staffCount: 0, stations: 0, expectedAttendance: 400, brand: { primary: "#5B2A86", logoText: "EAFF" }, registrationsByDay: [] },
     ca3,
   ],
-  tiers: [...tiers, ...ca3TierRows],
+  tiers: [...tiers, exhibition.exhibitorTier, ...ca3TierRows],
   zones: [...zones, ...ca3ZoneRows],
   rooms: [...rooms, ...ca3Rooms],
   sessions: [...sessions, ...ca3Sessions],
@@ -261,4 +265,5 @@ export const seed: AppState = {
   ],
   currentDelegateId: "d_demo",
   dealRoom: deal.dr,
+  expo: exhibition.expo,
 };

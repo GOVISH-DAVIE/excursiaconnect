@@ -4,13 +4,14 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type
 import { seed } from "./seed";
 import { overlaps } from "./time";
 import { drReducer, type DrAction } from "./dealroom/reducer";
+import { expoReducer, type ExpoAction } from "./expo/reducer";
 import { meetingInRoom } from "./dealroom/logic";
 import type { AppState, Capability, Category, Delegate, EventState, FormField, Order, PaymentMethod, Role, Room, Session, SpeakerProfile, Sponsor, TeamMember, Tier, Zone } from "./types";
 
 export const STORAGE_KEY = "excursiaconnect-proto-v1";
 /** Bumped whenever the seed gains records in arrays that already exist, so a saved browser resets instead of
  *  keeping an older copy that lacks them (hydrate only merges top-level keys). */
-export const SEED_VERSION = 5;
+export const SEED_VERSION = 6;
 
 export { overlaps };
 
@@ -18,6 +19,7 @@ export type ScanVerdict = { verdict: "allow" | "deny"; reason?: string; delegate
 
 type Action =
   | DrAction
+  | ExpoAction
   | { type: "reset" }
   | { type: "addGallery"; eventId: string; images: string[] }
   | { type: "removeGallery"; eventId: string; index: number }
@@ -86,6 +88,7 @@ function nowTime() {
 
 function reducer(state: AppState, action: Action): AppState {
   if (action.type.startsWith("dr/")) return drReducer(state, action as DrAction);
+  if (action.type.startsWith("expo/")) return expoReducer(state, action as ExpoAction);
   switch (action.type) {
     case "reset":
       return structuredClone(seed);

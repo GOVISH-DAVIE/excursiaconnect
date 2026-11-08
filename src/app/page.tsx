@@ -11,6 +11,13 @@ const personas = [
   { href: "/scan", title: "Staff scanner", desc: "Accreditation desk and zone doors. Allow or deny in one tap, with the reason." },
 ];
 
+const exhibition = [
+  { href: "/e/nairobi-brand-summit-2026/exhibit", title: "Exhibit page", desc: "The floor plan with live availability and prices, what a stand includes, and the application." },
+  { href: "/exhibition", title: "Exhibition team", desc: "Faith's workspace: the plan editor, exhibitor review and allocation, invoices, payments and the bank statement." },
+  { href: "/exhibitor/ex_rafiki-translation-services", title: "An approved exhibitor", desc: "Approved yesterday with no booth yet: choose one on the plan, hold it, sign, pay." },
+  { href: "/exhibitor/ex_bidco-africa", title: "An exhibitor that owes", desc: "Contract signed, deposit and balance both overdue: the portal asks for payment." },
+];
+
 const dealRoom = [
   { href: "/e/connected-africa-3/deal-room", title: "Deal Room page", desc: "Connected Africa 3.0: who it is for, the eligibility check, how it works, and the two applications." },
   { href: "/dealroom", title: "Deal Room team", desc: "Bouer's lead, reviewers and operations: the queue, scoring with evidence, decisions, settings and reports." },
@@ -39,6 +46,15 @@ export default function Home() {
         <h2 className="mt-14 text-[13px] font-medium uppercase tracking-[0.08em] text-white/50">Deal Room module · Connected Africa 3.0, as of summit day 2</h2>
         <div className="mt-4 grid gap-px bg-white/10 sm:grid-cols-2 lg:grid-cols-3 rounded-xl overflow-hidden">
           {dealRoom.map((p) => (
+            <Link key={p.href} href={p.href} className="group bg-ink p-6 hover:bg-ink-800 transition-colors">
+              <h2 className="text-[20px] font-medium tracking-[-0.01em] group-hover:text-coral transition-colors">{p.title}</h2>
+              <p className="mt-2 text-[15px] text-white/65 leading-relaxed">{p.desc}</p>
+            </Link>
+          ))}
+        </div>
+        <h2 className="mt-14 text-[13px] font-medium uppercase tracking-[0.08em] text-white/50">Exhibition module · Nairobi Brand &amp; PR Summit, as of show day 1</h2>
+        <div className="mt-4 grid gap-px bg-white/10 sm:grid-cols-2 rounded-xl overflow-hidden">
+          {exhibition.map((p) => (
             <Link key={p.href} href={p.href} className="group bg-ink p-6 hover:bg-ink-800 transition-colors">
               <h2 className="text-[20px] font-medium tracking-[-0.01em] group-hover:text-coral transition-colors">{p.title}</h2>
               <p className="mt-2 text-[15px] text-white/65 leading-relaxed">{p.desc}</p>
