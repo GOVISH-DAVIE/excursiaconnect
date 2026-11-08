@@ -7,6 +7,7 @@ import type { AppState, Capability } from "../types";
 import {
   bookingStage,
   expoCan,
+  holdExpiresAt,
   holdProblems,
   invoiceNo,
   invoiceOwed,
@@ -79,12 +80,23 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
     case "expo/clock": {
       // forward only, so nothing recorded can predate the clock
       if (action.clock <= expo.clock) return state;
+      const was = expo.clock;
+      // a hold that lapses as the clock passes its expiry is logged and the company told, once (BTH-4)
+      const expiry = (k: (typeof expo.bookings)[number]) => holdExpiresAt(k, expo.configs[k.eventId]);
+      for (const k of [...state.expo.bookings].sort((a, b) => expiry(a).localeCompare(expiry(b)))) {
+        const until = expiry(k);
+        if (k.contract || k.cancelled || !(was < until && action.clock >= until)) continue;
+        const codes = k.boothIds.map((id) => expo.booths.find((b) => b.id === id)?.code).join(", ");
+        expo = { ...expo, bookings: expo.bookings.map((x) => (x.id === k.id ? { ...x, history: [...x.history, note(`Hold lapsed unsigned; ${codes} back on sale`, "system", until)] } : x)) };
+        // the message is dated when the hold lapsed, not when the clock was moved
+        expo = { ...send({ ...expo, clock: until }, k.eventId, k.exhibitorId, `Your hold on ${codes} has lapsed`, `/exhibitor/${k.exhibitorId}`, "Email and SMS"), clock: was };
+      }
       let next = withExpo(state, { ...expo, clock: action.clock });
       // passing the exhibitors' opening time on a later show day plays that morning's arrivals (OPS-1, OPS-3)
       for (const cfg of Object.values(expo.configs))
         cfg.showDays.forEach((d, i) => {
           const open = `${d.date} ${cfg.exhibitorOpen}`;
-          if (i > 0 && expo.clock < open && action.clock >= open) next = arrivals(next, cfg, i + 1, action.clock);
+          if (i > 0 && was < open && action.clock >= open) next = arrivals(next, cfg, i + 1, action.clock);
         });
       return next;
     }

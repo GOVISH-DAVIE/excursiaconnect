@@ -61,6 +61,21 @@ An add-on switched on per event that qualifies capital seekers and finance provi
 
 **Where the rules live.** Every rule (clashes, caps, both-accept, consent, roles, second decider, read-only archive) is enforced in `src/lib/dealroom/` reducers; screens call the same functions in `logic.ts` to explain a refusal before it happens. Settings, Checks runs three 50-request booking bursts and the invariant check.
 
+## Exhibition module
+
+Halls, floor plans and booths; exhibitor applications and approval; booth holds, contracts, stand invoices, payments and reconciliation; the exhibitor portal with staff, branding, equipment orders and requirements; build-up, deliveries, contractors and dismantling; show-day check-in, hall doors, occupancy and issues; and reports. It runs on the Nairobi Brand & PR Summit 2026 (Sarit Expo Centre, 25 to 27 November 2026). Stand fees are the organiser's own receivables, with no commission. The use cases are in [docs/exhibition-use-cases.md](docs/exhibition-use-cases.md); what is covered is in [docs/exhibition-coverage.md](docs/exhibition-coverage.md) and the flow-by-flow test in [docs/exhibition-use-case-test.md](docs/exhibition-use-case-test.md).
+
+| Route | Persona | What it shows |
+| --- | --- | --- |
+| `/e/nairobi-brand-summit-2026/exhibit` | Public | Halls, the live plan, prices, what a stand includes, who is exhibiting, the application |
+| `/exhibitor/[id]` | Exhibitor contact | Status, booth choice and hold, contract, invoices; once signed, people and contractors, branding, equipment, requirements, move-in, deliveries, problems and dismantling. Try `ex_rafiki-translation-services` (approved, no booth), `ex_upesi-displays` (booked), `ex_lulu-cosmetics` (under review) |
+| `/exhibition` | Exhibition team, Finance | Overview, floor plan, exhibitors, sales and payments, stand services, logistics, operations, reports, messages, settings. Switch who you are in the rail; each role sees what the organiser's role matrix allows |
+| `/scan?event=ev_nairobi_summit` | Accreditation | The desk accredits a stand's people only when its stand is paid in full (PIN override with a reason); the hall doors admit contractors in build-up and dismantling, stand staff from 07:30 |
+
+**The exhibition clock.** The rail's clock starts at show day 1, 10:30, and only moves forward: +15 minutes, +1 hour, day 2, day 3, dismantling, after the show. Hold expiries, overdue invoices, late surcharges, delivery slots, issue service times and the door rules are worked out from it; passing a later show day's opening plays that morning's arrivals. Reset the demo data from the home page to start again.
+
+**Where the rules live.** In `src/lib/expo/`: `logic.ts`, `onsite.ts` and `ops.ts` hold the rules as pure functions; `reducer.ts` and `onsite-reducer.ts` enforce them, and the store's `accredit` and `scanVerdict` apply the desk and door rules. Settings, Checks sends 50 hold requests through the real reducer and runs the invariant check.
+
 ## Structure
 
 ```
@@ -68,8 +83,10 @@ src/lib/types.ts     domain types (Event, Tier, Delegate, Order, Zone, Room, Ses
 src/lib/seed.ts      deterministic mock data: 3 events, 5 tiers, 5 zones, 15 sessions, 212 delegates, orders
 src/lib/store.tsx    client store (reducer + localStorage, versioned) and domain helpers: scanVerdict, makeOrder, money
 src/lib/dealroom/    Deal Room types, rules (logic.ts), reducers (reducer, meetings, conversion) and seed
+src/lib/expo/        Exhibition types, rules (logic, onsite, ops), reducers (reducer, onsite-reducer) and seed
+src/lib/clock.ts     which module clock an event runs on (Deal Room, Exhibition, or the wall clock)
 src/lib/time.ts      minute and date arithmetic; csv.ts for exports
-src/components/      ui primitives, programme view, reset button
+src/components/      ui primitives, programme view, floor plan, reset button
 src/app/             routes per persona
 public/brand/        ExcursiaConnect logo files
 ```

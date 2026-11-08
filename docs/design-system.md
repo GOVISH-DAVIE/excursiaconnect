@@ -83,6 +83,16 @@ The Deal Room reuses the dashboard and site components; what it adds:
 - **Dates.** `fmtStamp` for clock times ("Tue 16 Mar, 10:40"); `fmtLong` with the year for dates that can fall in another year, such as the document deletion date.
 - **Phone width.** Grid columns that hold a sideways-scrolling row or a wide table carry `min-w-0`, so the page never grows wider than the screen.
 
+## The Exhibition
+
+The Exhibition module (`/exhibition`, `/exhibitor/[id]`, the public exhibit page) follows the Deal Room's patterns; what it adds:
+
+- **Floor plan.** [`<FloorPlan>`](../src/components/floor-plan.tsx) draws a hall to scale in SVG, in metres: booths coloured by `STATUS_STYLE` with their code and a label, hatching for booths off sale, tooltips on hover and focus, arrow keys to nudge the selected booth, a drag ghost that turns red where the reducer would refuse. `paint` replaces the status colour (staffed, not staffed, no stand in Operations); `<PlanLegend extra>` names those colours. Below 640px the plan keeps about 13 px a metre and scrolls sideways inside its card, so a 3 m booth stays a tap target.
+- **States.** `<StatePill s>` in [`src/app/exhibition/bits.tsx`](../src/app/exhibition/bits.tsx) maps the stand and logistics states (branding, orders, deliveries, dismantling, issues, staffed) to the Deal Room's pill tones; booking, invoice and exhibitor states have their own pills there.
+- **Charts.** The Deal Room kit (`ChartCard`, `HBars`, `StackedColumns`) has three hues; a chart never shows more than three series, so a hue never repeats. Every bar and segment is a link to the records behind it, and every report table downloads as CSV.
+- **Refusals.** As in the Deal Room: the reason sits next to the control, from the same function the reducer uses. A whole column that waits on the same thing (rentals before dismantling) says it once, not on every card.
+- **Portal.** `/exhibitor/[id]` shares the Deal Room portal's shape: the event's colour in the header, tabs that scroll and keep the active one in view, one-column cards on a phone.
+
 ## Checking a page
 
 The taste skill's layout checker runs against the dev server:
