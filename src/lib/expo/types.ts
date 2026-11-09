@@ -293,6 +293,8 @@ export interface DeskOverride {
   reason: string;
   day: number;
   at: string;
+  by?: string; // the team member who approved it with their PIN
+  operator?: string; // the team member at the desk
 }
 
 export interface ExpoMessage {

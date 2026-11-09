@@ -71,7 +71,7 @@ Checked against [stakeholders-and-processes.md](stakeholders-and-processes.md) o
 | DE-9 | Receive and keep the badge | Partial | Badge page with QR; email and SMS simulated |
 | DE-10 | Edit own profile | Built | Badge: Edit my details until the organiser locks edits |
 | DE-11 | Choose breakout sessions | Built | Badge: enrol with seats left |
-| DE-12 | Get accredited and enter zones | Built | Scanner: the desk accredits; every zone door refuses a badge that has not been through the desk |
+| DE-12 | Get accredited and enter zones | Built | Scanner: the desk accredits; every zone and room door refuses a badge that has not been through the desk, and no PIN waives that. Until then the badge page says the desk is the first stop, and for stand staff why the desk cannot accredit them yet |
 | DE-13 | Watch a hybrid session | Partial | Stream placeholder on virtual tickets |
 | DE-14 | Rate a session | Not built | Ratings are seeded only |
 | DE-15 | Request a refund | Built | Badge: within seven days of the event; the organiser approves on the Delegates tab |
@@ -84,11 +84,11 @@ Checked against [stakeholders-and-processes.md](stakeholders-and-processes.md) o
 
 | ID | Use case | Status | Where |
 | --- | --- | --- | --- |
-| AZ-1 | Sign in to a device for an event | Partial | `/scan`: choose a post; the rota says who is where |
-| AZ-2 | Accredit a delegate | Built | Desk scan marks accredited and checked in |
+| AZ-1 | Sign in to a device for an event | Partial | `/scan`: sign in with a name and PIN for one event; only active members of that organiser whose role scans; the rota's post for the half-day opens first; changing event signs out. The entitlement list is not synced to a device |
+| AZ-2 | Accredit a delegate | Built | Desk scan marks accredited and checked in, recorded against the person signed in; the delegate record names them |
 | AZ-3 | Delegate with no badge | Partial | Reissue from the record; no search on the scanner |
 | AZ-4 | Scan at a zone entrance or exit | Built | Allow or deny with the reason; occupancy updated |
-| AZ-5 | Override a deny | Built | PIN and reason, logged |
+| AZ-5 | Override a deny | Built | The PIN of someone the role matrix lets override (Owner, Accreditation) and a reason, logged with who scanned and who approved. A door waives hours, entitlement, re-entry and capacity, never a cancelled, unpaid or unaccredited badge; the desk waives only a stand that still owes. The store enforces both |
 | AZ-6 | Scan at a room door | Built | `/scan`: every room is a post; enrolled delegates pass, walk-ins only where the facilitator allows and seats remain; one entry per session |
 | AZ-7 | Keep scanning offline | Partial | A toggle |
 | AZ-8 | Watch occupancy at a post | Built | Live count on the scanner |

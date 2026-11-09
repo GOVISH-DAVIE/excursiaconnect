@@ -5,18 +5,21 @@ import { DR_TIER, DR_ZONE } from "./dealroom/logic";
 import { seedExpo } from "./expo/seed";
 
 const team: TeamMember[] = [
-  { id: "u_owner", organiserId: "org_epic", name: "Njeri Kamande", email: "njeri@epicpr.example", role: "Owner", eventIds: [], status: "Active", lastActive: "Today, 09:12" },
-  { id: "u_staff1", organiserId: "org_epic", name: "Kevin Oduya", email: "kevin@epicpr.example", role: "Staff", eventIds: ["ev_nairobi_summit"], responsibility: "Delegates", status: "Active", lastActive: "Today, 08:40" },
-  { id: "u_staff2", organiserId: "org_epic", name: "Faith Wanjala", email: "faith@epicpr.example", role: "Staff", eventIds: ["ev_nairobi_summit", "ev_fintech_forum"], responsibility: "Exhibition and sponsors", status: "Active", lastActive: "Yesterday" },
-  { id: "u_staff3", organiserId: "org_epic", name: "Brian Kiptoo", email: "brian@epicpr.example", role: "Staff", eventIds: ["ev_nairobi_summit"], responsibility: "Programme and speakers", status: "Active", lastActive: "Today, 07:55" },
+  { id: "u_owner", organiserId: "org_epic", name: "Njeri Kamande", email: "njeri@epicpr.example", role: "Owner", eventIds: [], status: "Active", lastActive: "Today, 09:12", pin: "7301" },
+  { id: "u_staff1", organiserId: "org_epic", name: "Kevin Oduya", email: "kevin@epicpr.example", role: "Staff", eventIds: ["ev_nairobi_summit"], responsibility: "Delegates", status: "Active", lastActive: "Today, 08:40", pin: "5172" },
+  { id: "u_staff2", organiserId: "org_epic", name: "Faith Wanjala", email: "faith@epicpr.example", role: "Staff", eventIds: ["ev_nairobi_summit", "ev_fintech_forum"], responsibility: "Exhibition and sponsors", status: "Active", lastActive: "Yesterday", pin: "6248" },
+  { id: "u_staff3", organiserId: "org_epic", name: "Brian Kiptoo", email: "brian@epicpr.example", role: "Staff", eventIds: ["ev_nairobi_summit"], responsibility: "Programme and speakers", status: "Active", lastActive: "Today, 07:55", pin: "3915" },
   { id: "u_fin", organiserId: "org_epic", name: "Dennis Mburu", email: "dennis@epicpr.example", role: "Finance", eventIds: [], responsibility: "Ledger and payouts", status: "Active", lastActive: "Mon 3 Nov" },
-  { id: "u_desk1", organiserId: "org_epic", name: "Agnes Muthoni", email: "agnes@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:02" },
-  { id: "u_desk2", organiserId: "org_epic", name: "Collins Were", email: "collins@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:05" },
-  { id: "u_desk3", organiserId: "org_epic", name: "Mary Atieno", email: "mary@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:10" },
-  { id: "u_desk4", organiserId: "org_epic", name: "Joseph Kariuki", email: "joseph@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:11" },
+  { id: "u_desk1", organiserId: "org_epic", name: "Agnes Muthoni", email: "agnes@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:02", pin: "2468" },
+  { id: "u_desk2", organiserId: "org_epic", name: "Collins Were", email: "collins@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:05", pin: "1357" },
+  { id: "u_desk3", organiserId: "org_epic", name: "Mary Atieno", email: "mary@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:10", pin: "8024" },
+  { id: "u_desk4", organiserId: "org_epic", name: "Joseph Kariuki", email: "joseph@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 08:11", pin: "4682" },
   { id: "u_desk5", organiserId: "org_epic", name: "Lucy Nekesa", email: "lucy@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Invited" },
   { id: "u_desk6", organiserId: "org_epic", name: "Patrick Omolo", email: "patrick@epicpr.example", role: "Accreditation", eventIds: ["ev_nairobi_summit"], status: "Invited" },
   { id: "u_spk", organiserId: "org_epic", name: "Esther Njeri", email: "esther.njeri@company.co.ke", role: "Speaker", eventIds: ["ev_nairobi_summit"], status: "Active", lastActive: "Today, 10:55" },
+  // Bouer runs its own desk at Connected Africa 3.0; the Deal Room team works the Deal Room desk with these two
+  { id: "u_bdesk1", organiserId: "org_bouer", name: "Halima Yusuf", email: "halima@bouer.example", role: "Accreditation", eventIds: ["ev_ca3"], status: "Active", lastActive: "Today, 07:40", pin: "5530" },
+  { id: "u_bdesk2", organiserId: "org_bouer", name: "Moses Kibet", email: "moses@bouer.example", role: "Accreditation", eventIds: ["ev_ca3"], status: "Active", lastActive: "Today, 07:45", pin: "9071" },
 ];
 
 const shifts: Shift[] = [
@@ -166,15 +169,17 @@ orders.push(
   { id: "o_vip", eventId: EV, delegateId: "d_vip", tierId: "t_vip", gross: 25000, discount: 0, gatewayFee: 375, commission: 1250, net: 23750, method: "card", reference: "PSK_7f21c0ab", status: "paid", at: "2026-09-28" },
 );
 // a session's counter is the roster: the number of delegates who hold a seat. An ended session's attendance
-// is its room-door scans, so the seed writes those on the first `attended` people of the roster.
+// is its room-door scans, and a room door admits only a paid badge the desk has accredited, so the seed writes
+// those on the first `attended` people of the roster who could have walked in (DE-12).
 for (const s of sessions) {
   if (s.kind !== "breakout") continue;
   const roster = delegates.filter((d) => d.sessions.includes(s.id));
+  const couldEnter = roster.filter((d) => d.accredited && (d.status === "Confirmed" || d.status === "Checked in"));
   s.enrolled = roster.length;
-  s.attended = Math.min(s.attended, s.enrolled);
+  s.attended = Math.min(s.attended, couldEnter.length);
   if (s.status === "ended" && s.roomId) {
     const [h, m] = s.start.split(":").map(Number);
-    roster.slice(0, s.attended).forEach((d, i) => {
+    couldEnter.slice(0, s.attended).forEach((d, i) => {
       const t = new Date(2026, 0, 1, h, m - 8 + Math.floor((i * 17) % 22));
       d.roomLog = [...(d.roomLog ?? []), { roomId: s.roomId!, sessionId: s.id, day: s.day, at: `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}`, verdict: "allow" }];
     });

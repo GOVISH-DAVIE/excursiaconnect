@@ -128,7 +128,11 @@ function Operations() {
                   <span>
                     {d?.name}, {expo.exhibitors.find((e) => e.id === o.exhibitorId)?.name}: {o.reason}
                   </span>
-                  <span className="text-slate">{fmtStamp(o.at)}</span>
+                  <span className="text-slate">
+                    {fmtStamp(o.at)}
+                    {o.by ? `, approved by ${state.team.find((m) => m.id === o.by)?.name}` : ""}
+                    {o.operator && o.operator !== o.by ? ` at ${state.team.find((m) => m.id === o.operator)?.name}'s desk` : ""}
+                  </span>
                 </li>
               );
             })}

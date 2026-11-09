@@ -127,9 +127,9 @@ export interface Delegate {
   tierId: string;
   status: DelegateStatus;
   accredited: boolean;
-  checkIns: { day: number; at: string }[];
-  zoneLog: { zoneId: string; direction: "in" | "out"; at: string; verdict: "allow" | "deny" | "override"; reason?: string }[];
-  roomLog?: { roomId: string; sessionId: string; day: number; at: string; verdict: "allow" | "deny" | "override"; reason?: string }[]; // AZ-6: scans at a room door, one per session
+  checkIns: { day: number; at: string; by?: string }[]; // by: the team member at the desk
+  zoneLog: { zoneId: string; direction: "in" | "out"; at: string; verdict: "allow" | "deny" | "override"; reason?: string; by?: string; approvedBy?: string }[];
+  roomLog?: { roomId: string; sessionId: string; day: number; at: string; verdict: "allow" | "deny" | "override"; reason?: string; by?: string; approvedBy?: string }[]; // AZ-6: scans at a room door, one per session
   sessions: string[];
   bookable: boolean;
   slots?: { day: number; time: string; location: string; bookedBy?: string }[];
@@ -251,6 +251,7 @@ export interface TeamMember {
   responsibility?: string; // what they look after: Delegates, Exhibition, Programme, Sponsors
   status: "Active" | "Invited";
   lastActive?: string;
+  pin?: string; // signs in on the scanner, and approves an override where the role allows it (AZ-1, AZ-5)
 }
 
 /** A scanning shift: one post (the desk, or a zone entrance or exit) on one day and slot. */
@@ -325,6 +326,7 @@ export interface AppState {
   orders: Order[];
   messages: Message[];
   currentDelegateId?: string;
+  scanSession?: { memberId: string; eventId: string }; // who is signed in on this scanner, for which event (AZ-1)
   dealRoom: DealRoomState;
   expo: ExpoState;
 }

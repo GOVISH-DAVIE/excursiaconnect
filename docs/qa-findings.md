@@ -47,7 +47,7 @@ The tier, field, session, zone, room and brand editors were built after this pas
 - The "Registrations, last 12 days" bars on the overview and the performance page are a fixed array per event; new registrations do not move them.
 - A zone's "Occupancy by hour" curve is a shape scaled to capacity, not scans.
 - The reconciliation exceptions are seeded; the nightly comparison is not run.
-- The delegate record's activity log labels every accreditation "Accreditation desk 1" and every door scan "Door staff"; the rota knows who was on the post and could name them.
+- ~~The delegate record's activity log labels every accreditation "Accreditation desk 1" and every door scan "Door staff".~~ Fixed 9 November 2026: the scanner is signed in by name and PIN, and every accreditation, scan and override names its person; older records fall back to the rota.
 - The seed's random delegates reuse 30 first names and 20 surnames, so the duplicate finder reports 12 pairs on a fresh reset.
 
 ## Smaller things noticed

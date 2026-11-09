@@ -3,17 +3,19 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Logo } from "@/components/ui";
-import { roomVerdict, scanVerdict, sessionAtRoom, useStore } from "@/lib/store";
+import { overrider, roomVerdict, scanOperator, scanRefusal, scanVerdict, sessionAtRoom, useStore } from "@/lib/store";
+import { can } from "@/lib/roles";
 import { DR_ZONE, eventDay } from "@/lib/dealroom/logic";
 import { moduleClock } from "@/lib/clock";
-import { deskProblem } from "@/lib/expo/ops";
+import { deskProblem, deskRefusal } from "@/lib/expo/ops";
 import type { DrMeeting } from "@/lib/dealroom/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
-import type { AppState, Delegate } from "@/lib/types";
+import type { AppState, Delegate, Shift } from "@/lib/types";
 
 type Post = { kind: "desk" } | { kind: "drdesk" } | { kind: "zone"; zoneId: string; direction: "in" | "out" } | { kind: "room"; roomId: string };
-// `stand` marks a desk refusal under the exhibition's paid-in-full rule: the one desk refusal a PIN may override (OPS-1)
-type Verdict = { verdict: "allow" | "deny" | "override"; reason?: string; delegate?: Delegate; meeting?: DrMeeting; stand?: boolean };
+// `waivable`: a refusal staff may override with a PIN. At the desk only a stand that still owes (OPS-1); at a door
+// hours, entitlement, re-entry and capacity, never a bad, unpaid or unaccredited badge (AZ-5)
+type Verdict = { verdict: "allow" | "deny" | "override"; reason?: string; delegate?: Delegate; meeting?: DrMeeting; waivable?: boolean };
 
 const findBadge = (state: AppState, code: string) => state.delegates.find((d) => d.badgeCode.toLowerCase() === code.trim().toLowerCase() || d.id === code.trim());
 
@@ -95,6 +97,10 @@ export function Scanner() {
   const [pin, setPin] = useState("");
   const [reason, setReason] = useState("");
   const [log, setLog] = useState<{ name: string; verdict: string; at: string }[]>([]);
+  const [pinError, setPinError] = useState("");
+  // AZ-1: the scanner works for whoever signed in on it, for one event; their rota post opens first
+  const op = scanOperator(state);
+  const signedIn = op && op.eventId === event.id ? op.member : undefined;
 
   const zone = post.kind === "zone" ? zones.find((z) => z.id === post.zoneId) : null;
   const rooms = state.rooms.filter((r) => zones.some((z) => z.id === r.zoneId));
@@ -123,10 +129,10 @@ export function Scanner() {
       const d = findBadge(state, c);
       if (!d || d.cancelled || d.status === "Cancelled" || d.status === "Refunded") return done({ verdict: "deny", reason: "Invalid or cancelled badge", delegate: d });
       if (d.eventId !== event.id) return done({ verdict: "deny", reason: `Badge is for ${state.events.find((e) => e.id === d.eventId)?.name ?? "another event"}`, delegate: d });
-      // stand staff and contractors are accredited once their company's stand is paid in full
-      const stand = deskProblem(state, d);
-      if (stand) return done({ verdict: "deny", reason: stand, delegate: d, stand: true });
-      if (d.status === "Pending" || d.status === "Awaiting payment") return done({ verdict: "deny", reason: "Registration not paid", delegate: d });
+      // stand staff and contractors are accredited once their company's stand is paid in full; only that may be waived
+      const stand = deskRefusal(state, d);
+      if (stand) return done({ verdict: "deny", reason: stand.waivable ? stand.reason : `${stand.reason}: the exhibition team decides, not the desk`, delegate: d, waivable: stand.waivable });
+      if (d.status === "Pending" || d.status === "Awaiting payment") return done({ verdict: "deny", reason: "Registration not paid: the delegate pays from the link in their badge email", delegate: d });
       dispatch({ type: "accredit", delegateId: d.id, day: DAY, at });
       return done({ verdict: "allow", reason: d.accredited ? "Already accredited" : "Accredited, badge printed", delegate: d });
     }
@@ -161,24 +167,31 @@ export function Scanner() {
     setOverride(false);
     setPin("");
     setReason("");
+    setPinError("");
   }
 
   function doOverride() {
-    if (!result?.delegate || pin.length < 4 || !reason) return;
+    if (!result?.delegate || !result.waivable || !reason) return;
+    // the PIN names who approved it; the store checks it again, with what is being waived
+    const approver = overrider(state, pin, event.id);
+    if (!approver) return setPinError("That PIN does not belong to anyone who may override at this event.");
+    const by = approver.id === signedIn?.id ? "" : `, approved by ${approver.name}`;
     if (post.kind === "desk") {
-      if (!result.stand) return;
-      dispatch({ type: "accredit", delegateId: result.delegate.id, day: DAY, at, override: reason });
-      return done({ verdict: "override", reason: `Accredited on override: ${reason}`, delegate: result.delegate });
+      dispatch({ type: "accredit", delegateId: result.delegate.id, day: DAY, at, override: reason, pin });
+      return done({ verdict: "override", reason: `Accredited on override: ${reason}${by}`, delegate: result.delegate });
     }
     if (post.kind === "drdesk" || drRoom) return;
     if (post.kind === "room") {
       if (!roomSession) return;
-      dispatch({ type: "roomScan", delegateId: result.delegate.id, roomId: post.roomId, sessionId: roomSession.id, day: DAY, verdict: "override", reason });
+      dispatch({ type: "roomScan", delegateId: result.delegate.id, roomId: post.roomId, sessionId: roomSession.id, day: DAY, verdict: "override", reason, pin });
     } else {
-      dispatch({ type: "scan", delegateId: result.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: "override", reason, day: DAY, at });
+      dispatch({ type: "scan", delegateId: result.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: "override", reason, day: DAY, at, pin });
     }
-    done({ verdict: "override", reason: `Override: ${reason}`, delegate: result.delegate });
+    done({ verdict: "override", reason: `Override: ${reason}${by}`, delegate: result.delegate });
   }
+
+  // the prototype fills a PIN from the seed: the operator's own if their role overrides, else a colleague's who may
+  const demoApproverPin = () => (signedIn && overrider(state, signedIn.pin ?? "", event.id) ? signedIn.pin : state.team.find((m) => m.organiserId === event.organiserId && m.pin && overrider(state, m.pin, event.id))?.pin) ?? "";
 
   // an event with an exhibition adds its stand passes: paid, owing, and a contractor (OPS-1, OPS-2)
   const stand = (pick: (d: Delegate) => boolean) => state.delegates.find((d) => d.eventId === event.id && !d.cancelled && pick(d))?.badgeCode ?? "";
@@ -197,6 +210,8 @@ export function Scanner() {
     ...expoSamples,
   ].filter(([code]) => code);
   const changeEvent = (id: string) => {
+    // a scanner is signed in for one event; another event needs its own sign-in
+    if (signedIn) dispatch({ type: "scanSignOut" });
     setEventId(id);
     setPost({ kind: "desk" });
     setResult(null);
@@ -220,7 +235,18 @@ export function Scanner() {
           </button>
         </header>
 
+        {signedIn ? (
+          <>
         <div className="px-5">
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-[13px]">
+            <span className="min-w-0 truncate">
+              <span className="text-white/60">Scanning: </span>
+              {signedIn?.name}, {signedIn?.role}
+            </span>
+            <button className="shrink-0 text-white/70 underline underline-offset-4 hover:text-white" onClick={() => { dispatch({ type: "scanSignOut" }); setResult(null); setLog([]); }}>
+              Sign out
+            </button>
+          </div>
           <label className="text-[13px] text-white/60">My post</label>
           <select
             className="mt-1 w-full rounded-lg bg-white/10 px-3 py-2.5 text-sm"
@@ -328,21 +354,25 @@ export function Scanner() {
                   </div>
                 </div>
               )}
-              {result.verdict === "deny" && result.delegate && (post.kind === "desk" ? !!result.stand : post.kind !== "drdesk" && !drRoom) && !override && (
+              {result.verdict === "deny" && result.delegate && result.waivable && post.kind !== "drdesk" && !drRoom && !override && (
                 <button onClick={() => setOverride(true)} className="mt-3 w-full rounded-lg bg-white/20 py-2 text-sm font-medium">
                   Override with PIN
                 </button>
               )}
               {override && (
                 <div className="mt-3 space-y-2">
-                  <input className="w-full rounded-lg bg-white/90 text-ink px-3 py-2 text-sm" placeholder="Staff PIN" type="password" value={pin} onChange={(e) => setPin(e.target.value)} />
+                  <input className="w-full rounded-lg bg-white/90 text-ink px-3 py-2 text-sm" placeholder={signedIn && overrider(state, signedIn.pin ?? "", event.id) ? "Your PIN" : "PIN of someone who may override"} type="password" inputMode="numeric" aria-label="Override PIN" value={pin} onChange={(e) => { setPin(e.target.value); setPinError(""); }} />
+                  {pinError && <div className="text-[13px] text-white">{pinError}</div>}
+                  <button type="button" className="text-[13px] text-white/80 underline underline-offset-4" onClick={() => { setPin(demoApproverPin()); setPinError(""); }}>
+                    Prototype: fill a demo PIN
+                  </button>
                   <select className="w-full rounded-lg bg-white/90 text-ink px-3 py-2 text-sm" value={reason} onChange={(e) => setReason(e.target.value)}>
                     <option value="">Reason…</option>
                     {(post.kind === "desk" ? ["Payment confirmed by Finance", "Organiser instruction"] : ["Organiser instruction", "Exit scan missed", "Manual grant pending sync"]).map((r) => (
                       <option key={r}>{r}</option>
                     ))}
                   </select>
-                  <button onClick={doOverride} className="w-full rounded-lg bg-ink py-2 text-sm font-medium">
+                  <button onClick={doOverride} disabled={!pin || !reason} className="w-full rounded-lg bg-ink py-2 text-sm font-medium disabled:opacity-50">
                     Confirm override
                   </button>
                 </div>
@@ -364,13 +394,92 @@ export function Scanner() {
             </ul>
           )}
         </div>
+          </>
+        ) : (
+          <SignIn
+            key={event.id}
+            eventId={event.id}
+            onShift={state.shifts.filter((x) => x.eventId === event.id && x.day === DAY && x.slot === ((mod ? clock.slice(11, 16) : new Date().toTimeString().slice(0, 5)) < "13:00" ? "Morning" : "Afternoon") && x.memberId).map((x) => x.memberId!)}
+            onSignIn={(memberId) => {
+              // the post on this person's rota for the day and the half-day opens first
+              const slot = (mod ? clock.slice(11, 16) : new Date().toTimeString().slice(0, 5)) < "13:00" ? "Morning" : "Afternoon";
+              const shift = state.shifts.find((x) => x.eventId === event.id && x.day === DAY && x.slot === slot && x.memberId === memberId);
+              setPost(toPost(shift));
+              setResult(null);
+              setLog([]);
+            }}
+          />
+        )}
         <footer className="px-5 py-3 text-[13px] text-white/40">
           {post.kind === "drdesk" || drRoom
             ? "Checks in order: valid badge → this event → a Deal Room participant → a meeting today (desk) or here, from 15 minutes before (door)."
-            : "Checks in order: valid badge → entitled here, now → anti-passback → zone capacity. Offline: cached list, capacity check skipped."}
+            : "Checks in order: valid badge → accredited → entitled here, now → anti-passback → zone capacity. An override needs the PIN of someone allowed to give one, and never admits a bad, unpaid or unaccredited badge. Offline: cached list, capacity check skipped."}
         </footer>
       </div>
     </div>
+  );
+}
+
+/** The rota's post as the scanner's: the desk, or a zone entrance or exit. */
+function toPost(shift?: Shift): Post {
+  if (!shift || shift.post === "desk") return { kind: "desk" };
+  const [zoneId, direction] = shift.post.split(":");
+  return { kind: "zone", zoneId, direction: direction === "out" ? "out" : "in" };
+}
+
+/** AZ-1: who is scanning, with their own PIN. Every accreditation, scan and override is then recorded against them. */
+function SignIn({ eventId, onShift, onSignIn }: { eventId: string; onShift: string[]; onSignIn: (memberId: string) => void }) {
+  const { state, dispatch } = useStore();
+  const event = state.events.find((e) => e.id === eventId)!;
+  const people = state.team.filter((m) => m.organiserId === event.organiserId && can(state.grants, m.role, "access.scan") && (!m.eventIds.length || m.eventIds.includes(eventId)));
+  // whoever the rota has on a post now comes first; anyone else who may scan can still pick their name
+  const [memberId, setMemberId] = useState(() => (people.find((m) => onShift.includes(m.id) && !scanRefusal(state, m, eventId)) ?? people.find((m) => !scanRefusal(state, m, eventId)))?.id ?? "");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const m = people.find((x) => x.id === memberId);
+  const submit = () => {
+    if (!m) return;
+    const why = scanRefusal(state, m, eventId);
+    if (why) return setError(why);
+    if (pin.trim() !== m.pin) return setError(`That PIN is not ${m.name.split(" ")[0]}'s.`);
+    dispatch({ type: "scanSignIn", memberId: m.id, eventId, pin: pin.trim() });
+    onSignIn(m.id);
+  };
+  if (!people.length)
+    return <div className="mx-5 mt-2 rounded-2xl border border-dashed border-white/20 p-5 text-sm text-white/70">No one on {event.name}&apos;s team can scan yet. Give someone the Accreditation role in Team and roles.</div>;
+  return (
+    <form
+      className="px-5 mt-2 flex-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <h1 className="text-[22px] font-medium tracking-[-0.02em]">Sign in to scan</h1>
+      <p className="mt-1 text-[13px] text-white/60">Every accreditation, scan and override is recorded against the person signed in.</p>
+      <label className="mt-4 block text-[13px] text-white/60" htmlFor="scan-who">
+        Who is scanning
+      </label>
+      <select id="scan-who" className="mt-1 w-full rounded-lg bg-white/10 px-3 py-2.5 text-sm" value={memberId} onChange={(e) => { setMemberId(e.target.value); setError(""); setPin(""); }}>
+        {people.map((x) => (
+          <option key={x.id} value={x.id} className="text-ink">
+            {x.name}, {x.role}
+            {x.status === "Invited" ? " (invited)" : ""}
+          </option>
+        ))}
+      </select>
+      <label className="mt-3 block text-[13px] text-white/60" htmlFor="scan-pin">
+        PIN
+      </label>
+      <input id="scan-pin" className="mt-1 w-full rounded-lg bg-white/10 px-3 py-2.5 text-sm font-mono" type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => { setPin(e.target.value); setError(""); }} />
+      {error && <p className="mt-2 text-[13px] text-coral">{error}</p>}
+      <button className="btn-primary mt-4 w-full">Start scanning</button>
+      {m?.pin && (
+        <button type="button" className="mt-3 text-[13px] text-white/60 underline underline-offset-4 hover:text-white" onClick={() => { setPin(m.pin!); setError(""); }}>
+          Prototype: fill {m.name.split(" ")[0]}&apos;s demo PIN
+        </button>
+      )}
+    </form>
   );
 }
 

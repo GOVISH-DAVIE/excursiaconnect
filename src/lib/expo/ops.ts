@@ -12,18 +12,23 @@ import type { ExpoConfig } from "./types";
 /** The show day a stamp falls on, 1 to 3; 0 outside the show days. */
 export const showDayOf = (cfg: ExpoConfig, stamp: string) => cfg.showDays.findIndex((d) => d.date === stamp.slice(0, 10)) + 1;
 
-/** OPS-1: why the desk cannot accredit a badge that belongs to an exhibiting company; undefined when it can. */
-export function deskProblem(state: AppState, d: Delegate): string | undefined {
+/**
+ * OPS-1: why the desk cannot accredit a badge that belongs to an exhibiting company; undefined when it can.
+ * Only money owed may be waived at the desk, by someone allowed to override: a company that is not approved, or
+ * has no signed stand, is the exhibition team's decision, not the desk's.
+ */
+export function deskRefusal(state: AppState, d: Delegate): { reason: string; waivable: boolean } | undefined {
   if (!d.exhibitorId) return undefined;
   const expo = state.expo;
   const cfg = expo.configs[d.eventId];
   const e = expo.exhibitors.find((x) => x.id === d.exhibitorId);
   if (!cfg || !e) return undefined;
-  if (e.status !== "Approved") return `${e.name} is not approved to exhibit yet`;
-  if (!activeBookingOf(expo, e.id, cfg, expo.clock)?.contract) return `${e.name} has no confirmed stand`;
-  if (!paidInFull(expo, e.id)) return `${e.name}'s stand is not paid in full`;
+  if (e.status !== "Approved") return { reason: `${e.name} is not approved to exhibit yet`, waivable: false };
+  if (!activeBookingOf(expo, e.id, cfg, expo.clock)?.contract) return { reason: `${e.name} has no confirmed stand`, waivable: false };
+  if (!paidInFull(expo, e.id)) return { reason: `${e.name}'s stand is not paid in full`, waivable: true };
   return undefined;
 }
+export const deskProblem = (state: AppState, d: Delegate) => deskRefusal(state, d)?.reason;
 
 /** OPS-2: whether a pass opens a hall door now, on the exhibition clock; undefined when it does. Other doors are not the module's. */
 export function doorProblem(state: AppState, d: Delegate, zoneId: string, now: string): string | undefined {

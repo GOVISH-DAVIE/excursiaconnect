@@ -95,7 +95,7 @@ Booth occupancy, exhibitor check-in, access passes and issue management.
 
 | ID | Use case | Status | Where |
 | --- | --- | --- | --- |
-| OPS-1 | Check exhibitor staff in | Built | `/scan` desk: a stand's people are accredited only when its stand is paid in full (rule in the store's accredit); PIN override with a reason, logged and listed in Operations |
+| OPS-1 | Check exhibitor staff in | Built | `/scan` desk: a stand's people are accredited only when its stand is paid in full (rule in the store's accredit); PIN override with a reason, only for a stand that still owes (a company not approved or without a signed stand is the exhibition team's call), approved by someone the role matrix lets override, logged with who approved it and listed in Operations |
 | OPS-2 | Control hall access by pass | Built | `/scan` hall doors: contractor passes in build-up and dismantling only, stand staff from 07:30 on show days, on the exhibition clock |
 | OPS-3 | See booth occupancy | Built | `/exhibition/operations`: the plan coloured by stands staffed each day, from check-ins or the floor walk's call |
 | OPS-4 | Report an issue | Built | Portal On site, and Operations for the floor team |

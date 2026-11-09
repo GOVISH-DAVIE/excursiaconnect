@@ -7,6 +7,9 @@ import { Programme } from "@/components/programme";
 import { StatusPill, Wordmark } from "@/components/ui";
 import { money, useStore } from "@/lib/store";
 import { useToday } from "@/lib/use-today";
+import { deskRefusal } from "@/lib/expo/ops";
+import { CONTRACTOR_TIER } from "@/lib/expo/onsite";
+import { fmtStamp } from "@/lib/time";
 
 const tabs = ["Badge", "My day", "Programme", "People", "Messages"] as const;
 
@@ -46,6 +49,10 @@ export function Badge({ id }: { id: string }) {
         .filter((m) => ["Proposed", "Change requested", "Confirmed", "In progress", "Held"].includes(m.status) && state.dealRoom.matches.some((x) => x.id === m.matchId && (x.seekerId === drApp.id || x.providerId === drApp.id)))
         .sort((a, b) => a.start.localeCompare(b.start))
     : [];
+  // DE-12: until the desk has accredited this badge, no door opens to it, so the badge says where to go first
+  const firstStop = !me.accredited && (me.status === "Confirmed" || me.status === "Checked in") && (event.state === "Live" || event.state === "Approved");
+  const doors = sessions.filter((x) => x.day === 1).map((x) => x.start).sort()[0] ?? "08:00";
+  const stand = deskRefusal(state, me);
   const catColor: Record<string, string> = { Speaker: "#5B2A86", Panelist: "#5B2A86", Sponsor: "#0A7E8C", Exhibitor: "#0A7E8C", VIP: "#B8860B", "General Delegate": event.brand.primary, "Deal Room": "#1F2937", Contractor: "#9A3412" };
 
   return (
@@ -66,6 +73,16 @@ export function Badge({ id }: { id: string }) {
         <div className="flex-1 p-5">
           {tab === "Badge" && (
             <div>
+              {firstStop && (
+                <div className={`mb-4 rounded-xl border px-4 py-3 text-[14px] ${stand ? "border-warn/40 bg-warn-50" : "border-line bg-paper"}`}>
+                  <div className="font-medium">First stop: the accreditation desk</div>
+                  <p className="mt-1 text-slate">
+                    In the foyer from {doors}, {fmtStamp(event.startDate, false)}. Show this code; the hall and room doors open to it once the desk has accredited you.
+                  </p>
+                  {stand && <p className="mt-1">{stand.reason}, so the desk cannot accredit you yet{stand.waivable ? "; it can once the stand is paid" : ""}.</p>}
+                  {me.tierId === CONTRACTOR_TIER && <p className="mt-1 text-slate">Contractor passes open the halls in build-up and dismantling only.</p>}
+                </div>
+              )}
               <div className="rounded-2xl border border-line overflow-hidden">
                 <div style={{ background: catColor[me.category] }} className="text-white px-5 py-3 flex items-center justify-between">
                   <span className="font-medium text-sm">{me.category}</span>
