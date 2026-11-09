@@ -39,10 +39,17 @@ function Reports() {
   const daysSoFar = cfg.showDays.filter((d) => `${d.date} ${cfg.exhibitorOpen}` <= now).length;
 
   /* REP-1 booth sales */
-  const byCat = CATS.map((c) => {
-    const list = booths.filter((b) => b.category === c && !b.blocked);
-    return { c, n: list.length, sold: list.filter(sold).length, m2: list.filter(sold).reduce((n, b) => n + area(b), 0), all: list.reduce((n, b) => n + area(b), 0) };
-  }).filter((r) => r.n);
+  const salesOf = (list: typeof booths) => {
+    const open = list.filter((b) => !b.blocked);
+    return { n: open.length, sold: open.filter(sold).length, m2: open.filter(sold).reduce((n, b) => n + area(b), 0), all: open.reduce((n, b) => n + area(b), 0) };
+  };
+  // a category's booths open on the first hall that has any; the plan keeps the category when you switch hall
+  const hallFor = (c: BoothCategory) => halls.find((h) => booths.some((b) => b.hallId === h.id && b.category === c))?.id;
+  const byCat = CATS.map((c) => ({ c, href: `/exhibition/plan?hall=${hallFor(c)}&category=${encodeURIComponent(c)}&status=Booked,Reserved`, ...salesOf(booths.filter((b) => b.category === c)) })).filter((r) => r.n);
+  const salesRows = [
+    ...halls.map((h) => ({ label: h.name, href: `/exhibition/plan?hall=${h.id}&status=Booked,Reserved`, ...salesOf(booths.filter((b) => b.hallId === h.id)) })),
+    ...byCat.map((r) => ({ ...r, label: r.c })),
+  ];
 
   /* REP-4 revenue: contracted is the stand fees of signed bookings; invoiced and paid include passes and orders */
   const revenueBy = (pick: (hallId: string, cat: BoothCategory) => boolean) => {
@@ -81,14 +88,20 @@ function Reports() {
           />
         </ChartCard>
         <ChartCard title="Floor sold by category" sub="Booked or reserved, in m². Click a bar for the booths.">
-          <HBars rows={byCat.map((r) => ({ label: r.c, value: r.m2, shown: `${r.m2} of ${r.all} m², ${r.sold} of ${r.n} booths`, href: `/exhibition/plan?status=Booked,Reserved` }))} />
+          <HBars rows={byCat.map((r) => ({ label: r.c, value: r.m2, shown: `${r.m2} of ${r.all} m², ${r.sold} of ${r.n} booths`, href: r.href }))} />
         </ChartCard>
       </div>
       <Table
-        title="Booth sales"
-        csv={() => downloadCsv("booth-sales.csv", [row(["Category", "Booths", "Sold", "m² sold", "m² for sale"]), ...byCat.map((r) => row([r.c, r.n, r.sold, r.m2, r.all]))])}
-        head={["Category", "Booths sold", "m² sold"]}
-        rows={byCat.map((r) => [r.c, `${r.sold} of ${r.n}`, `${r.m2} of ${r.all}`])}
+        title="Booth sales by hall and category"
+        csv={() => downloadCsv("booth-sales.csv", [row(["Hall or category", "Booths for sale", "Sold", "m² sold", "m² for sale"]), ...salesRows.map((r) => row([r.label, r.n, r.sold, r.m2, r.all]))])}
+        head={["Hall or category", "Booths sold", "m² sold"]}
+        rows={salesRows.map((r) => [
+          r.label,
+          <Link key="l" className="hover:underline underline-offset-4" href={r.href}>
+            {r.sold} of {r.n}
+          </Link>,
+          `${r.m2} of ${r.all}`,
+        ])}
       />
 
       {money && (

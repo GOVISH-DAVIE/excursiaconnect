@@ -5,7 +5,7 @@
 import { can } from "../roles";
 import { addMinutes, daysBetween } from "../time";
 import type { AppState, Capability, Delegate } from "../types";
-import type { BankLine, Booking, Booth, BoothStatus, Exhibitor, ExpoConfig, ExpoState, Invoice } from "./types";
+import type { BankLine, Booking, Booth, BoothStatus, BoothType, Exhibitor, ExpoConfig, ExpoState, Hall, HallFeature, Invoice } from "./types";
 
 export const EV_NBS = "ev_nairobi_summit";
 export const EXPO_TIERS = ["t_exhibitor", "t_contractor"];
@@ -24,6 +24,75 @@ export const memberName = (state: AppState, id: string) => (id === "exhibitor" ?
 
 export const kes = (n: number) => `KES ${Math.round(n).toLocaleString("en")}`;
 export const area = (b: Booth) => b.w * b.d;
+
+/* ---------- what a stand includes, and the sizes an applicant asks for (SET-3, EXH-2) ---------- */
+
+/** What each booth type comes with, as set in Settings. The pass allowance is added from the terms, so it never disagrees. */
+export const DEFAULT_INCLUDES: Record<BoothType, string[]> = {
+  "Shell scheme": ["Walls on the closed sides, carpet and a fascia board with your name", "A table, two chairs and a 13 A socket", "Lighting and daily cleaning"],
+  "Space only": ["The floor space marked out, for your own stand build", "Power, water and internet ordered separately"],
+};
+export const includesOf = (cfg: ExpoConfig, t: BoothType) => cfg.includes?.[t] ?? DEFAULT_INCLUDES[t];
+export const passLine = (cfg: ExpoConfig) => `${cfg.passPer9} exhibitor pass${cfg.passPer9 === 1 ? "" : "es"} per 9 m²`;
+
+export const SIZES = ["3 × 3 m", "3 × 6 m", "6 × 6 m", "Larger"] as const;
+/** Whether a booth is the size an applicant asked for: by floor area, so 6 × 3 m answers 3 × 6 m. */
+export function sizeFits(size: string, b: Booth) {
+  const a = area(b);
+  if (size === "Larger") return a > 36;
+  const m = size.match(/(\d+) × (\d+)/);
+  return !m || a === Number(m[1]) * Number(m[2]);
+}
+
+/* ---------- the hall's walls, doors and pillars (SET-1) ---------- */
+
+export const DOOR_DEPTH = 0.6;
+export type Wall = "North" | "East" | "South" | "West";
+export const WALLS: Wall[] = ["North", "East", "South", "West"];
+/** The wall a door sits on; pillars stand on the floor. */
+export function wallOf(h: Hall, f: HallFeature): Wall | undefined {
+  if (f.kind === "Pillar") return undefined;
+  if (f.y + f.d >= h.depth && f.d <= DOOR_DEPTH) return "South";
+  if (f.y <= 0 && f.d <= DOOR_DEPTH) return "North";
+  if (f.x <= 0 && f.w <= DOOR_DEPTH) return "West";
+  return "East";
+}
+/** Where a door starts along its wall, and how wide it is, in metres. */
+export const doorAlong = (h: Hall, f: HallFeature) => (wallOf(h, f) === "North" || wallOf(h, f) === "South" ? { at: f.x, len: f.w } : { at: f.y, len: f.d });
+/** A door on a wall, as a rectangle on the plan. */
+export function doorOn(h: Hall, wall: Wall, at: number, len: number): Pick<HallFeature, "x" | "y" | "w" | "d"> {
+  if (wall === "North") return { x: at, y: 0, w: len, d: DOOR_DEPTH };
+  if (wall === "South") return { x: at, y: h.depth - DOOR_DEPTH, w: len, d: DOOR_DEPTH };
+  if (wall === "West") return { x: 0, y: at, w: DOOR_DEPTH, d: len };
+  return { x: h.width - DOOR_DEPTH, y: at, w: DOOR_DEPTH, d: len };
+}
+/** A hall resized keeps its doors on the walls they were on. */
+export function resizeHall(h: Hall, width: number, depth: number): Hall {
+  const next = { ...h, width, depth };
+  return { ...next, features: h.features.map((f) => (f.kind === "Pillar" ? f : { ...f, ...doorOn(next, wallOf(h, f)!, doorAlong(h, f).at, doorAlong(h, f).len) })) };
+}
+const overlaps = (a: { x: number; y: number; w: number; d: number }, b: { x: number; y: number; w: number; d: number }) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.d && b.y < a.y + a.d;
+
+/** Why a hall cannot be saved as it stands: its size, its booths and its features must agree (SET-1). */
+export function hallProblems(expo: ExpoState, h: Hall): string[] {
+  const out: string[] = [];
+  if (!h.name.trim()) out.push("Give the hall a name");
+  if (expo.halls.some((x) => x.id !== h.id && x.eventId === h.eventId && x.name.trim().toLowerCase() === h.name.trim().toLowerCase())) out.push(`There is already a hall called ${h.name.trim()}`);
+  if (h.width < 6 || h.depth < 6) out.push("A hall is at least 6 × 6 m");
+  const booths = expo.booths.filter((b) => b.hallId === h.id);
+  if (booths.some((b) => b.x + b.w > h.width || b.y + b.d > h.depth)) out.push("Booths sit beyond that size; move them first");
+  for (const f of h.features) {
+    const name = f.kind.toLowerCase();
+    if (f.x < 0 || f.y < 0 || f.x + f.w > h.width || f.y + f.d > h.depth) out.push(`The ${name} at ${f.x}, ${f.y} m is outside the hall`);
+    else if (f.kind === "Pillar") {
+      const under = booths.find((b) => overlaps(b, f));
+      if (under) out.push(`The pillar at ${f.x}, ${f.y} m is under ${under.code}; move the booth first`);
+    }
+    if (f.kind !== "Pillar" && (f.w < 1 && f.d < 1)) out.push(`The ${name} needs a width`);
+  }
+  if (!h.features.some((f) => f.kind === "Entrance")) out.push("A hall needs an entrance");
+  return out;
+}
 /** A booth's fee, net of VAT: m² × the type's rate × the category's factor, unless a price was agreed. */
 export const boothNet = (cfg: ExpoConfig, b: Booth) => b.priceOverride ?? Math.round((area(b) * cfg.rates[b.type] * cfg.factors[b.category]) / 100) * 100;
 export const gross = (net: number, vatPct: number) => Math.round(net * (1 + vatPct / 100));

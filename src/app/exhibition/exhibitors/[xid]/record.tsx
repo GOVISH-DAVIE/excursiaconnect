@@ -64,7 +64,7 @@ export function ExhibitorRecord({ id }: { id: string }) {
 }
 
 function Decision({ e }: { e: Exhibitor }) {
-  const { can, dispatch } = useExpo();
+  const { expo, can, dispatch } = useExpo();
   const [noteText, setNote] = useState("");
   const edit = can("expo.manage");
   return (
@@ -77,6 +77,10 @@ function Decision({ e }: { e: Exhibitor }) {
         <div className="flex justify-between gap-3">
           <dt className="text-slate">Size wanted</dt>
           <dd>{e.application.size}</dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt className="text-slate">Hall wanted</dt>
+          <dd>{expo.halls.find((h) => h.id === e.application.hallId)?.name ?? "Either"}</dd>
         </div>
         <div className="flex justify-between gap-3">
           <dt className="text-slate">Booth asked for</dt>

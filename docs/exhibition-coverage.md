@@ -1,12 +1,12 @@
 # Exhibition coverage
 
-What the prototype covers of the 49 use cases in [exhibition-use-cases.md](exhibition-use-cases.md), grouped by the eight areas of the brief, as of 8 November 2026 on branch `exhibition`. The flow-by-flow test is in [exhibition-use-case-test.md](exhibition-use-case-test.md).
+What the prototype covers of the 49 use cases in [exhibition-use-cases.md](exhibition-use-cases.md), grouped by the eight areas of the brief, as of 9 November 2026 on branch `exhibition`, after a review of each use case and user journey. The flow-by-flow test is in [exhibition-use-case-test.md](exhibition-use-case-test.md).
 
-**Built** means the use case works end to end on mock data, with its rules enforced in the reducer. **Partial** means the screen exists but a step is simulated. **Not built** means nothing on screen.
+**Built** means the use case works end to end on mock data, with its rules enforced in the reducer. **Partial** means the screen exists but a step is simulated, or the use case is met more narrowly than it asks. **Not built** means nothing on screen.
 
 The module runs on the Nairobi Brand & PR Summit 2026 (Sarit Expo Centre, 25 to 27 November 2026). An exhibition clock in the workspace rail starts at show day 1, 10:30, and only moves forward: +15 minutes, +1 hour, day 2, day 3, dismantling and after the show. Hold expiries, overdue invoices, late surcharges, delivery slots, issue service times and the hall door rules are worked out from it, and the scanner reads it for this event.
 
-All 49 are covered: 48 built, 1 partial.
+All 49 are covered: 47 built, 2 partial.
 
 ## 1. Exhibition setup (SET)
 
@@ -14,9 +14,9 @@ Exhibition halls, floor plans, booth sizes, categories and pricing.
 
 | ID | Use case | Status | Where |
 | --- | --- | --- | --- |
-| SET-1 | Define the exhibition halls | Built | Settings, Halls: name, size in metres, access zone; a hall cannot shrink past its booths |
+| SET-1 | Define the exhibition halls | Built | Settings, Halls: add a hall, or remove an empty one; name and size in metres; entrances, loading doors and fire exits placed along a wall, pillars on the floor; a hall cannot shrink past its booths, a pillar cannot go under a booth, and every hall needs an entrance. All halls open through the Exhibition zone |
 | SET-2 | Lay out booths on the floor plan | Built | `/exhibition/plan`: add, drag on a 1 m grid, nudge with the arrow keys, code, block; overlaps, pillars and walls refused with the reason |
-| SET-3 | Set booth types and sizes | Built | Plan, booth panel: shell scheme or space only, width and depth; fixed while booked |
+| SET-3 | Set booth types and sizes | Built | Plan, booth panel: shell scheme or space only, width and depth; fixed while booked. Settings: what each type includes, shown on the exhibit page with the pass allowance from the terms |
 | SET-4 | Set booth categories | Built | Plan, booth panel: standard, corner, island, premium location, each with its factor |
 | SET-5 | Set the prices | Built | Settings, Prices and terms: rate per m² by type, category factors, VAT, agreed prices per booth; every change logged with a reason |
 | SET-6 | Set the terms and deadlines | Built | Settings: hold hours, deposit, balance date, full-invoice window, cancellation, contract version, order and branding deadlines |
@@ -28,8 +28,8 @@ Applications, company profiles, approvals and exhibitor registration.
 | ID | Use case | Status | Where |
 | --- | --- | --- | --- |
 | EXH-1 | Publish the exhibit page | Built | `/e/nairobi-brand-summit-2026/exhibit`: halls, live plan, prices, what a stand includes, today's payment terms, who is exhibiting |
-| EXH-2 | Apply to exhibit | Built | The same page: company, products, size, hall and booth preference; a reference and a portal link |
-| EXH-3 | Review applications | Built | `/exhibition/exhibitors` with filters; record shows the application and starts the review |
+| EXH-2 | Apply to exhibit | Built | The same page: company, products, size, hall and booth preference (the booths offered follow the size and hall asked for, and the form says when none is free); a reference and a portal link |
+| EXH-3 | Review applications | Built | `/exhibition/exhibitors` with filters by status, sector, hall and booth; the record shows the size, hall and booth asked for and starts the review |
 | EXH-4 | Approve, waitlist or decline | Built | Record, Decision: a reason needed to waitlist or decline; the company is told |
 | EXH-5 | Keep the company profile | Built | Portal Profile and the record's Profile; changes logged |
 | EXH-6 | Register the exhibitor's people | Built | Approving a company confirms its waiting staff; the portal's People tab registers more (POR-2) |
@@ -46,7 +46,7 @@ Interactive floor plans, booth selection, allocation, reservations and availabil
 | BTH-3 | Choose and hold a booth | Built | Portal, Booth: approved companies only, one booking at a time |
 | BTH-4 | Release an expired hold | Built | Expiry follows from the clock; when the clock passes it the booking logs it and the company is told |
 | BTH-5 | Never sell a booth twice | Built | The hold rule in the reducer; Settings, Checks sends 50 requests for one booth (1 held) and over ten (10 held) |
-| BTH-6 | Track availability | Built | Plan filters and the availability table; Overview and Reports by hall and category |
+| BTH-6 | Track availability | Built | Plan filters by status and category; each count in the availability table picks out that status and category; Overview and Reports by hall and category |
 | BTH-7 | Move or release a booking | Built | Cancel under the terms, then allocate the new booth; a one-step swap is out of scope |
 
 ## 4. Sales and payments (SAL)
@@ -70,7 +70,7 @@ Booking management, staff registration, branding uploads and special requirement
 
 | ID | Use case | Status | Where |
 | --- | --- | --- | --- |
-| POR-1 | Manage the booking | Built | `/exhibitor/[id]`: status tracker, booth, contract, invoices, messages |
+| POR-1 | Manage the booking | Built | `/exhibitor/[id]`: status tracker, booth, contract, invoices, messages; once signed, the Status tab lists what the stand still needs (staff, contractors, branding, orders, move-in, dismantling), each opening its tab |
 | POR-2 | Register stand staff | Built | Portal, People: one at a time or a pasted or uploaded CSV; extra passes invoiced in one invoice; each person gets a badge; a pass not yet used can be cancelled |
 | POR-3 | Upload branding | Built | Portal, Stand: fascia name (24 characters), logo and artwork, kept as file metadata; marked late after the deadline |
 | POR-4 | Order equipment and services | Built | Portal, Stand: catalogue by group, the late surcharge after the order deadline, one invoice per order |
@@ -83,7 +83,7 @@ Setup schedules, equipment, utilities, deliveries and dismantling.
 
 | ID | Use case | Status | Where |
 | --- | --- | --- | --- |
-| LOG-1 | Set the build-up and dismantle schedule | Built | `/exhibition/logistics`, Schedule: windows kept around the show in the reducer; a move-in time per stand, shown in the portal |
+| LOG-1 | Set the build-up and dismantle schedule | Partial | `/exhibition/logistics`, Schedule: one build-up and one dismantling window for the venue, kept around the show in the reducer; a move-in time per stand, shown in the portal. The use case asks for windows per hall; both halls share the venue's windows |
 | LOG-2 | Register contractors | Built | Portal People or Logistics, Contractors: contractor passes on their own tier and category |
 | LOG-3 | Book a delivery | Built | Portal On site or Logistics, Deliveries: bay and slot, a full or past slot refused; arrivals and missed vehicles on the bay board |
 | LOG-4 | Fulfil equipment and utility orders | Built | Stand services, Orders: ordered, delivered, collected; collection opens with dismantling |
@@ -107,7 +107,7 @@ Booth sales, occupancy, exhibitor attendance, revenue and outstanding payments.
 
 | ID | Use case | Status | Where |
 | --- | --- | --- | --- |
-| REP-1 | Booth sales | Built | `/exhibition/reports`: booths by hall, floor sold by category, table and CSV; Overview graphs |
+| REP-1 | Booth sales | Built | `/exhibition/reports`: booths by hall, floor sold by category, a table by hall and category with CSV; every bar and count opens those booths on the plan; Overview graphs |
 | REP-2 | Occupancy | Built | Reports: stands staffed by show day, each day opening Operations |
 | REP-3 | Exhibitor attendance | Built | Reports: companies present and people checked in by day, table and CSV |
 | REP-4 | Revenue | Built | Reports (Finance): contracted, invoiced and paid, by hall and category, CSV |

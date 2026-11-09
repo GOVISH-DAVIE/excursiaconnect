@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { PageHeader, Section, Tabs } from "@/components/ui";
-import { boothStatus, kes, validateExpo } from "@/lib/expo/logic";
+import { boothStatus, DEFAULT_INCLUDES, doorAlong, doorOn, hallProblems, includesOf, kes, passLine, resizeHall, validateExpo, wallOf, WALLS, type Wall } from "@/lib/expo/logic";
 import { expoReducer } from "@/lib/expo/reducer";
-import type { BoothCategory, BoothType, ExpoConfig, Exhibitor, Hall } from "@/lib/expo/types";
+import type { BoothCategory, BoothType, ExpoConfig, Exhibitor, Hall, HallFeature } from "@/lib/expo/types";
 import type { AppState } from "@/lib/types";
 import { fmtStamp } from "@/lib/time";
 import { memberName } from "@/lib/expo/logic";
@@ -57,6 +57,19 @@ function Terms({ cfg }: { cfg: ExpoConfig }) {
           </Field>
         </div>
         <p className="mt-3 text-[13px] text-slate">A 3 × 3 m shell-scheme booth, standard: {kes(Math.round((9 * f.rates["Shell scheme"] * f.factors.Standard) / 100) * 100)} + VAT. A booth with an agreed price keeps it.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {(["Shell scheme", "Space only"] as BoothType[]).map((t) => (
+            <Field key={t} label={`${t} includes, one per line`} help={`Shown on the exhibit page, with “${passLine(f)}” added from the terms`}>
+              <textarea
+                className="input min-h-28 text-[13px]"
+                disabled={!edit}
+                value={includesOf(f, t).join("\n")}
+                onChange={(e) => setF({ ...f, includes: { ...DEFAULT_INCLUDES, ...f.includes, [t]: e.target.value.split("\n") } })}
+                onBlur={() => setF({ ...f, includes: { ...DEFAULT_INCLUDES, ...f.includes, [t]: includesOf(f, t).map((l) => l.trim()).filter(Boolean) } })}
+              />
+            </Field>
+          ))}
+        </div>
       </Section>
       <Section title="Terms and deadlines">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -115,22 +128,44 @@ function Terms({ cfg }: { cfg: ExpoConfig }) {
   );
 }
 
+/** SET-1: the halls, their size and the doors and pillars the plan works around. A booth never sits over a pillar. */
 function Halls() {
   const { expo, cfg, can, dispatch } = useExpo();
   const halls = expo.halls.filter((h) => h.eventId === cfg!.eventId);
+  const edit = can("expo.manage");
+  const add = () => {
+    const n = expo.halls.length + 1;
+    const blank: Hall = { id: `h_${n}_${cfg!.eventId.slice(-4)}`, eventId: cfg!.eventId, name: `Hall ${n}`, zoneId: halls[0]?.zoneId ?? "z_exhib", width: 24, depth: 18, features: [] };
+    dispatch({ type: "expo/hall", hall: { ...blank, features: [{ id: `f_${blank.id}_1`, kind: "Entrance", ...doorOn(blank, "South", 10, 4) }] } });
+  };
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {halls.map((h) => (
-        <HallCard key={h.id + h.width + h.depth + h.name} h={h} edit={can("expo.manage")} onSave={(x) => dispatch({ type: "expo/hall", hall: x })} booths={expo.booths.filter((b) => b.hallId === h.id).length} />
-      ))}
-    </div>
+    <>
+      <div className="grid gap-4 lg:grid-cols-2">
+        {halls.map((h) => (
+          <HallCard key={JSON.stringify(h)} h={h} edit={edit} onSave={(x) => dispatch({ type: "expo/hall", hall: x })} onRemove={halls.length > 1 ? () => dispatch({ type: "expo/hallRemove", hallId: h.id }) : undefined} booths={expo.booths.filter((b) => b.hallId === h.id).length} />
+        ))}
+      </div>
+      {edit && (
+        <button className="btn-secondary mt-4" onClick={add}>
+          Add a hall
+        </button>
+      )}
+    </>
   );
 }
 
-function HallCard({ h, edit, onSave, booths }: { h: Hall; edit: boolean; onSave: (h: Hall) => void; booths: number }) {
+const DOORS: HallFeature["kind"][] = ["Entrance", "Loading door", "Fire exit"];
+
+function HallCard({ h, edit, onSave, onRemove, booths }: { h: Hall; edit: boolean; onSave: (h: Hall) => void; onRemove?: () => void; booths: number }) {
   const { expo } = useExpo();
   const [f, setF] = useState(h);
-  const tooSmall = expo.booths.some((b) => b.hallId === h.id && (b.x + b.w > f.width || b.y + b.d > f.depth));
+  const problems = hallProblems(expo, f);
+  const changed = JSON.stringify(f) !== JSON.stringify(h);
+  const size = (width: number, depth: number) => setF(resizeHall(f, width, depth));
+  const put = (id: string, patch: Partial<HallFeature>) => setF({ ...f, features: f.features.map((x) => (x.id === id ? { ...x, ...patch } : x)) });
+  const door = (x: HallFeature, wall: Wall, at: number, len: number) => put(x.id, doorOn(f, wall, Math.max(0, at), Math.max(1, len)));
+  const nextId = () => `f_${h.id}_${Math.max(0, ...f.features.map((x) => Number(x.id.split("_").pop()) || 0)) + 1}`;
+  const num = (v: string) => Math.max(0, Number(v) || 0);
   return (
     <Section title={h.name} action={<span className="text-[13px] text-slate">{booths} booths</span>}>
       <div className="grid gap-3 sm:grid-cols-3">
@@ -138,18 +173,96 @@ function HallCard({ h, edit, onSave, booths }: { h: Hall; edit: boolean; onSave:
           <input className="input" disabled={!edit} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </Field>
         <Field label="Width, m">
-          <input className="input" type="number" disabled={!edit} value={f.width} onChange={(e) => setF({ ...f, width: Number(e.target.value) || 0 })} />
+          <input className="input" type="number" disabled={!edit} value={f.width} onChange={(e) => size(num(e.target.value), f.depth)} />
         </Field>
         <Field label="Depth, m">
-          <input className="input" type="number" disabled={!edit} value={f.depth} onChange={(e) => setF({ ...f, depth: Number(e.target.value) || 0 })} />
+          <input className="input" type="number" disabled={!edit} value={f.depth} onChange={(e) => size(f.width, num(e.target.value))} />
         </Field>
       </div>
-      <p className="mt-2 text-[13px] text-slate">Doors: the platform zone {h.zoneId === "z_exhib" ? "Exhibition" : h.zoneId}, so exhibitor passes work at the scanner. Features: {h.features.map((x) => x.kind.toLowerCase()).join(", ")}.</p>
-      {tooSmall && <p className="mt-2 text-[13px] text-bad">Booths sit beyond that size; move them first.</p>}
+      <p className="mt-2 text-[13px] text-slate">Its doors are the platform zone {h.zoneId === "z_exhib" ? "Exhibition" : h.zoneId}, so exhibitor and contractor passes work at the scanner.</p>
+      <h3 className="mt-4 text-[13px] font-medium">Doors and pillars</h3>
+      <p className="text-[12px] text-slate">Doors are placed along a wall, measured from its left or top end; pillars by their distance from the top-left corner. Booths cannot sit over a pillar.</p>
+      <ul className="mt-2 grid gap-2">
+        {f.features.map((x) => {
+          const wall = wallOf(f, x);
+          const along = doorAlong(f, x);
+          return (
+            <li key={x.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 text-[13px]">
+              <div className="flex flex-wrap items-center gap-2">
+                <select className="input h-9 w-32 px-2 text-[13px]" aria-label="Kind" disabled={!edit} value={x.kind} onChange={(e) => {
+                  const kind = e.target.value as HallFeature["kind"];
+                  if (kind === "Pillar") put(x.id, { kind, x: Math.min(x.x, f.width - 1), y: Math.min(Math.max(x.y, 1), f.depth - 2), w: 1, d: 1 });
+                  else if (x.kind === "Pillar") put(x.id, { kind, ...doorOn(f, "South", Math.min(x.x, f.width - 2), 2) });
+                  else put(x.id, { kind });
+                }}>
+                  {[...DOORS, "Pillar" as const].map((k) => (
+                    <option key={k}>{k}</option>
+                  ))}
+                </select>
+                {wall ? (
+                  <>
+                    <select className="input h-9 w-28 px-2 text-[13px]" aria-label="Wall" disabled={!edit} value={wall} onChange={(e) => door(x, e.target.value as Wall, along.at, along.len)}>
+                      {WALLS.map((w) => (
+                        <option key={w} value={w}>
+                          {w} wall
+                        </option>
+                      ))}
+                    </select>
+                    <label className="flex items-center gap-1">
+                      at <input className="input h-9 w-14 px-2 text-[13px]" type="number" disabled={!edit} value={along.at} onChange={(e) => door(x, wall, num(e.target.value), along.len)} /> m,
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <input className="input h-9 w-14 px-2 text-[13px]" type="number" disabled={!edit} value={along.len} onChange={(e) => door(x, wall, along.at, num(e.target.value))} /> m wide
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label className="flex items-center gap-1">
+                      <input className="input h-9 w-14 px-2 text-[13px]" type="number" disabled={!edit} value={x.x} onChange={(e) => put(x.id, { x: num(e.target.value) })} /> m across,
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <input className="input h-9 w-14 px-2 text-[13px]" type="number" disabled={!edit} value={x.y} onChange={(e) => put(x.id, { y: num(e.target.value) })} /> m down
+                    </label>
+                  </>
+                )}
+              </div>
+              {edit && (
+                <button className="h-9 w-9 rounded-md text-[18px] leading-none text-slate hover:bg-paper hover:text-ink" aria-label={`Remove the ${x.kind.toLowerCase()}`} title="Remove" onClick={() => setF({ ...f, features: f.features.filter((y) => y.id !== x.id) })}>
+                  ×
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
       {edit && (
-        <button className="btn-secondary btn-sm mt-3" disabled={tooSmall || JSON.stringify(f) === JSON.stringify(h) || !f.name.trim()} onClick={() => onSave(f)}>
-          Save the hall
-        </button>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button className="btn-secondary btn-sm" onClick={() => setF({ ...f, features: [...f.features, { id: nextId(), kind: "Entrance", ...doorOn(f, "South", 0, 3) }] })}>
+            Add a door
+          </button>
+          <button className="btn-secondary btn-sm" onClick={() => setF({ ...f, features: [...f.features, { id: nextId(), kind: "Pillar", x: Math.floor(f.width / 2), y: Math.floor(f.depth / 2), w: 1, d: 1 }] })}>
+            Add a pillar
+          </button>
+        </div>
+      )}
+      {changed && problems.length > 0 && <p className="mt-3 text-[13px] text-bad">{problems.join(". ")}.</p>}
+      {edit && (
+        <div className="mt-3 flex gap-2">
+          <button className="btn-primary btn-sm" disabled={!changed || problems.length > 0} onClick={() => onSave(f)}>
+            Save the hall
+          </button>
+          {changed && (
+            <button className="btn-secondary btn-sm" onClick={() => setF(h)}>
+              Undo
+            </button>
+          )}
+          {/* a hall goes only once it has no booths; the reducer holds the same rule */}
+          {onRemove && !changed && booths === 0 && (
+            <button className="ml-auto text-[13px] underline underline-offset-4 text-slate hover:text-ink" onClick={onRemove}>
+              Remove the hall
+            </button>
+          )}
+        </div>
       )}
     </Section>
   );

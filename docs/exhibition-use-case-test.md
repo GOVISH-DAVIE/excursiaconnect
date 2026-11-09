@@ -113,6 +113,27 @@ Each flow ends in a verdict: **Pass** when every step works as the use cases des
 
 Every exhibition page and tab, the portal tabs and the public exhibit page were checked at 375 wide: no sideways scroll on the page. The floor plan keeps about 13 px a metre and scrolls inside its card; wide tables scroll inside theirs. The active portal tab scrolls into view.
 
+## Review against the use cases and user journeys
+
+Run on 9 November 2026. Each stakeholder's journey was walked in Chrome from its start, at the default clock: a visitor applying from the event page (Mto Audio Works, NBS-EX-0053), the owner approving it, the company holding A7, signing, paying by M-Pesa and registering a person, the desk accrediting that person, Operations counting the stand as staffed, then the Staff, Finance and Accreditation views. Every use case was read against what the screens do.
+
+| Found | Use case | Fixed |
+| --- | --- | --- |
+| A hall could be renamed and resized, but not added, and its entrances, pillars and doors could not be changed | SET-1 | Settings, Halls: add a hall, remove an empty one, place doors along a wall and pillars on the floor. The reducer refuses a pillar under a booth, a door off its wall, a hall with no entrance or a name already used; resizing keeps doors on their walls |
+| What a stand includes was fixed in the page's code, so "Two exhibitor passes per 9 m²" and "Build-up from 23 November" would not follow Settings | SET-3, SET-6 | What each type includes is set in Settings; the pass allowance and the build-up date come from the terms |
+| The booth list on the apply form ignored the size asked for; asking for 6 × 6 m offered only 3 × 3 m booths, and nothing said none was free | EXH-2 | The booths offered follow the size and hall; when none fits, the form says so and that the team will offer what fits |
+| The confirmation said "We have emailed and texted" an email address | EXH-2 | It names the email and the phone |
+| The record did not show the hall the company asked for | EXH-3 | Hall wanted, beside size and booth |
+| A count by category in the plan's availability table, and every category bar in Reports, opened the plan filtered by status only | BTH-6, REP-1 | The plan filters by category too; the counts and bars open that status and that category |
+| Reports showed booth sales by category only, with no links in the table | REP-1 | A table by hall and category; each count opens its booths |
+| Once a stand was paid in full the portal's Status tab ended at "Booked", with nothing about what was left | POR-1 | A checklist of what the stand still needs, each line opening its tab |
+| Finance's Overview listed applications to review and companies with no booth, which Finance cannot act on | Stakeholders | Those two show only to the exhibition team |
+| On a show day the Overview said nothing about stands with nobody there | OPS-3 | "Stands nobody has checked in to" once the stand doors open, opening that day in Operations |
+
+Reducer suite for the review: 19 checks pass (halls added, refused, resized and removed; Finance refused; sizes; inclusions saved through Settings), and the cut 2 and cut 3 suites still pass (28 and 19). The new portal checklist and the Halls editor were checked at 375 wide.
+
+**Open question, not changed.** Applications and booth sales stay open through the show days. At the default clock a company can apply, hold a 3 × 3 m shell-scheme stand, sign and pay on show day 1, when build-up is over and the stand cannot be built. Closing sales at a date would stop the apply-to-pay journey being shown from the default clock, so it is left for a decision.
+
 ## Outside this work
 
 ESLint reports four errors in files this branch does not change (`register.tsx`, the organiser's delegate record, `use-today.ts`): a call to `Date.now` during render and a state update inside an effect.

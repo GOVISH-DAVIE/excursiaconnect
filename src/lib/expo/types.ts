@@ -165,6 +165,7 @@ export interface ExpoConfig {
   cancellation: string;
   contractVersion: string;
   passPer9: number; // passes per 9 m²
+  includes?: Record<BoothType, string[]>; // what each booth type comes with, shown on the exhibit page (SET-3)
   extraPass: number;
   orderDeadline: string;
   lateSurchargePct: number;

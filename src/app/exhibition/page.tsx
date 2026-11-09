@@ -8,11 +8,13 @@ import { addMinutes, fmtStamp } from "@/lib/time";
 import { ChartCard, HBars } from "@/app/dealroom/reports/charts";
 import { Refusal } from "@/app/dealroom/bits";
 import { deliveryStatus, issueStatus } from "@/lib/expo/onsite";
-import { ScannerWork, useExpo } from "./bits";
+import { showDayOf, staffedOn } from "@/lib/expo/ops";
+import { ScannerWork, useExpo, useStands } from "./bits";
 
 /** The exhibition at a glance: what is sold, what is owed, what needs someone today. Every number opens its records. */
 export default function ExhibitionOverview() {
-  const { expo, cfg, now, can, event } = useExpo();
+  const { state, expo, cfg, now, can, event } = useExpo();
+  const stands = useStands();
   if (!cfg) return null;
   // the desk and the doors are worked from the scanner; every number here opens records they cannot see
   if (!can("expo.manage") && !can("expo.floor") && !can("money.view"))
@@ -36,9 +38,17 @@ export default function ExhibitionOverview() {
   const overdue = invoices.filter((i) => invoiceStatus(expo, i, now) === "Overdue");
   const money = can("money.view");
 
+  // on a show day, once the stand people's doors have opened, a stand nobody has checked in to needs a call
+  const day = showDayOf(cfg, now);
+  const floorOpen = day > 0 && now.slice(11) >= cfg.exhibitorOpen && now.slice(11) <= cfg.showDays[day - 1].close;
   const attention = [
-    { label: "Applications to review", n: exhibitors.filter((e) => e.status === "Applied" || e.status === "Under review").length, href: "/exhibition/exhibitors?status=Applied,Under%20review" },
-    { label: "Approved with no booth yet", n: exhibitors.filter((e) => e.status === "Approved" && !activeBookingOf(expo, e.id, cfg, now)).length, href: "/exhibition/exhibitors?status=Approved&booth=none" },
+    // deciding applications and allocating booths is the exhibition team's; Finance sees the money that follows
+    ...(can("expo.manage")
+      ? [
+          { label: "Applications to review", n: exhibitors.filter((e) => e.status === "Applied" || e.status === "Under review").length, href: "/exhibition/exhibitors?status=Applied,Under%20review" },
+          { label: "Approved with no booth yet", n: exhibitors.filter((e) => e.status === "Approved" && !activeBookingOf(expo, e.id, cfg, now)).length, href: "/exhibition/exhibitors?status=Approved&booth=none" },
+        ]
+      : []),
     { label: "Holds ending within 24 hours", n: expo.bookings.filter((k) => bookingStage(expo, k, cfg, now) === "Held" && holdExpiresAt(k, cfg) < addMinutes(now, 1440)).length, href: "/exhibition/sales?stage=Held" },
     { label: "Reserved, first payment not in", n: expo.bookings.filter((k) => bookingStage(expo, k, cfg, now) === "Reserved").length, href: "/exhibition/sales?stage=Reserved" },
     ...(can("expo.manage") || can("expo.floor")
@@ -46,6 +56,7 @@ export default function ExhibitionOverview() {
           { label: "Branding to approve", n: expo.branding.filter((b) => b.eventId === cfg.eventId && !b.decision).length, href: "/exhibition/services?tab=Branding&state=Waiting%20for%20approval" },
           { label: "Orders to deliver", n: expo.orders.filter((o) => o.eventId === cfg.eventId && o.state === "Ordered").length, href: "/exhibition/services?tab=Orders" },
           { label: "Requirements not yet seen", n: expo.requirements.filter((r) => r.eventId === cfg.eventId && !r.ack).length, href: "/exhibition/services?tab=Requirements" },
+          ...(floorOpen ? [{ label: `Stands nobody has checked in to, day ${day}`, n: stands.filter((x) => !staffedOn(state, x.e.id, day).staffed).length, href: `/exhibition/operations?day=${day}` }] : []),
           { label: "Issues past their service time", n: expo.issues.filter((i) => i.eventId === cfg.eventId && issueStatus(cfg, i, now) === "Overdue").length, href: "/exhibition/operations" },
           { label: "Deliveries missed", n: expo.deliveries.filter((d) => d.eventId === cfg.eventId && deliveryStatus(cfg, d, now) === "Missed").length, href: "/exhibition/logistics?tab=Deliveries" },
         ]
@@ -104,7 +115,7 @@ export default function ExhibitionOverview() {
             </ul>
           )}
         </Section>
-        <Section title="By hall" flush>
+        <Section title="By hall" flush className="self-start">
           <table className="w-full">
             <thead>
               <tr>

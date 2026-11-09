@@ -17,6 +17,7 @@ import {
   exhibitorRef,
   kes,
   placementProblems,
+  hallProblems,
 } from "./logic";
 import type { Booth, Exhibitor, ExpoConfig, ExpoState, Hall, Payment } from "./types";
 import { note, send, withExpo } from "./util";
@@ -29,6 +30,7 @@ type CoreAction =
   | { type: "expo/actAs"; memberId: string }
   | { type: "expo/config"; eventId: string; patch: Partial<ExpoConfig>; note: string }
   | { type: "expo/hall"; hall: Hall }
+  | { type: "expo/hallRemove"; hallId: string }
   | { type: "expo/booth"; booth: Booth }
   | { type: "expo/boothRemove"; boothId: string }
   | { type: "expo/apply"; exhibitor: Omit<Exhibitor, "ref" | "status" | "statusAt" | "history"> }
@@ -51,6 +53,7 @@ export type ExpoAction = CoreAction | OnsiteAction;
 const NEEDS: Partial<Record<ExpoAction["type"], Capability[]>> = {
   "expo/config": ["expo.manage"],
   "expo/hall": ["expo.manage"],
+  "expo/hallRemove": ["expo.manage"],
   "expo/booth": ["expo.manage"],
   "expo/boothRemove": ["expo.manage"],
   "expo/review": ["expo.manage"],
@@ -113,12 +116,18 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
     }
 
     case "expo/hall": {
-      const h = action.hall;
-      // a hall cannot shrink past the booths already in it
-      if (!h.name.trim() || h.width < 6 || h.depth < 6) return state;
-      if (expo.booths.some((b) => b.hallId === h.id && (b.x + b.w > h.width || b.y + b.d > h.depth))) return state;
+      const h = { ...action.hall, name: action.hall.name.trim() };
+      // a hall cannot shrink past its booths, and its doors and pillars stay inside it and clear of the booths (SET-1)
+      if (hallProblems(expo, h).length) return state;
       const exists = expo.halls.some((x) => x.id === h.id);
-      return withExpo(state, { ...expo, halls: exists ? expo.halls.map((x) => (x.id === h.id ? h : x)) : [...expo.halls, h] });
+      const was = expo.halls.find((x) => x.id === h.id);
+      const what = !was ? `Hall added: ${h.name}, ${h.width} × ${h.depth} m` : `Hall ${h.name}: ${h.width} × ${h.depth} m, ${h.features.length} doors and pillars`;
+      const cfg = expo.configs[h.eventId];
+      return withExpo(state, {
+        ...expo,
+        halls: exists ? expo.halls.map((x) => (x.id === h.id ? h : x)) : [...expo.halls, h],
+        configs: cfg ? { ...expo.configs, [h.eventId]: { ...cfg, log: [...cfg.log, note(what, by, at)] } } : expo.configs,
+      });
     }
 
     case "expo/booth": {
@@ -126,6 +135,18 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
       if (placementProblems(expo, b).length) return state;
       const exists = expo.booths.some((x) => x.id === b.id);
       return withExpo(state, { ...expo, booths: exists ? expo.booths.map((x) => (x.id === b.id ? b : x)) : [...expo.booths, b] });
+    }
+
+    case "expo/hallRemove": {
+      const h = expo.halls.find((x) => x.id === action.hallId);
+      // a hall goes only once it is empty, and an event keeps at least one
+      if (!h || expo.booths.some((b) => b.hallId === h.id) || expo.halls.filter((x) => x.eventId === h.eventId).length < 2) return state;
+      const cfg = expo.configs[h.eventId];
+      return withExpo(state, {
+        ...expo,
+        halls: expo.halls.filter((x) => x.id !== h.id),
+        configs: cfg ? { ...expo.configs, [h.eventId]: { ...cfg, log: [...cfg.log, note(`Hall removed: ${h.name}`, by, at)] } } : expo.configs,
+      });
     }
 
     case "expo/boothRemove": {

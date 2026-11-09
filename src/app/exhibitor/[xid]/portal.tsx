@@ -4,7 +4,8 @@ import { useState } from "react";
 import { FloorPlan, PlanLegend } from "@/components/floor-plan";
 import { useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
-import { activeBookingOf, allowance, area, bookingStage, boothNet, boothStatus, gross, holdExpiresAt, holdProblems, invoiceOwed, invoicePaid, invoiceStatus, invoiceTotal, kes, lineText, paidInFull, passesOver, scheduleOnSigning } from "@/lib/expo/logic";
+import { activeBookingOf, allowance, area, bookingStage, boothNet, boothStatus, gross, holdExpiresAt, holdProblems, invoiceOwed, invoicePaid, invoiceStatus, invoiceTotal, kes, lineText, paidInFull, passesOver, scheduleOnSigning, staffOf } from "@/lib/expo/logic";
+import { brandingState, contractorsOf, dismantleState, passCap } from "@/lib/expo/onsite";
 import type { Booth, BoothStatus, Exhibitor } from "@/lib/expo/types";
 import { fmtStamp } from "@/lib/time";
 import { Card } from "./card";
@@ -122,6 +123,7 @@ function Status({ e, go }: { e: Exhibitor; go: (t: Tab) => void }) {
           </button>
         </Card>
       )}
+      {k?.contract && <StandChecklist e={e} go={go} />}
       {next && (
         <Card title={invoiceStatus(expo, next, now) === "Overdue" ? "A payment is overdue" : "Next payment"}>
           <p className="text-[14px]">
@@ -134,6 +136,49 @@ function Status({ e, go }: { e: Exhibitor; go: (t: Tab) => void }) {
         </Card>
       )}
     </>
+  );
+}
+
+/** POR-1: once the contract is signed, what the stand still needs from the company, each line opening its tab. */
+function StandChecklist({ e, go }: { e: Exhibitor; go: (t: Tab) => void }) {
+  const { state } = useStore();
+  const expo = state.expo;
+  const cfg = expo.configs[e.eventId];
+  const now = expo.clock;
+  const k = activeBookingOf(expo, e.id, cfg, now)!;
+  const spaceOnly = expo.booths.some((b) => k.boothIds.includes(b.id) && b.type === "Space only");
+  const staff = staffOf(state, e.id).length;
+  const cap = passCap(state, cfg, e.id);
+  const brand = expo.branding.find((b) => b.exhibitorId === e.id);
+  const bs = brandingState(brand);
+  const orders = expo.orders.filter((o) => o.exhibitorId === e.id).length;
+  const moveIn = expo.moveIns.find((m) => m.exhibitorId === e.id);
+  const contractors = contractorsOf(state, e.id).length;
+  const ds = dismantleState(expo.dismantles.find((d) => d.exhibitorId === e.id));
+  const rows: { label: string; state: string; done: boolean; tab: Tab }[] = [
+    { label: "Stand staff", state: staff ? `${staff} registered, ${cap} passes` : `None yet; ${cap} passes come with your stand`, done: staff > 0, tab: "People" },
+    ...(spaceOnly ? [{ label: "Contractors", state: contractors ? `${contractors} registered for build-up and dismantling` : "None yet; your stand builders need passes", done: contractors > 0, tab: "People" as Tab }] : []),
+    { label: "Branding", state: bs === "Not sent" ? `Not sent; due ${fmtStamp(cfg.brandingDeadline, false)}` : bs === "Returned" ? "Returned with changes to make" : bs === "Waiting for approval" ? "With the team for approval" : "Approved for print", done: bs === "Approved", tab: "Stand" },
+    { label: "Equipment and services", state: orders ? `${orders} order${orders === 1 ? "" : "s"}` : "Nothing ordered; optional", done: true, tab: "Stand" },
+    { label: "Move-in", state: moveIn ? `${now >= moveIn.at ? "Moved in from" : "From"} ${fmtStamp(moveIn.at)}` : now > cfg.buildUp.to ? "Build-up is over" : "The team will set your time", done: !!moveIn || now > cfg.buildUp.to, tab: "On site" },
+    ...(now >= cfg.dismantle.from ? [{ label: "Dismantling", state: ds, done: ds === "Signed off", tab: "On site" as Tab }] : []),
+  ];
+  const left = rows.filter((r) => !r.done).length;
+  return (
+    <Card title={left ? `Your stand: ${left} thing${left === 1 ? "" : "s"} to do` : "Your stand is ready"}>
+      <ul className="-mx-1">
+        {rows.map((r) => (
+          <li key={r.label}>
+            <button className="flex w-full items-start gap-3 rounded-md px-1 py-2 text-left text-[14px] hover:bg-paper" onClick={() => go(r.tab)}>
+              <span aria-hidden="true" className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${r.done ? "bg-ok" : "bg-warn"}`} />
+              <span className="shrink-0 font-medium">{r.label}</span>
+              <span className="ml-auto min-w-0 text-right text-slate">{r.state}</span>
+              <span className="sr-only">{r.done ? "done" : "to do"}, open {r.tab}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 

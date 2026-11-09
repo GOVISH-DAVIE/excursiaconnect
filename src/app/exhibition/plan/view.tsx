@@ -28,6 +28,7 @@ function Plan() {
   const [hallId, setHallId] = useState(halls.find((h) => h.id === q.get("hall"))?.id ?? halls[0]?.id);
   const [status, setStatus] = useState<BoothStatus[]>((q.get("status") ?? "").split(",").filter((s): s is BoothStatus => STATUSES.includes(s as BoothStatus)));
   const [selected, setSelected] = useState<string | null>(expo.booths.find((b) => b.code === q.get("booth"))?.id ?? null);
+  const [category, setCategory] = useState<BoothCategory | null>(CATEGORIES.find((c) => c === q.get("category")) ?? null);
   const [refused, setRefused] = useState("");
   if (!cfg) return null;
   if (!can("expo.manage") && !can("expo.floor") && !can("money.view")) return <Refusal title="The floor plan is for the exhibition team"><ScannerWork /></Refusal>;
@@ -82,6 +83,11 @@ function Plan() {
             {s === "Blocked" ? "Not for sale" : s} {booths.filter((b) => statusOf(b) === s).length}
           </button>
         ))}
+        {category && (
+          <button className="pill bg-ink text-white" aria-label={`Stop picking out ${category} booths`} onClick={() => setCategory(null)}>
+            {category} ×
+          </button>
+        )}
       </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-3">
@@ -94,7 +100,7 @@ function Plan() {
               tip={(b) => [`${b.code}, ${statusOf(b) === "Blocked" ? "not for sale" : statusOf(b).toLowerCase()}`, `${b.w} × ${b.d} m ${b.type.toLowerCase()}, ${b.category.toLowerCase()}`, ownerOf(b)?.name ?? priceLine(b, cfg.vatPct, boothNet(cfg, b))]}
               selected={selected}
               onSelect={(id) => { setSelected(id); setRefused(""); }}
-              faded={status.length ? (b) => !status.includes(statusOf(b)) : undefined}
+              faded={status.length || category ? (b) => (status.length > 0 && !status.includes(statusOf(b))) || (!!category && b.category !== category) : undefined}
               editable={edit}
               onMove={move}
               problemsAt={(b, x, y) => placementProblems(expo, { ...b, x, y })}
@@ -104,7 +110,7 @@ function Plan() {
             </div>
             {refused && <p className="mt-2 text-[13px] text-bad">{refused}</p>}
           </section>
-          <Availability hallId={hall.id} onPick={(s) => setStatus([s])} />
+          <Availability hallId={hall.id} onPick={(s, c) => { setStatus([s]); setCategory(c); }} />
         </div>
         <div className="min-w-0">{sel ? <BoothPanel key={sel.id + sel.x + sel.y} booth={sel} onRemoved={() => setSelected(null)} /> : <Section title="Select a booth">Its size, price and who has it show here{edit ? ", with the controls to change it or allocate it" : ""}.</Section>}</div>
       </div>
@@ -112,8 +118,8 @@ function Plan() {
   );
 }
 
-/** BTH-6: what is left, by category, each count picking out those booths. */
-function Availability({ hallId, onPick }: { hallId: string; onPick: (s: BoothStatus) => void }) {
+/** BTH-6: what is left, by category, each count picking out those booths: that status and that category. */
+function Availability({ hallId, onPick }: { hallId: string; onPick: (s: BoothStatus, c: BoothCategory) => void }) {
   const { expo, cfg, now } = useExpo();
   const booths = expo.booths.filter((b) => b.hallId === hallId);
   return (
@@ -142,7 +148,7 @@ function Availability({ hallId, onPick }: { hallId: string; onPick: (s: BoothSta
                     return (
                       <td key={s} className="td-r">
                         {n ? (
-                          <button className="hover:underline underline-offset-4" onClick={() => onPick(s)}>
+                          <button className="hover:underline underline-offset-4" aria-label={`Pick out the ${n} ${c.toLowerCase()} booths ${s === "Blocked" ? "not for sale" : s.toLowerCase()}`} onClick={() => onPick(s, c)}>
                             {n}
                           </button>
                         ) : (

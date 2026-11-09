@@ -6,7 +6,8 @@ import { Wordmark, fmtDate } from "@/components/ui";
 import { FloorPlan, PlanLegend } from "@/components/floor-plan";
 import { useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
-import { activeBookingOf, activeBookingOfBooth, area, boothNet, boothStatus, gross, kes, scheduleOnSigning } from "@/lib/expo/logic";
+import { activeBookingOf, activeBookingOfBooth, area, boothNet, boothStatus, gross, includesOf, kes, passLine, scheduleOnSigning, sizeFits, SIZES } from "@/lib/expo/logic";
+import { fmtStamp } from "@/lib/time";
 import type { Booth, BoothStatus } from "@/lib/expo/types";
 
 /*
@@ -122,7 +123,7 @@ export function ExhibitPublic({ slug }: { slug: string }) {
               </div>
               <div>
                 <dt>Passes</dt>
-                <dd>Two per 9 m², included</dd>
+                <dd>{cfg.passPer9} per 9 m², included</dd>
               </div>
             </dl>
           </div>
@@ -170,7 +171,7 @@ export function ExhibitPublic({ slug }: { slug: string }) {
               <div className="span-6">
                 <h3 className="t-day">Shell scheme, {kes(cfg.rates["Shell scheme"])} per m²</h3>
                 <ul className="rows">
-                  {["Walls on the closed sides, carpet and a fascia board with your name", "A table, two chairs and a 13 A socket", "Lighting and daily cleaning", "Two exhibitor passes per 9 m²"].map((t) => (
+                  {[...includesOf(cfg, "Shell scheme"), passLine(cfg)].map((t) => (
                     <li key={t}>
                       <span className="rows__name">{t}</span>
                     </li>
@@ -180,7 +181,7 @@ export function ExhibitPublic({ slug }: { slug: string }) {
               <div className="span-6">
                 <h3 className="t-day">Space only, {kes(cfg.rates["Space only"])} per m²</h3>
                 <ul className="rows">
-                  {["The floor space marked out, for your own stand build", "Power, water and internet ordered separately", "Build-up from 23 November, your contractor registered for a pass", "Two exhibitor passes per 9 m²"].map((t) => (
+                  {[...includesOf(cfg, "Space only"), `Build-up from ${fmtStamp(cfg.buildUp.from)}, your contractors registered for passes`, passLine(cfg)].map((t) => (
                     <li key={t}>
                       <span className="rows__name">{t}</span>
                     </li>
@@ -252,12 +253,11 @@ export function ExhibitPublic({ slug }: { slug: string }) {
 }
 
 const SECTORS = ["Media", "Digital agency", "Creative agency", "PR agency", "Print and signage", "Events and AV", "Research", "Martech", "Technology", "Consumer brand", "Financial services", "Promotional products", "Other"];
-const SIZES = ["3 × 3 m", "3 × 6 m", "6 × 6 m", "Larger"];
 
 /** EXH-2: the application; the booth asked for is a preference, held only after approval. */
 function Apply({ eventId, free, hallNames }: { eventId: string; free: Booth[]; hallNames: Record<string, string> }) {
   const { state, dispatch } = useStore();
-  const [f, setF] = useState({ name: "", sector: "", website: "", description: "", contact: "", title: "", email: "", phone: "", products: "", size: SIZES[0], hallId: "", boothPref: "", avoid: "" });
+  const [f, setF] = useState({ name: "", sector: "", website: "", description: "", contact: "", title: "", email: "", phone: "", products: "", size: SIZES[0] as string, hallId: "", boothPref: "", avoid: "" });
   const [tried, setTried] = useState(false);
   const [sentId, setSentId] = useState<string | null>(null);
   const missing = [
@@ -269,6 +269,8 @@ function Apply({ eventId, free, hallNames }: { eventId: string; free: Booth[]; h
     !f.products.trim() && "what you will show",
   ].filter(Boolean) as string[];
   const sent = sentId ? state.expo.exhibitors.find((e) => e.id === sentId) : undefined;
+  // the booths that answer the size and hall asked for; the choice is a preference, so nothing is held yet
+  const fitting = free.filter((b) => (!f.hallId || b.hallId === f.hallId) && sizeFits(f.size, b));
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   const submit = () => {
     setTried(true);
@@ -290,7 +292,9 @@ function Apply({ eventId, free, hallNames }: { eventId: string; free: Booth[]; h
         {sent ? (
           <div className="surface p-6 max-w-2xl">
             <h3 className="t-day">Application received, reference {sent.ref}</h3>
-            <p className="mt-2">We have emailed and texted {sent.contact.email}. Your exhibitor portal shows where it stands and, once approved, the booths you can hold.</p>
+            <p className="mt-2">
+              We have emailed {sent.contact.email} and texted {sent.contact.phone}. Your exhibitor portal shows where it stands and, once approved, the booths you can hold.
+            </p>
             <Link href={`/exhibitor/${sent.id}`} className="btn btn-primary mt-4 inline-flex">
               Open my exhibitor portal
             </Link>
@@ -341,7 +345,7 @@ function Apply({ eventId, free, hallNames }: { eventId: string; free: Booth[]; h
             </label>
             <label className="block">
               <span className="label">Size wanted</span>
-              <select className="input" value={f.size} onChange={set("size")}>
+              <select className="input" value={f.size} onChange={(e) => setF({ ...f, size: e.target.value, boothPref: "" })}>
                 {SIZES.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
@@ -362,14 +366,17 @@ function Apply({ eventId, free, hallNames }: { eventId: string; free: Booth[]; h
               <span className="label">Booth you would like (optional)</span>
               <select className="input" value={f.boothPref} onChange={set("boothPref")}>
                 <option value="">No preference</option>
-                {free
-                  .filter((b) => !f.hallId || b.hallId === f.hallId)
-                  .map((b) => (
-                    <option key={b.id} value={b.code}>
-                      {b.code}, {b.w} × {b.d} m {b.category.toLowerCase()}, {area(b)} m²
-                    </option>
-                  ))}
+                {fitting.map((b) => (
+                  <option key={b.id} value={b.code}>
+                    {b.code}, {b.w} × {b.d} m {b.category.toLowerCase()}, {area(b)} m²
+                  </option>
+                ))}
               </select>
+              {!fitting.length && (
+                <span className="mt-1 block text-[13px]" style={{ color: "var(--muted)" }}>
+                  No {f.size === "Larger" ? "stand larger than 6 × 6 m" : `${f.size} stand`} is free{f.hallId ? ` in ${hallNames[f.hallId]}` : ""} now. Apply anyway: the team will offer what fits, or keep you on the waiting list.
+                </span>
+              )}
             </label>
             <label className="block">
               <span className="label">Not next to (optional)</span>
