@@ -35,6 +35,7 @@ export default function Home() {
       <div className="mx-auto max-w-5xl px-6 py-16">
         <Logo variant="light" className="h-32" />
         <p className="mt-8 max-w-xl text-white/70 text-[18px] leading-relaxed">Clickable prototype of the ExcursiaConnect PRD. Data is mock and lives in this browser, so what one persona does, the others see.</p>
+        <p className="mt-3 max-w-xl text-white/50 text-[14px] leading-relaxed">Visits are recorded to improve the prototype: IP address, browser, the pages opened and the time on each, clicks, and a replay of the screen with every input field hidden. Records are deleted after 90 days.</p>
         <div className="mt-10 grid gap-px bg-white/10 sm:grid-cols-2 lg:grid-cols-3 rounded-xl overflow-hidden">
           {personas.map((p) => (
             <Link key={p.href} href={p.href} className="group bg-ink p-6 hover:bg-ink-800 transition-colors">

@@ -11,7 +11,7 @@ npm run dev      # http://localhost:3000
 npm run build && npm start
 ```
 
-No environment variables, database or payment keys are needed. The Rethink Sans font is bundled locally so it builds offline.
+The demo needs no database or payment keys: its data lives in each browser. The one server-side piece is the visitor log below, which needs two environment variables to open. The Rethink Sans font is bundled locally so it builds offline.
 
 One design language covers every screen: tokens, type, buttons and the public site's page rhythm are in [docs/design-system.md](docs/design-system.md). What the prototype covers of the use cases, and what is still missing, is in [docs/coverage.md](docs/coverage.md); a click-through of every screen, with the dead controls and the gaps, is in [docs/qa-findings.md](docs/qa-findings.md).
 
@@ -76,6 +76,51 @@ Halls, floor plans and booths; exhibitor applications and approval; booth holds,
 
 **Where the rules live.** In `src/lib/expo/`: `logic.ts`, `onsite.ts` and `ops.ts` hold the rules as pure functions; `reducer.ts` and `onsite-reducer.ts` enforce them, and the store's `accredit` and `scanVerdict` apply the desk and door rules. Settings, Checks sends 50 hold requests through the real reducer and runs the invariant check.
 
+## Visitor log
+
+Every page opened in the prototype is recorded on the server in SQLite:
+- the visitor's IP address and browser;
+- the session, which ends after 30 minutes idle;
+- each page with the seconds it was in view;
+- each click on a link, button or tab, by its label;
+- a screen recording for replay (rrweb): the page, scrolling, the mouse and clicks. Every input field is masked in the browser before anything is sent.
+
+Text a visitor's actions put on the page (a message they sent, say) shows in the replay. Query strings are never recorded. Records older than 90 days are deleted, recordings with them. One session keeps at most 25 MB of recording. The home page says all this.
+
+It is read at `/adminwatch`, which is not linked from the prototype, is not indexed, and opens with a password:
+- **Sessions:** a list with a **Play** button for each recorded one.
+- **A session's page:** the replay, with a button per page that jumps to it, then the pages and clicks in order.
+- **Its own pages:** nothing in `/adminwatch` is ever recorded or replayed.
+
+| Variable | What it does |
+| --- | --- |
+| `ADMINWATCH_PASSWORD` | The password for `/adminwatch`. Unset, the page says it is not set up and nothing opens |
+| `ADMINWATCH_SECRET` | 32 characters or more, signs the 12-hour sign-in cookie (`openssl rand -base64 48`) |
+| `VISITS_DB_PATH` | Where the SQLite file lives; default `data/visits.db`. The Node process must be able to write there; back it up |
+
+After five wrong passwords from one address in 15 minutes, sign-in is refused. Every attempt is recorded.
+
+**Deployment.** The app runs as one `next start`, behind nginx, listening on loopback only so that the forwarded IP can be trusted:
+
+```bash
+npm run build && npm start -- -H 127.0.0.1 -p 3000
+```
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:3000;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Requirements:
+- **Node:** 20 or 22.
+- **SQLite library:** `better-sqlite3` installs from a prebuilt binary. Where there is none, it builds with `python3`, `make` and `g++`.
+- **Instances:** one only. The SQLite file belongs to one process, so it does not suit several instances.
+
 ## Structure
 
 ```
@@ -86,8 +131,9 @@ src/lib/dealroom/    Deal Room types, rules (logic.ts), reducers (reducer, meeti
 src/lib/expo/        Exhibition types, rules (logic, onsite, ops), reducers (reducer, onsite-reducer) and seed
 src/lib/clock.ts     which module clock an event runs on (Deal Room, Exhibition, or the wall clock)
 src/lib/time.ts      minute and date arithmetic; csv.ts for exports
-src/components/      ui primitives, programme view, floor plan, reset button
-src/app/             routes per persona
+src/components/      ui primitives, programme view, floor plan, reset button, visit beacon
+src/server/visits/   the visitor log on the server: SQLite (db), IP, browser, sign-in, writes and reads
+src/app/             routes per persona; api/visit takes the beacon's events, adminwatch reads the log
 public/brand/        ExcursiaConnect logo files
 ```
 
