@@ -22,11 +22,21 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
   const entitled = (zid: string) => tier.entitlements.includes(zid) || (d.grants ?? []).includes(zid) || (d.category === "VIP" && zid === "z_vip");
   const meetings = state.delegates.flatMap((h) => (h.slots ?? []).filter((s) => s.bookedBy === d.id).map((s) => ({ with: h.name, ...s }))).concat((d.slots ?? []).filter((s) => s.bookedBy).map((s) => ({ with: state.delegates.find((x) => x.id === s.bookedBy)?.name ?? "", ...s })));
 
+  // attended means the room door let this badge in for that session, not that it was checked in at the desk
+  const inRoom = (sessionId: string) => (d.roomLog ?? []).some((l) => l.sessionId === sessionId && l.verdict !== "deny");
+  // who was on the post: the person signed in on the scanner, or for older records the rota for that half-day
+  const memberName = (id?: string) => state.team.find((m) => m.id === id)?.name;
+  const staffAt = (by: string | undefined, post: string, day: number, at: string) =>
+    memberName(by) ?? memberName(state.shifts.find((x) => x.eventId === eventId && x.day === day && x.post === post && x.slot === (at < "13:00" ? "Morning" : "Afternoon"))?.memberId);
   const audit = [
     ...(d.status !== "Pending" ? [{ at: order?.at ?? "2026-10-02", who: "System", what: `Registered via public page, tier ${tier.name}` }] : []),
     ...(order ? [{ at: order.at, who: order.method === "bank" ? "Organiser staff" : "System", what: `Payment ${order.status} by ${order.method === "mpesa" ? "M-Pesa" : order.method}, ref ${order.reference}` }] : []),
-    ...d.checkIns.map((c) => ({ at: `Day ${c.day} ${c.at}`, who: "Accreditation desk 1", what: "Accredited and checked in" })),
-    ...d.zoneLog.slice(0, 5).map((l) => ({ at: l.at, who: "Door staff", what: `${zones.find((z) => z.id === l.zoneId)?.name} ${l.direction}: ${l.verdict}${l.reason ? `, ${l.reason}` : ""}` })),
+    ...d.checkIns.map((c) => ({ at: `Day ${c.day} ${c.at}`, who: staffAt(c.by, "desk", c.day, c.at) ?? "Accreditation desk", what: "Accredited and checked in" })),
+    ...d.zoneLog.slice(0, 5).map((l) => ({
+      at: l.at,
+      who: staffAt(l.by, `${l.zoneId}:${l.direction}`, d.checkIns[0]?.day ?? 1, l.at) ?? "Door staff",
+      what: `${zones.find((z) => z.id === l.zoneId)?.name} ${l.direction}: ${l.verdict}${l.reason ? `, ${l.reason}` : ""}${l.approvedBy && l.approvedBy !== l.by ? `, approved by ${memberName(l.approvedBy)}` : ""}`,
+    })),
   ];
 
   return (
@@ -105,8 +115,9 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
               ))}
               <div>
                 <label className="label">Category</label>
-                <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as Category })}>
-                  {["General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP"].map((c) => (
+                {/* a module issues Deal Room and Contractor passes; they are not changed here */}
+                <select className="input" value={form.category} disabled={form.category === "Deal Room" || form.category === "Contractor"} onChange={(e) => setForm({ ...form, category: e.target.value as Category })}>
+                  {["General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP", ...(form.category === "Deal Room" || form.category === "Contractor" ? [form.category] : [])].map((c) => (
                     <option key={c}>{c}</option>
                   ))}
                 </select>
@@ -205,7 +216,7 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
                       Day {s.day}, {s.start}–{s.end}
                     </td>
                     <td className="td text-slate">{state.rooms.find((r) => r.id === s.roomId)?.name}</td>
-                    <td className="td">{s.status === "ended" ? <Tone tone={d.checkIns.length ? "ok" : "mute"}>{d.checkIns.length ? "Scanned in" : "No scan"}</Tone> : <Tone tone="mute">Not yet</Tone>}</td>
+                    <td className="td">{s.status === "ended" ? <Tone tone={inRoom(s.id) ? "ok" : "mute"}>{inRoom(s.id) ? "Scanned in" : "No scan"}</Tone> : <Tone tone="mute">Not yet</Tone>}</td>
                   </tr>
                 ))}
               </tbody>

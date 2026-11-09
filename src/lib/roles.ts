@@ -57,6 +57,13 @@ export const CAPABILITIES: { group: string; items: { id: Capability; label: stri
     ],
   },
   {
+    group: "Exhibition",
+    items: [
+      { id: "expo.manage", label: "Set up halls and booths, decide exhibitors, allocate booths" },
+      { id: "expo.floor", label: "Run logistics and the show floor" },
+    ],
+  },
+  {
     group: "Team",
     items: [
       { id: "team.invite", label: "Invite and remove staff" },
@@ -70,7 +77,7 @@ export const ALL_CAPABILITIES: Capability[] = CAPABILITIES.flatMap((g) => g.item
 /** What each role may do out of the box; the owner can change every role but their own. */
 export const DEFAULT_GRANTS: Record<Role, Capability[]> = {
   Owner: ALL_CAPABILITIES,
-  Staff: ["event.programme", "delegates.view", "delegates.edit", "delegates.approve", "delegates.badge", "delegates.export", "delegates.campaign", "access.grant", "access.scan", "sessions.all"],
+  Staff: ["event.programme", "delegates.view", "delegates.edit", "delegates.approve", "delegates.badge", "delegates.export", "delegates.campaign", "access.grant", "access.scan", "sessions.all", "expo.manage", "expo.floor"],
   Finance: ["delegates.view", "money.view", "money.markPaid", "money.refund", "money.payout"],
   Accreditation: ["access.scan", "access.override"],
   Speaker: ["sessions.own"],

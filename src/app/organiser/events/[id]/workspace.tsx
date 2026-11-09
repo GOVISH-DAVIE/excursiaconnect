@@ -11,6 +11,7 @@ import { MediaTab } from "./media";
 import { ReportsTab, exportWorkbook, roomFigures } from "./reports";
 import { BrandEditor, FieldEditor, RoomEditor, SessionEditor, TierEditor, ZoneEditor } from "./editors";
 import { readableOn } from "@/lib/brand";
+import { EXPO_TIERS, invoiceOwed, invoiceStatus, invoiceTotal, kes } from "@/lib/expo/logic";
 
 const tabs = ["Overview", "Delegates", "Tickets and form", "Programme", "Media", "Zones and rooms", "Finance", "Reports"] as const;
 type Tab = (typeof tabs)[number];
@@ -56,6 +57,11 @@ export function EventWorkspace({ id }: { id: string }) {
             <Link href={`/e/${event.slug}`} className="btn-secondary" target="_blank">
               Public page
             </Link>
+            {state.expo.configs[event.id] && (
+              <Link href="/exhibition" className="btn-secondary">
+                Exhibition
+              </Link>
+            )}
             {(event.state === "Draft" || event.state === "Changes requested") && (
               <button className="btn-primary" disabled={organiser?.kycStatus !== "Verified"} title={organiser?.kycStatus !== "Verified" ? "KYC must be verified before you can submit" : undefined} onClick={() => dispatch({ type: "setEventState", eventId: id, state: "Submitted" })}>
                 {event.state === "Draft" ? "Submit for approval" : "Resubmit for approval"}
@@ -394,6 +400,7 @@ export function EventWorkspace({ id }: { id: string }) {
             <Stat label="Your net" value={money(net)} tone="ok" />
             <Stat label="Next payout" value="Fri 6 Nov" sub={`to ${state.organisers[0].payoutAccount}`} href="/organiser/finance" />
           </div>
+          {state.expo.configs[event.id] && <StandFees eventId={event.id} />}
           <Section title="Ledger" action={<button className="btn-secondary">Export .xlsx</button>} flush>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -579,7 +586,7 @@ function DelegatesTab({ event, delegates, tiers, base, tierName, initialStatus }
             <div>
               <label className="label" htmlFor="csv-tier">Ticket to issue</label>
               <select id="csv-tier" className="input" value={importTier} onChange={(e) => setImportTier(e.target.value)}>
-                {tiers.map((t) => (
+                {tiers.filter((t) => !EXPO_TIERS.includes(t.id)).map((t) => (
                   <option key={t.id} value={t.id}>{t.name}{t.price ? ` (${t.price} ${t.currency}, no payment taken)` : " (free)"}</option>
                 ))}
               </select>
@@ -669,7 +676,8 @@ function DelegatesTab({ event, delegates, tiers, base, tierName, initialStatus }
             ))}
           </select>
           <select className="input max-w-[180px]" value={cat} onChange={(e) => setCat(e.target.value)}>
-            {["All", "General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP"].map((s) => (
+            {/* categories a module issues (Deal Room, Contractor) are listed only when the event has them */}
+            {["All", "General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP", ...(["Deal Room", "Contractor"] as const).filter((c) => delegates.some((d) => d.category === c))].map((s) => (
               <option key={s}>{s}</option>
             ))}
           </select>
@@ -742,5 +750,26 @@ function DelegatesTab({ event, delegates, tiers, base, tierName, initialStatus }
         </div>
       </Section>
     </div>
+  );
+}
+
+/** SAL-8: stand fees are the organiser's own receivables, invoiced in the Exhibition module; no commission is taken on them. */
+function StandFees({ eventId }: { eventId: string }) {
+  const { state } = useStore();
+  const x = state.expo;
+  const inv = x.invoices.filter((i) => i.eventId === eventId && i.state === "Issued");
+  const total = inv.reduce((n, i) => n + invoiceTotal(i), 0);
+  const owed = inv.reduce((n, i) => n + invoiceOwed(x, i), 0);
+  const late = inv.filter((i) => invoiceStatus(x, i, x.clock) === "Overdue").reduce((n, i) => n + invoiceOwed(x, i), 0);
+  return (
+    <Section title="Stand fees" action={<Link href="/exhibition/sales?tab=Invoices" className="link text-[13px]">In the Exhibition</Link>}>
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Stat label="Invoiced, with VAT" value={kes(total)} href="/exhibition/sales?tab=Invoices" />
+        <Stat label="Received" value={kes(total - owed)} tone="ok" href="/exhibition/sales?tab=Invoices&status=Paid" />
+        <Stat label="Owed" value={kes(owed)} href="/exhibition/sales?tab=Invoices&status=Issued,Part%20paid,Overdue" />
+        <Stat label="Overdue" value={kes(late)} tone={late ? "bad" : undefined} href="/exhibition/sales?tab=Invoices&status=Overdue" />
+      </div>
+      <p className="mt-3 text-[13px] text-slate">Paid to you directly by M-Pesa or bank transfer. They are not part of ticket payouts and carry no Algotech commission.</p>
+    </Section>
   );
 }

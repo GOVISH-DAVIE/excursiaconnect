@@ -6,11 +6,16 @@ export function generateStaticParams() {
   return seed.events.map((e) => ({ slug: e.slug }));
 }
 
-export default async function RegisterPage({ params }: PageProps<"/e/[slug]/register">) {
+// the params are read inside the Suspense boundary, so the shell around them can render at once
+async function Resolved({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  return <Register slug={slug} />;
+}
+
+export default function RegisterPage({ params }: PageProps<"/e/[slug]/register">) {
   return (
     <Suspense fallback={<div className="p-10 text-slate">Loading…</div>}>
-      <Register slug={slug} />
+      <Resolved params={params} />
     </Suspense>
   );
 }
