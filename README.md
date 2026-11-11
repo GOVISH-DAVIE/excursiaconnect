@@ -93,6 +93,8 @@ public/brand/        ExcursiaConnect logo files
 
 ## Where a real build diverges
 
+The backend is planned in [docs/backend-plan.md](docs/backend-plan.md): Node.js and TypeScript, Prisma on PostgreSQL, reached from server-side Next.js, in phases with milestones toward the Deal Room's onboarding launch (15 Dec 2026) and the summit (15 to 18 Feb 2027). How it runs behind nginx (processes, the nginx block, deploys, backups) is in [docs/deploy.md](docs/deploy.md).
+
 - Store becomes PostgreSQL behind an API; the reducer actions map one-to-one onto endpoints.
 - M-Pesa (Daraja STK push + callback), Paystack and SMS/email are simulated with timeouts.
 - QR codes are signed in the PRD; here they are plain text.

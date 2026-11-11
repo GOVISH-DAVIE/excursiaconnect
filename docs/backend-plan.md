@@ -1,0 +1,380 @@
+# Backend and integration plan
+
+How ExcursiaConnect goes from a browser-only prototype to a real backend, in phases with milestones. Written on 11 November 2026 on branch `backend`, cut from `deal-room-vis-a-vis` (PR #2), and revised the same day after four independent reviews (see [Reviews](#what-the-reviews-found)).
+
+**The stack, decided:**
+- Node.js and TypeScript.
+- **Prisma** on **PostgreSQL**.
+- Reached from **server-side Next.js**: server components read, server actions write, and route handlers take webhooks and serve the apps' API.
+- Running with `next start` on loopback **behind nginx**.
+- No separate API server.
+
+How it runs on the server (processes, nginx, deploys, backups) is in [deploy.md](deploy.md).
+
+## Where we start
+
+The prototype keeps the whole app in one reducer in the browser (`src/lib/store.tsx`), saved to localStorage under a seed version. Nothing is on a server:
+- no database
+- no sign-in
+- no payments, email or SMS
+- no tests
+
+The one exception is the visitor log on the unmerged `visitor-log` branch, which writes to SQLite.
+
+| Area | Where the rules live today | Size |
+| --- | --- | --- |
+| Core platform (organisers, events, tiers, registration, delegates, zones, rooms, sessions, scanning, team, payouts) | `src/lib/store.tsx`, `src/lib/types.ts`, `src/lib/roles.ts` | 58 actions, 17 record types |
+| Exhibition (halls, booths, exhibitors, contracts, invoices, payments, on-site logistics) | `src/lib/expo/*` | 37 actions, 23 record types |
+| Deal Room (applications, review, fee, challenges, matching, consent, meetings, sessions, pipeline, conversion) | `src/lib/dealroom/*` | 77 actions, 33 record types |
+| Screens | `src/app/*` | 53 routes, no route handlers |
+
+**What helps:** the rules are already separate from the screens. Reducers are `(state, action) => state`, the selectors (`slotProblems`, `matchable`, `pipelineOf`, `drCan`) are pure, and `seed.ts` gives realistic fixtures. Of the ~172 actions, about 12 are prototype-only and drop out. Of the rest:
+- about 95 are simple: one record and a history note
+- about 45 are medium: several records in one module
+- about 20 are hard: payments, sequences, bookings, scanning, offline sync, payouts, and the work the demo clock triggers
+
+## What the reviews found
+
+Four reviewers each read the plan and the code from one angle: build feasibility, code quality, performance, and running behind nginx with security. I checked each finding against the code before taking it on. **Verdict: proceed, with the changes below**, all now reflected in this plan.
+
+**The rules are not yet safe to run on a server.**
+1. The core reducer and the scanner rules sit in a `"use client"` file (`store.tsx:1`). A server action importing them gets a client reference, not the function.
+2. "Now" is read from the machine clock or the demo clock, ids come from `Math.random`, and `nowTime()` uses the server's local time zone. On a UTC server every rule would be three hours off Nairobi.
+3. The acting user comes from the state (`actingStaffId`, `actingMemberId`) or from the action itself. Exhibition's `as: "exhibitor"` skips every permission check (`expo/onsite-reducer.ts:60-63`).
+4. Refusals carry no reason: there are 55 silent `return state` in the Deal Room reducer alone.
+
+**The reducers trust what the browser sends.**
+- Registration accepts any delegate and order it receives.
+- A scan stores the browser's own verdict.
+- A draft save spreads the whole record sent (`dealroom/reducer.ts:201`), so a crafted request could set its own fee or decisions.
+- The fee is marked paid from the browser with a reference the browser supplies (`dr/[appId]/portal.tsx:307`).
+- Staff accounts are created and changed with no permission check (`dr/staffAdd`, `staffSet`, `staffRevoke`).
+
+**Hand-writing ~170 commands won't make 15 December.**
+- A Deal Room is small (about 0.8 MB, hundreds of applications), and its reducers already work on the whole aggregate.
+- **Running the existing reducer on the server, under a per-event lock**, ships far sooner and keeps the rules identical.
+
+**A database constraint can't enforce double-booking on its own.**
+- Whether a proposed meeting still holds its slot depends on the clock (`logic.ts:652-653`), and a constraint can't read the clock.
+- The fix is a table of the bookings that currently hold a slot, kept by the commands, with the constraint on that table.
+
+**Other findings:**
+- **Performance:** auto-propose tries about 1,440 slots per pair (480 ms in memory for 55 proposals), and the prototype ships 1.2 MB to every browser.
+- **Badge codes:** they come from a character sum of the id, so `dr_cs50` and `dr_cs05` collide.
+- **Security:** nginx must overwrite `X-Forwarded-For` and set `X-Forwarded-Host`, or server actions fail their origin check.
+- **CSP:** a nonce-based CSP is incompatible with the partial prerendering this app uses.
+
+## Architecture
+
+### First: make the rules server-safe (milestone M0.0)
+
+Before any database work:
+1. **Split `store.tsx`.** The reducer and every rule move to `src/lib/core/*.ts` with no React import. `store.tsx` keeps only the provider, `useStore` and localStorage, and re-exports the rules so screens don't change.
+2. **One context passed into every reducer and time-dependent rule:**
+   ```ts
+   type Ctx = { now: string; newId: (prefix: string) => string; actor: Actor | null };
+   ```
+   - In the prototype, `now` comes from the demo clock, as today.
+   - On the server, `now` is the server clock in **Africa/Nairobi** (with a staging-only override), `newId` is a database-safe id, and `actor` comes from the session.
+   - `stamp`, `nowTime`, `Date.now`, `Math.random` and `uid` leave `src/lib`.
+3. **Who is acting comes only from `ctx.actor`.** `actingStaffId`, `actingMemberId`, `scanSession` and `as: "exhibitor"` become prototype-only plumbing that builds `ctx.actor`.
+4. **Refusals return a reason:** reducers return `{ state, refusal?: string }`, so the server and the screens give the same reason text.
+5. **Vitest in the repo**, with seed-based tests, starting with the actions Phase 1 uses.
+
+### How a write runs on the server
+
+One server action, `runAction(action)`, keeps the screens' `dispatch` shape. Each action passes through these steps:
+
+```
+session → actor
+  → registry: deny by default; is this action allowed for this actor at all?
+  → Zod schema for this action type: whitelisted fields only
+  → ownership: does the actor own, or may they act on, every record the action names?
+  → per-event advisory lock (pg_advisory_xact_lock)
+  → load the module's aggregate for that event
+  → run the existing reducer with ctx (server now, server ids, actor)
+  → refused? return the reason, write nothing
+  → save only the records whose object identity changed (immutable updates make this cheap)
+  → write side tables in the same transaction: audit, outbox, busy slots, counters
+  → commit → return the changed slice, filtered for this viewer
+```
+
+**Two storage styles, chosen by volume:**
+- **Aggregate style:** the Deal Room's business records (applications, matches, meetings, sessions, opportunities, configuration) and the Exhibition's.
+  - Stored as **JSONB rows** with indexed **summary columns** kept by the save step: event, type, status, reference, assignee, fee state, pipeline status.
+  - Lists and dashboards read the summary columns with SQL. The full record loads only on detail pages and inside commands.
+  - Writes are serialised per event, which costs little at these sizes and removes a class of race conditions.
+- **Normalised tables with targeted commands:** high-volume and money records.
+  - delegates, tiers and badges
+  - scans and presence
+  - payments and refunds
+  - the outbox
+  - busy slots
+  - counters
+  - audit
+  
+  These never go through an aggregate load.
+
+**When to break a hot path out of the aggregate:** when the load test shows a Deal Room write over its budget (below). Meeting arrivals and outcomes on summit day are the likeliest, and the busy-slot table already makes bookings safe outside the aggregate.
+
+**Prototype-only actions get no server command:** `reset`, `hydrate`, `setCurrentDelegate`, `dr/clock`, `dr/actAs`, `expo/clock`, `expo/actAs`, `dr/offline` and `dr/sync`. Scanner sign-in becomes real sign-in. `dr/payFee` is never sent from a browser: only the payment webhook path calls it.
+
+### How a read runs
+
+- **Each module has loaders that return only what the viewer may see.** Today the whole state goes to every browser (1.2 MB on the seed). Under the loaders, staff screens get a projection, an applicant gets their own record, and the badge page gets the badge.
+- **The client store becomes a cache:** `runAction` returns the re-loaded slice for that viewer and the store replaces its copy. Screens don't also call `refresh()`. The cross-tab sync through the storage event becomes a refetch on focus.
+- **Sessions are read inside `<Suspense>`:** `cacheComponents` is on, so a cookie can't be read at the top of the root layout. The existing `Resolve` boundary hosts it. `connection()` goes where a server component needs "now" with no request API (for example, whether applications are open).
+- **Writes from one tab queue one at a time** (Next runs server actions in order per client). Autosaves merge, "save and submit" is one command, and screens wait for the result before navigating. Phase 1 shows a pending state rather than optimistic updates.
+
+### Concurrency and correctness
+
+- **No double-booking:**
+  - A `DrBusy` table holds every slot a meeting or session currently holds, per room and table, and per participant: `tsrange [start, end + buffer)`, plus an `active` flag.
+  - **Exclusion constraints** (btree_gist) apply `WHERE active`.
+  - Lapsed proposals are released by a job and, before every booking, inside the same transaction.
+  - Caps are counted under `pg_advisory_xact_lock` on both participants, taken in sorted order.
+  - Constraint error 23P01 is mapped back to the reducer's reason by re-running `slotProblems` on a fresh read.
+  - Meetings gain `seekerId` and `providerId` columns.
+- **Sequences:** references come from `UPDATE counter SET n = n + 1 RETURNING n` inside the submit transaction, with a unique index on (event, reference). Badge codes are random with a retry on the unique index.
+- **Payments:**
+  - The fee is settled by `UPDATE … WHERE paid_at IS NULL AND waived_at IS NULL`, checking the row count.
+  - Each webhook first does `INSERT INTO payment(provider, txn_id) … ON CONFLICT DO NOTHING`. In the same transaction it settles the fee, issues the badge and writes the outbox.
+  - Calls out to providers happen outside transactions.
+- **Isolation:** READ COMMITTED with the locks and constraints above. Serializable isolation isn't needed.
+- **Counters:** `tier.sold` becomes a count, or sits behind one function. Zone occupancy is one conditional `UPDATE … WHERE occupancy < capacity RETURNING`.
+
+### Time and jobs
+
+- **The server's "now" is Africa/Nairobi.** Times are stored as `timestamptz`, and the loader converts back to the `YYYY-MM-DD HH:MM` strings the rules expect.
+- **Everything the demo clock did becomes a pg-boss job**, pulled out of `dr/clock` and `expo/clock` as `job(state, from, to, ctx)`:
+  - RFI expiry, the fee reminder after three days, intro expiry
+  - meeting reminders 24 hours and 30 minutes before
+  - lapsing proposals and holds
+  - the 19:00 daily report
+  - weekly digests and the monthly review
+  - the archive at the conversion end date, and document deletion
+- The staging clock override drives the jobs too, and **refuses to start when `APP_ENV=production`**.
+- **Demo-only state stays out of the schema:** `dr.script`, `queue`/`offline`, `actingStaffId` and `clock`.
+
+### Data model, in outline
+
+One Prisma schema, keyed by `eventId` everywhere, even where the code is single-event for February. Ids stay strings, so seed ids import as they are.
+
+| Group | Style | Models (first cut) |
+| --- | --- | --- |
+| Identity and access | Tables | `User`, `Session`, `OtpCode`, `TotpSecret`, `Membership` (role per organiser or event), `ScannerDevice`, `AuditEntry` (insert-only), `RateLimit` |
+| Events | Tables | `Organiser`, `Event`, `Tier`, `FormField`, `Zone`, `Room`, `ProgrammeSession`, `Shift`, `Sponsor`, `SpeakerProfile`, `Media` |
+| Delegates and money | Tables | `Delegate`, `Badge`, `Order`, `Payment` (unique provider and transaction id, raw payload), `Refund`, `Payout`, `Campaign`, `Scan`, `Presence`, `RoomScan` |
+| Deal Room | Aggregate | `DrConfig`, `DrStaff`, `DrApplication`, `DrMatch`, `DrMeeting`, `DrSession`, `DrOpportunity`, `DrException`, `DrIncident`: each a JSONB record plus summary columns |
+| Deal Room | Tables | `DrBusy`, `DrCounter`, `DrConsent` and `DrAccess` (the consent and access logs), `DrFeePayment` |
+| Exhibition | Aggregate | `ExpoConfig`, `Hall`, `Booth`, `Exhibitor`, `Booking`, `Invoice`, `StandOrder`, `Issue` (JSONB plus summary columns) |
+| Platform | Tables | `Outbox` (email, SMS, push; no 400-message cap), `File` (object storage key, quarantine state, retention date), `VisitSession`, `PageView`, `Click` |
+
+**Indexes worth having from the start:**
+- `DrApplication`: (event, type, status), (event, mission), unique (event, reference), and (delegate).
+- `DrMeeting`: (event, start), (match), (seeker) and (provider).
+- `DrConsent`: (seeker, provider, document, at descending).
+- `Badge`: unique on `lower(code)`.
+- `Scan`: (delegate, zone, at descending).
+- `RoomScan`: partial unique (delegate, session) where the verdict isn't a deny.
+- `Outbox`: partial index on (status, next attempt).
+- `AuditEntry`: (entity, entity id, at).
+- Offline sync: unique (device, client id).
+
+### Security model
+
+- **Authorisation:**
+  - Deny by default.
+  - The actor comes from the session only.
+  - A Zod schema validates every action.
+  - Ownership and tenancy are checked for every record an action names, not just the role, which closes IDOR.
+  - MFA is a property of the role, enforced by the server; it is not an editable flag.
+  - Staff accounts are managed by Algotech admins only.
+- **Sessions:**
+  - The cookie is `__Host-sid` (Secure, HttpOnly, SameSite Lax, or Strict for staff), holding a 256-bit random id stored hashed.
+  - The id rotates on sign-in and on step-up.
+  - Sessions are revoked when a role changes.
+  - Staff time out after 30 minutes idle and 12 hours absolute.
+  - TOTP secrets are encrypted, with reuse blocked and recovery codes.
+- **One-time codes:** hashed, 10-minute expiry, single use, 5 attempts. SMS sends are capped per number and per day. Responses never reveal whether an account exists.
+- **Scanner PINs:** hashed, with per-staff and per-device lockout and device binding. The demo seed's plaintext PINs never reach production; production staff get fresh PINs.
+- **CSRF:**
+  - Server actions rely on Next's origin check, which needs nginx to forward the public host, and on SameSite cookies.
+  - Cookie-authenticated `/api/*` writes get an Origin check in `proxy.ts`.
+  - Webhooks are exempt and verified as below.
+- **Webhooks:**
+  - **Daraja:** a random per-transaction token in the callback path; Safaricom IPs allow-listed in nginx as a second layer; never settled on the callback alone. The worker confirms with STK Push Query and matches amount, phone and reference. The KES amount is locked when the push starts. A sweeper handles pushes that never get a callback, and statements are reconciled daily.
+  - **Paystack:** the HMAC-SHA512 signature over the raw body, then Verify Transaction.
+  - **Pesapal:** always calls GetTransactionStatus.
+  - **SMS and email callbacks:** used as status hints only, with a path token and an allow-list (Africa's Talking) or the provider's signature (SES, Resend).
+- **Documents:**
+  - Uploaded straight to a private bucket by presigned POST (size and type limits, random keys).
+  - Held in quarantine until a virus scan clears them.
+  - Read by a signed GET of two minutes or less, issued only after the consent check, with the access row written in the same transaction.
+  - Served as an attachment, with the watermarked copy where downloads are off.
+- **Data protection** (Kenya Data Protection Act 2019):
+  - Register with the ODPC as controller and processor, and run a DPIA for the Deal Room.
+  - Document the safeguards for any storage outside Kenya.
+  - Keep a 72-hour breach runbook and handle subject access and deletion requests.
+  - Retention covers outbox bodies, the visitor log, nginx logs and backups.
+  - Logs never hold query strings, phone numbers or document contents.
+- **Audit integrity:** separate database roles (`migrator`, `app`, `worker`, and a read-only role for oversight). The app may only INSERT into `AuditEntry`.
+
+### Performance budgets
+
+These are measured in the load test before each gate:
+
+| Path | Budget |
+| --- | --- |
+| Scan verdict | p95 300 ms end to end; 50 ms server time; 100 ms offline |
+| Booking a meeting | p95 250 ms; the 50-request burst books no clash, every response within 2 s |
+| A Deal Room write (aggregate) | p95 250 ms under summit-day load |
+| Live board poll | 30 ms when unchanged; 150 ms and 15 KB when changed; two phones agree within 5 s |
+| Staff screens (dashboard, applications, meetings) | p95 400 ms server time; first payload 150 KB or less |
+| Applicant portal | first payload 60 KB or less |
+| Auto-propose for 150 pairs | 10 s or less, as a background job with progress |
+| Payment webhook | acknowledged within 1 s |
+| Database connections | 20 or fewer in total: web 10, worker 3 for Prisma plus 3 for pg-boss |
+
+**Also:**
+- The **live board polls every 3 seconds** with a version number that every relevant write bumps. It gets 204 when nothing changed, which survives offline and reconnects better than server-sent events behind nginx.
+- **Scanners** post each verdict and keep a badge list with an ETag for offline use.
+- **Auto-propose and refill** load the event's busy set into memory, plan there, and insert in one transaction as a job.
+- **Caching:**
+  - Public event pages cache with `'use cache'` and a tag per event.
+  - The Next cache is per process, so the worker invalidates it through an internal route handler.
+  - Nothing per-viewer is ever cached, and `/api` and portals send `Cache-Control: private, no-store`.
+
+## Phases and milestones
+
+The dates work back from the paper's two gates:
+- **Deal Room applications open Tue 15 December 2026**
+- **the summit runs 15 to 18 February 2027**
+
+What applicants and reviewers need on day one comes first. Anything that can follow does.
+
+**Assumption:** at least two developers from Phase 1. With one, Phase 2 narrows to what the Deal Room needs before the summit (badges, scanning, accreditation), and the rest of ticketing moves after it.
+
+| Phase | Window | Gate |
+| --- | --- | --- |
+| 0. Server-safe rules and foundations | Thu 12 Nov to Fri 27 Nov 2026 | The rules run on the server; sign-in and the gateway run on staging |
+| 1. Deal Room onboarding | Mon 23 Nov 2026 to Fri 8 Jan 2027 | **Applications open Tue 15 Dec**; decisions from Tue 22 Dec; fees from Fri 8 Jan |
+| 2. Core platform and scanning | Mon 4 Jan to Fri 29 Jan 2027 | Badges, accreditation and scanners for the summit; ticketing for other events |
+| 3. Deal Room summit operations | Mon 4 Jan to Wed 10 Feb 2027 | Design freeze Fri 22 Jan; rehearsal Wed 10 Feb; **summit 15 to 18 Feb** |
+| 4. After the summit | Mon 22 Feb to Fri 19 Mar 2027 | Digests, monthly review, reports, archive |
+| 5. Exhibition | From Mon 22 Mar 2027 (D9: the November summit is demo data only) | The first real exhibition on the platform |
+| 6. The apps' API | From Mon 4 Jan 2027, if D10 says so | Android and iOS on the same API |
+
+### Phase 0: Server-safe rules and foundations (12 to 27 November 2026)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M0.0 | **Server-safe rules**: split `store.tsx` into `src/lib/core/*` and the client provider; `Ctx { now, newId, actor }` through every reducer and time-dependent rule; refusals with reasons; Vitest with seed-based tests | The prototype runs unchanged; `src/lib` has no `Date.now`, `Math.random` or React import; the Phase 1 actions have tests that pass |
+| M0.1 | **Decisions and applications to third parties**: D3 to D11 answered; the Daraja production application and the SMS sender ID filed (each takes one to two weeks); the ODPC registration started | Each decision has an answer in this file; both applications have reference numbers |
+| M0.2 | **Database and Prisma**: PostgreSQL with database roles, the first schema (identity, minimal event, tier and delegate, the Deal Room aggregate and its tables), migrations, connection limits and timeouts | `prisma migrate deploy` runs clean on an empty database, as the `migrator` role |
+| M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record |
+| M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL |
+| M0.5 | **The gateway**: registry, Zod schemas, ownership checks, per-event lock, aggregate load and save, audit, the module flag (server or local data), filtered results | Assigning a reviewer runs end to end from the existing screen; a test proves another organiser's and another applicant's records are refused |
+| M0.6 | **CI and staging**: type-check, lint, tests and build on every push; staging deployed behind nginx as in `deploy.md` | CI is green; staging is reachable over HTTPS with the security headers |
+
+### Phase 1: Deal Room onboarding (23 November 2026 to 8 January 2027)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M1.1 | **Apply** (by Fri 11 Dec): seeker, provider and challenge forms; drafts on the server with merged autosaves; resume links; one "save and submit" command; reference numbers from a counter; the portal's status page | An applicant applies from a phone on staging and gets a reference; a second device resumes the draft |
+| M1.2 | **Documents** (by Fri 11 Dec): presigned upload, quarantine, asynchronous virus scan, signed downloads after consent, retention dates | A pitch deck uploads, clears quarantine and opens only for those allowed, through a link that expires |
+| M1.3 | **Review, first half** (by Fri 11 Dec): queue, assignment, rubric scoring with evidence, information requests with expiry | The review rules' tests pass on the server |
+| M1.4 | **Email** (by Fri 11 Dec): the outbox and worker, templates for every onboarding message, delivery status, the Notifications screen reading the outbox | Messages arrive in a real inbox with delivery status |
+| M1.5 | **Go-live** (Mon 14 Dec): production database with point-in-time recovery and a restore drill timed against the RTO, monitoring and alerts, privacy notice, load test of apply and upload | **Applications open Tue 15 Dec 2026** |
+| M1.6 | **Review, second half** (by Tue 22 Dec): recommendations, decisions, second decider, readiness, conditions; provider and challenge verification (KYC, NDA, sanctions, decision-maker) | The first decisions are recorded on production; no record is verified with a step missing |
+| M1.7 | **Fee and SMS** (by Fri 8 Jan): one payment method first (M-Pesa if Daraja is approved, otherwise card), then the second; webhooks as specified; the 3-day reminder job; the lead's waiver; badge on payment, with minimal tier and badge records; SMS through Africa's Talking once the sender ID is approved | A sandbox payment issues a badge; a repeated callback changes nothing; approvals made before 8 Jan get their payment link then |
+
+### Phase 2: Core platform and scanning (4 to 29 January 2027)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M2.1 | **Badges and delegates**: badge page and email, random badge codes, delegate edits | A paid participant gets a working badge by email and SMS |
+| M2.2 | **Accreditation and scanning**: scanner devices and PIN sign-in with lockout, desk accreditation, zone and room doors, anti-passback through `Presence`, atomic capacity, PIN overrides, the offline queue with idempotent sync | 50 scans a minute on two devices with one offline: no duplicates and no over-capacity after sync |
+| M2.3 | **Organisers and events**: KYC and DPA, the event builder, media uploaded straight to storage, approval by Algotech | An organiser builds and publishes an event on staging |
+| M2.4 | **Registration and orders**: pricing, promo and status worked out on the server; M-Pesa and card checkout; refunds | A delegate registers and pays; a crafted request can't change the price |
+| M2.5 | **Money and comms**: commission, payouts, reconciliation; memberships, shifts, campaigns | A payout run matches the payments to the shilling |
+| M2.6 | **Visitor log**: moved from SQLite to PostgreSQL; IP taken only from `X-Real-IP`; `/adminwatch` behind staff sign-in with TOTP and an IP allow-list | Visits record and replay from PostgreSQL; `/adminwatch` refuses anyone without staff sign-in |
+
+### Phase 3: Deal Room summit operations (4 January to 10 February 2027)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M3.1 | **Matching and introductions**: candidates and fit, decisions, briefs, introductions and answers, intro expiry, consent per document, the access log, watermarked downloads | A pair is introduced and accepts; a document opens only under consent and is logged |
+| M3.2 | **Scheduling**: `DrBusy` with exclusion constraints, lapse release, caps under advisory locks, confirm and change, auto-propose as a job, .ics invites, reminders | The PRD's three 50-request bursts book no clash; auto-propose for 150 pairs finishes within 10 s |
+| M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server |
+| M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds |
+| M3.5 | **Offline on the day**: live board and scanners queue offline and sync with client ids; conflicts go to the lead; incidents are logged | A forced 10-minute outage loses nothing |
+| M3.6 | **Every role, walked through**: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight | No role sees a screen or a record it shouldn't, and no link ends in a refusal |
+| M3.7 | **Freeze and rehearsal**: freeze Fri 22 Jan; rehearsal on staging with real phones Wed 10 Feb; printed backups; restore drill and failover to the standby server | **The summit runs 15 to 18 Feb 2027** |
+
+### Phase 4: After the summit (22 February to 19 March 2027)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M4.1 | **Pipeline and opportunities** from the summary columns; participant updates; outcomes in five tiers | The pipeline on production matches its records |
+| M4.2 | **Jobs**: weekly digests, monthly review, overdue actions, archive at the conversion end, document deletion at retention | Each job runs once and on time, visible in the job log |
+| M4.3 | **Reports**: every report and CSV from SQL over the summary columns, plus oversight's read-only role | Oversight reads every report without a refusal |
+| M4.4 | **Post-summit scope** as a contracted add-on, if decided (paper gap 17) | The setting exists and defaults to off |
+
+### Phase 5: Exhibition (from 22 March 2027)
+
+The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only (D9), so no real exhibition is due before the Deal Room summit. The Exhibition stays on the prototype's local data until this phase.
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M5.0 | Exhibition rules made server-safe: the actor from `ctx`, no `as: "exhibitor"` bypass, refusal reasons | Exhibition's tests pass with the exhibitor acting only on its own company |
+| M5.1 | Halls, booths, floor plan; exhibitor applications and review | An organiser sells a stand on staging |
+| M5.2 | Holds, contracts, invoices, payments (M-Pesa, card, bank lines), reconciliation | A booking paid in two instalments reconciles |
+| M5.3 | Exhibitor portal: people, branding, equipment orders, requirements | An exhibitor completes the portal on a phone |
+| M5.4 | On-site: move-in, deliveries, contractors, show-day doors and occupancy, issues, dismantling, reports | A show day runs on staging with the scanners |
+
+### Phase 6: The apps' API (from 4 January 2027, if D10 says so)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M6.1 | `/api/v1` route handlers over the same gateway and loaders, token auth for the apps, versioning, rate limits | An OpenAPI file lists every endpoint the apps use |
+| M6.2 | Push notifications through the outbox | A test device receives a meeting reminder |
+
+## Decisions
+
+| # | Decision | Status or recommendation | Why |
+| --- | --- | --- | --- |
+| D1 | Database | **Decided 11 Nov 2026: PostgreSQL** | Exclusion constraints, point-in-time recovery, JSONB for the aggregates |
+| D2 | Where it runs | **Decided 11 Nov 2026: `next start` behind nginx.** Still open: **managed PostgreSQL with HA and 30-day PITR** (recommended), or self-managed with pgBackRest or WAL-G and a replica on a second server | The PRD asks for 99.95% in summit week, RTO 1 hour, RPO 5 minutes; one server alone can't meet that |
+| D3 | Sign-in | **Our own sessions** as specified under the security model | The flows are specific (codes, scanner PINs, per-event roles); a library hides the rules |
+| D4 | Card payments | **Paystack** or **Pesapal**, whichever Algotech already has an account with | Both take cards in Kenya |
+| D5 | M-Pesa | **Daraja directly**; file the production application in week one | Approval takes one to two weeks |
+| D6 | Files | S3-compatible private bucket with versioning; **choose the region with the DPA in mind** | Storage outside Kenya needs documented safeguards |
+| D7 | Email and SMS | **Africa's Talking** for SMS (register the sender ID in week one); **Amazon SES** or Resend for email | Sender ID approval takes one to two weeks |
+| D8 | Background jobs | **pg-boss** in a worker process | Jobs share the database's transactions; no extra infrastructure |
+| D9 | Exhibition timing | **Decided 11 Nov 2026: the Nairobi Brand & PR Summit is demo data only.** Exhibition follows the Deal Room, from 22 Mar 2027 | No real exhibition is due before February, so nothing moves ahead of 15 Dec |
+| D10 | The apps | Confirm whether the Flutter apps are needed for February, or the web on phones is enough | The web is now laid out for phones; the apps add store approval as a risk |
+| D11 | Team | Confirm the number of developers from Phase 1 | The phase windows assume at least two |
+| D12 | Content Security Policy | **Hash-based CSP with Next's experimental SRI**, or inline scripts allowed with strict other directives | A nonce-based CSP is incompatible with partial prerendering, which this app uses |
+
+## Risks
+
+| Risk | What we do |
+| --- | --- |
+| Five weeks to 15 Dec | Day one carries apply, documents, the first half of review and email only; decisions follow on 22 Dec and fees on 8 Jan |
+| M-Pesa approval or the SMS sender ID run late | Filed in week one (M0.1); card and email carry the gate if either is late |
+| Rules drift between the prototype and the server | The server runs the same reducers; their tests run in CI |
+| Leaking data the prototype showed everyone | Loaders filter per viewer; the gateway checks ownership; M3.6 walks every role |
+| Summit-day connectivity | Offline queues with client ids, polling that recovers, printed backups |
+| One server fails in summit week | Managed PostgreSQL with HA, a warm standby server, a timed failover drill (M3.7) |
+| The aggregate becomes a bottleneck | Budgets are measured in the load tests; hot paths move to targeted commands |
+| Holidays (24 Dec to 1 Jan) | Nothing gated falls in that week |
+
+## How we work on it
+
+- One branch per milestone off `backend`, merged back by pull request. Each pull request:
+  - names its milestone
+  - adds tests for the rules it touches
+  - is checked in the browser on a phone and a laptop
+- Migrations are expand first, contract in the next release, and never edited after merge.
+- This file is updated as milestones close: each row gets the date it was done and its pull request.
