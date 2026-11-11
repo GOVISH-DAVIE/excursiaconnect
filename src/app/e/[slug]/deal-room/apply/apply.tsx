@@ -5,16 +5,20 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
-import { SEEKER_DOCS, formGaps } from "@/lib/dealroom/logic";
-import type { Currency, DrApplication, Instrument, ProviderKind, Stage } from "@/lib/dealroom/types";
+import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, formGaps } from "@/lib/dealroom/logic";
+import type { ChallengeRoute, Currency, DrApplication, DrChallenge, Instrument, OwnerKind, ProviderKind, Stage } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
 import { DocLine, UploadDoc } from "@/app/dealroom/bits";
 
-const INSTRUMENTS: Instrument[] = ["Equity", "Debt", "Mezzanine", "Grant", "Trade finance", "Other"];
+const INSTRUMENTS: Instrument[] = PATHWAYS;
 const STAGES: Stage[] = ["Bankable project", "Early revenue", "Growth", "Expansion"];
 const REVENUE = ["Pre-revenue, contracted offtake", "Under USD 250k", "USD 250k to 1m", "USD 1m to 5m", "USD 5m to 20m", "Over USD 20m"];
 
-function blank(eventId: string, type: "seeker" | "provider", email: string, phone: string, now: string): DrApplication {
+type Mode = "seeker" | "provider" | "challenge";
+const BLANK_CHALLENGE: DrChallenge = { title: "", problem: "", users: "", constraints: "", outcome: "", budget: "", route: "", timeline: "", decisionProcess: "" };
+
+function blank(eventId: string, mode: Mode, email: string, phone: string, now: string): DrApplication {
+  const type = mode === "seeker" ? "seeker" : "provider";
   return {
     id: `dr_${type === "seeker" ? "cs" : "fp"}_${now.replace(/\D/g, "").slice(-6)}${Math.floor(Math.random() * 1e5).toString(36)}`,
     eventId,
@@ -27,7 +31,8 @@ function blank(eventId: string, type: "seeker" | "provider", email: string, phon
     decisionMaker: { name: "", title: "", email: "", phone: "" },
     ask: type === "seeker" ? { amount: 0, currency: "USD", instrument: "Equity", useOfFunds: "", stage: "Growth" } : undefined,
     traction: type === "seeker" ? { revenueBand: "", customers: "", metrics: "" } : undefined,
-    mandate: type === "provider" ? { sectors: [], countries: [], stages: [], ticketMin: 0, ticketMax: 0, currency: "USD", instruments: [], exclusions: [], timeline: "" } : undefined,
+    mandate: type === "provider" ? { sectors: [], countries: [], stages: [], ticketMin: 0, ticketMax: 0, currency: "USD", instruments: mode === "challenge" ? ["Procurement and contracts", "Pilots and deployment"] : [], exclusions: [], timeline: "" } : undefined,
+    challenge: mode === "challenge" ? { ...BLANK_CHALLENGE } : undefined,
     documents: [],
     status: "Draft",
     statusAt: now,
@@ -50,10 +55,11 @@ export function Apply({ slug }: { slug: string }) {
   const resumeId = search.get("resume");
   const inviteToken = search.get("invite");
   const linked = dr.apps.find((a) => (resumeId && a.id === resumeId) || (inviteToken && a.invite?.token === inviteToken));
-  const [pickedType, setType] = useState<"seeker" | "provider">(search.get("type") === "provider" ? "provider" : "seeker");
+  const [pickedMode, setMode] = useState<Mode>(search.get("type") === "provider" ? "provider" : search.get("type") === "challenge" ? "challenge" : "seeker");
   const [typed, setWho] = useState<string | null>(null);
   // a resume or invitation link fills these in once the saved state has loaded, so they are derived, not initial state
-  const type = linked?.type ?? pickedType;
+  const mode: Mode = linked ? (linked.challenge ? "challenge" : linked.type) : pickedMode;
+  const type = mode === "seeker" ? "seeker" : "provider";
   const who = typed ?? (linked ? linked.contact.email || linked.contact.phone : "");
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState("");
@@ -85,16 +91,17 @@ export function Apply({ slug }: { slug: string }) {
     const email = who.includes("@") ? who.trim() : "";
     const phone = email ? "" : who.trim();
     const existing =
-      linked ?? dr.apps.find((a) => a.eventId === event.id && a.type === type && ["Lead", "Invited", "Draft"].includes(a.status) && (a.contact.email.toLowerCase() === email.toLowerCase() || (!!phone && a.contact.phone === phone)));
+      linked ?? dr.apps.find((a) => a.eventId === event.id && a.type === type && !!a.challenge === (mode === "challenge") && ["Lead", "Invited", "Draft"].includes(a.status) && (a.contact.email.toLowerCase() === email.toLowerCase() || (!!phone && a.contact.phone === phone)));
     if (existing) {
       first.current = false;
-      setType(existing.type);
+      const was: Mode = existing.challenge ? "challenge" : existing.type;
+      setMode(was);
       // a lead or an early draft may not have the ask or traction yet: start them blank so every field can be filled
-      const fill = blank(event.id, existing.type, email, phone, dr.clock);
+      const fill = blank(event.id, was, email, phone, dr.clock);
       setApp({ ...existing, ask: existing.ask ?? fill.ask, traction: existing.traction ?? fill.traction, mandate: existing.mandate ?? fill.mandate, contact: { ...existing.contact, email: existing.contact.email || email, phone: existing.contact.phone || phone } });
       return;
     }
-    const a = blank(event.id, type, email, phone, dr.clock);
+    const a = blank(event.id, mode, email, phone, dr.clock);
     if (a.type === "seeker") {
       const sector = search.get("sector");
       const country = search.get("country");
@@ -137,7 +144,7 @@ export function Apply({ slug }: { slug: string }) {
 
       <main className="wrap wrap--narrow py-10 space-y-5">
         <div>
-          <h1 className="h1">{type === "seeker" ? "Apply to raise capital" : "Apply as a finance provider"}</h1>
+          <h1 className="h1">{mode === "seeker" ? "Apply to raise capital" : mode === "challenge" ? "Bring a challenge to the Deal Room" : "Apply as an investor, buyer or partner"}</h1>
           <p className="mt-1 text-slate text-[15px]">
             {closed ? "Applications are closed." : `Open until ${fmtStamp(cfg.rules.appClose, false)}. About 20 minutes; it saves as you type.`}
             {linked?.status === "Invited" && " You were invited by the Deal Room team; your details are filled in."}
@@ -157,11 +164,14 @@ export function Apply({ slug }: { slug: string }) {
           <Card title="Sign in with a one-time code">
             {!linked && (
               <div className="dr-toggle mb-4" role="tablist">
-                <button role="tab" aria-selected={type === "seeker"} onClick={() => setType("seeker")}>
+                <button role="tab" aria-selected={mode === "seeker"} onClick={() => setMode("seeker")}>
                   Raising capital
                 </button>
-                <button role="tab" aria-selected={type === "provider"} onClick={() => setType("provider")}>
-                  Providing finance
+                <button role="tab" aria-selected={mode === "provider"} onClick={() => setMode("provider")}>
+                  Investing, buying or partnering
+                </button>
+                <button role="tab" aria-selected={mode === "challenge"} onClick={() => setMode("challenge")}>
+                  Bringing a challenge
                 </button>
               </div>
             )}
@@ -203,14 +213,24 @@ export function Apply({ slug }: { slug: string }) {
                   <input className="input" value={app.org.name} onChange={(e) => up({ org: { ...app.org, name: e.target.value } })} />
                 </F>
                 {type === "seeker" ? (
-                  <F label="Registration number">
-                    <input className="input" value={app.org.regNo} onChange={(e) => up({ org: { ...app.org, regNo: e.target.value } })} />
-                  </F>
+                  <>
+                    <F label="Registration number">
+                      <input className="input" value={app.org.regNo} onChange={(e) => up({ org: { ...app.org, regNo: e.target.value } })} />
+                    </F>
+                    <F label="Kind of organisation">
+                      <select className="input" value={app.ownerKind ?? ""} onChange={(e) => up({ ownerKind: (e.target.value || undefined) as OwnerKind | undefined })}>
+                        <option value="">Choose</option>
+                        {OWNER_KINDS.map((k) => (
+                          <option key={k}>{k}</option>
+                        ))}
+                      </select>
+                    </F>
+                  </>
                 ) : (
-                  <F label="Type of provider">
+                  <F label={mode === "challenge" ? "Kind of organisation" : "Type of provider"}>
                     <select className="input" value={app.providerKind ?? ""} onChange={(e) => up({ providerKind: (e.target.value || undefined) as ProviderKind | undefined })}>
                       <option value="">Choose</option>
-                      {cfg.providerKinds.map((k) => (
+                      {(mode === "challenge" ? CHALLENGE_KINDS : cfg.providerKinds).map((k) => (
                         <option key={k}>{k}</option>
                       ))}
                     </select>
@@ -262,7 +282,7 @@ export function Apply({ slug }: { slug: string }) {
                       <input className="input" type="number" min={0} value={app.ask.amount || ""} onChange={(e) => up({ ask: { ...app.ask!, amount: Number(e.target.value) } })} />
                     </div>
                   </F>
-                  <F label="Instrument">
+                  <F label="Transaction pathway">
                     <select className="input" value={app.ask.instrument} onChange={(e) => up({ ask: { ...app.ask!, instrument: e.target.value as Instrument } })}>
                       {INSTRUMENTS.map((x) => (
                         <option key={x}>{x}</option>
@@ -297,6 +317,8 @@ export function Apply({ slug }: { slug: string }) {
               </Card>
             )}
 
+            {app.challenge && <ChallengeFields c={app.challenge} onChange={(challenge) => up({ challenge })} />}
+
             {type === "provider" && app.mandate && <MandateFields app={app} sectors={cfg.sectors} countries={cfg.countries} onChange={(mandate) => up({ mandate })} />}
 
             <Card title="The decision-maker">
@@ -324,7 +346,7 @@ export function Apply({ slug }: { slug: string }) {
             <Card title="Mission and how you heard of us">
               <div className="grid gap-3 sm:grid-cols-2">
                 <F label="Mission">
-                  <select className="input" value={app.mission} onChange={(e) => up({ mission: e.target.value })}>
+                  <select className="input" value={app.mission} onChange={(e) => up({ mission: e.target.value, track: undefined })}>
                     <option value="">Choose</option>
                     {cfg.missions.map((m) => (
                       <option key={m.id} value={m.id}>
@@ -333,6 +355,20 @@ export function Apply({ slug }: { slug: string }) {
                     ))}
                   </select>
                 </F>
+                {type === "seeker" && (
+                  <F label="Strategic track">
+                    <select className="input" value={app.track ?? ""} disabled={!app.mission} onChange={(e) => up({ track: e.target.value || undefined })}>
+                      <option value="">{app.mission ? "Choose" : "Choose a mission first"}</option>
+                      {cfg.tracks
+                        .filter((t) => t.missionId === app.mission)
+                        .map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.code} {t.name}
+                          </option>
+                        ))}
+                    </select>
+                  </F>
+                )}
                 <F label="How you heard of the Deal Room">
                   <select className="input" value={app.source} onChange={(e) => up({ source: e.target.value })}>
                     <option value="">Choose</option>
@@ -379,9 +415,11 @@ export function Apply({ slug }: { slug: string }) {
               )}
               {gaps.advisory.length > 0 && <p className="mb-3 text-[13px] text-slate">Worth adding, not required: {gaps.advisory.join(", ")}.</p>}
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <span className="text-[13px] text-slate">{type === "provider" ? "After you submit, you upload KYC documents and sign the NDA from your status page." : "You get a reference number and a status page at once."}</span>
+                <span className="text-[13px] text-slate">
+                  {mode === "challenge" ? "After you submit, you upload registration documents and sign the NDA from your status page. Once verified, the team matches your challenge with businesses that can solve it." : type === "provider" ? "After you submit, you upload KYC documents and sign the NDA from your status page." : "You get a reference number and a status page at once."}
+                </span>
                 <button className="btn btn-primary btn-cta" onClick={submit}>
-                  Submit the application
+                  {mode === "challenge" ? "Submit the challenge" : "Submit the application"}
                 </button>
               </div>
             </div>
@@ -423,12 +461,58 @@ function Chips<T extends string>({ all, value, onChange }: { all: readonly T[]; 
   );
 }
 
+/** The problem a public institution or corporate buyer brings, in the paper's challenge-intake terms. */
+export function ChallengeFields({ c, onChange }: { c: DrChallenge; onChange: (c: DrChallenge) => void }) {
+  const set = (k: keyof DrChallenge) => (e: { target: { value: string } }) => onChange({ ...c, [k]: e.target.value });
+  return (
+    <Card title="Your challenge">
+      <p className="-mt-1 mb-3 text-[13px] text-slate">Describe the problem, not a solution. Businesses see the title and problem once you are verified; the rest is shared with those you agree to meet.</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <F label="Challenge title" span>
+          <input className="input" value={c.title} placeholder="Faster, cheaper identity checks at county service centres" onChange={set("title")} />
+        </F>
+        <F label="The problem" span>
+          <textarea className="input min-h-20" value={c.problem} onChange={set("problem")} />
+        </F>
+        <F label="Who has it" help="The users or citizens affected, and how many">
+          <input className="input" value={c.users} onChange={set("users")} />
+        </F>
+        <F label="What success looks like" help="A measurable outcome">
+          <input className="input" value={c.outcome} onChange={set("outcome")} />
+        </F>
+        <F label="Constraints" help="Optional: data rules, systems to integrate, languages, regulation" span>
+          <input className="input" value={c.constraints} onChange={set("constraints")} />
+        </F>
+        <F label="Procurement route">
+          <select className="input" value={c.route} onChange={(e) => onChange({ ...c, route: e.target.value as ChallengeRoute | "" })}>
+            <option value="">Choose</option>
+            {CHALLENGE_ROUTES.map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+          </select>
+        </F>
+        <F label="Budget range" help="Optional, for example USD 200k to 500k">
+          <input className="input" value={c.budget} onChange={set("budget")} />
+        </F>
+        <F label="Timeline" help="Optional, for example pilot from June 2027">
+          <input className="input" value={c.timeline} onChange={set("timeline")} />
+        </F>
+        <F label="How the decision is made" help="Who signs off, and the steps to a contract">
+          <input className="input" value={c.decisionProcess} onChange={set("decisionProcess")} />
+        </F>
+      </div>
+    </Card>
+  );
+}
+
 export function MandateFields({ app, sectors, countries, onChange }: { app: DrApplication; sectors: string[]; countries: string[]; onChange: (m: NonNullable<DrApplication["mandate"]>) => void }) {
   const m = app.mandate!;
+  const ch = !!app.challenge;
   // typed as free text and split on leaving the field, so a comma can be typed
   const [excl, setExcl] = useState(m.exclusions.join(", "));
   return (
-    <Card title="Your mandate">
+    <Card title={ch ? "Who could solve it" : "Your mandate"}>
+      {ch && <p className="-mt-1 mb-3 text-[13px] text-slate">Matching uses these: the sectors, countries and stages of the businesses you want to meet, the pathways open to them and the contract size.</p>}
       <div className="grid gap-4">
         <F label="Sectors">
           <Chips all={sectors} value={m.sectors} onChange={(sectors) => onChange({ ...m, sectors })} />
@@ -439,7 +523,7 @@ export function MandateFields({ app, sectors, countries, onChange }: { app: DrAp
         <F label="Stages">
           <Chips all={STAGES} value={m.stages} onChange={(stages) => onChange({ ...m, stages })} />
         </F>
-        <F label="Instruments">
+        <F label="Transaction pathways">
           <Chips all={INSTRUMENTS} value={m.instruments} onChange={(instruments) => onChange({ ...m, instruments })} />
         </F>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -449,10 +533,10 @@ export function MandateFields({ app, sectors, countries, onChange }: { app: DrAp
               <option>KES</option>
             </select>
           </F>
-          <F label="Smallest ticket">
+          <F label={ch ? "Smallest contract or pilot" : "Smallest ticket"}>
             <input className="input" type="number" min={0} value={m.ticketMin || ""} onChange={(e) => onChange({ ...m, ticketMin: Number(e.target.value) })} />
           </F>
-          <F label="Largest ticket">
+          <F label={ch ? "Largest contract" : "Largest ticket"}>
             <input className="input" type="number" min={0} value={m.ticketMax || ""} onChange={(e) => onChange({ ...m, ticketMax: Number(e.target.value) })} />
           </F>
         </div>
@@ -460,9 +544,11 @@ export function MandateFields({ app, sectors, countries, onChange }: { app: DrAp
           <F label="Exclusions" help="Comma-separated, for example coal, tobacco. Optional but checked in matching.">
             <input className="input" value={excl} onChange={(e) => setExcl(e.target.value)} onBlur={() => onChange({ ...m, exclusions: excl.split(",").map((x) => x.trim()).filter(Boolean) })} />
           </F>
-          <F label="Typical decision timeline" help="Optional">
-            <input className="input" value={m.timeline} placeholder="2 to 3 months" onChange={(e) => onChange({ ...m, timeline: e.target.value })} />
-          </F>
+          {!ch && (
+            <F label="Typical decision timeline" help="Optional">
+              <input className="input" value={m.timeline} placeholder="2 to 3 months" onChange={(e) => onChange({ ...m, timeline: e.target.value })} />
+            </F>
+          )}
         </div>
       </div>
     </Card>

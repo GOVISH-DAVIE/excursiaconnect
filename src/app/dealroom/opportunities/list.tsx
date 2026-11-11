@@ -44,7 +44,7 @@ function OpportunitiesBody() {
   const [owner, setOwner] = useState(q.get("owner") ?? "");
   const [flag, setFlag] = useState(q.get("flag") ?? "");
   if (!cfg) return null;
-  if (!me || (me.role !== "Lead" && me.role !== "Reviewer")) return <Refusal title="Opportunities are for their owners and the lead">Operations works the summit days; after the summit each opportunity has an owner from the reviewing team.</Refusal>;
+  if (!me || (me.role !== "Lead" && me.role !== "Reviewer" && me.role !== "Coordinator")) return <Refusal title="Opportunities are for their owners and the lead">Operations works the summit days; after the summit each opportunity has an owner from the reviewing team.</Refusal>;
   // a reviewer sees the opportunities they own; the lead sees all (PRD Reporting req. 5)
   const mine = dr.opportunities.filter((o) => o.eventId === cfg.eventId && (lead || o.owner === me.id));
   const open = mine.filter(oppOpen);

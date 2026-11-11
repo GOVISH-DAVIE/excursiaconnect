@@ -15,7 +15,9 @@ export function DealRoomShell({ children }: { children: ReactNode }) {
     { href: "/dealroom/matching", label: "Matching", show: drCan(me, "match") },
     { href: "/dealroom/meetings", label: "Meetings", show: drCan(me, "schedule") },
     { href: "/dealroom/live", label: "Live board", show: drCan(me, "liveboard") || drCan(me, "outcome") },
-    { href: "/dealroom/opportunities", label: "Opportunities", show: me?.role === "Lead" || me?.role === "Reviewer" },
+    { href: "/dealroom/programme", label: "Programme", show: !!me },
+    { href: "/dealroom/pipeline", label: "Pipeline", show: !!me },
+    { href: "/dealroom/opportunities", label: "Opportunities", show: me?.role === "Lead" || me?.role === "Reviewer" || me?.role === "Coordinator" },
     { href: "/dealroom/reports", label: "Reports", show: true },
     { href: "/dealroom/notifications", label: "Notifications", show: true },
     { href: "/dealroom/settings", label: "Settings and rules", show: true },
@@ -24,8 +26,8 @@ export function DealRoomShell({ children }: { children: ReactNode }) {
   const steps = [
     { label: "+25 min", to: addMinutes(dr.clock, 25) },
     { label: "19:00", to: `${today} 19:00` },
-    { label: "15 Jun", to: "2027-06-15 10:00" },
-    { label: "19 Sep", to: "2027-09-19 09:00" },
+    { label: "18 May", to: "2027-05-18 10:00" },
+    { label: "22 Aug", to: "2027-08-22 09:00" },
   ].filter((s) => s.to > dr.clock);
 
   const context = (
@@ -37,8 +39,7 @@ export function DealRoomShell({ children }: { children: ReactNode }) {
             .filter((s) => s.active)
             .map((s) => (
               <option key={s.id} value={s.id} className="text-ink">
-                {s.name}, {s.role}
-                {s.role === "Reviewer" && s.canDecide ? " (decides)" : ""}
+                {`${s.name}, ${s.role}${s.org ? `, ${s.org}` : ""}${s.role === "Reviewer" && s.canDecide ? " (decides)" : ""}`}
               </option>
             ))}
         </select>

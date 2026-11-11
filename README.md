@@ -45,19 +45,19 @@ Scan verdict order (as in the PRD): valid badge → entitled here, now → anti-
 
 ## Deal Room module
 
-An add-on switched on per event that qualifies capital seekers and finance providers, matches them only when both are ready and have accepted an introduction, schedules timed meetings in Deal Room rooms, and tracks each opportunity to evidenced money for six months. It runs on a seeded Bouer event, Connected Africa 3.0 (15 to 18 March 2027). The product documents are [01-Deal-Room-PRD.md](docs/01-Deal-Room-PRD.md) to [04-Deal-Room-Research.md](docs/04-Deal-Room-Research.md); what is covered is in [docs/deal-room-coverage.md](docs/deal-room-coverage.md) and the flow-by-flow test in [docs/deal-room-use-case-test.md](docs/deal-room-use-case-test.md).
+An add-on switched on per event that qualifies opportunity owners (businesses raising capital, and public institutions or corporate buyers bringing a challenge) and the investors, buyers and partners who can meet them, matches them only when both are ready and have accepted an introduction, schedules timed meetings and programmed sessions, and tracks each opportunity to evidenced money for six months. It runs on a seeded Bouer event, Connected Africa 3.0 (15 to 18 February 2027), in the terms of the decision paper *Deal Room Vis a Vis*: three missions, six strategic tracks, 19 sectors, eight transaction pathways, Qualified / Conditional / Referred / Declined, the paper's seven meeting outcomes and five commitment tiers. How the prototype stands against that paper is in [docs/deal-room-vis-a-vis-gaps.md](docs/deal-room-vis-a-vis-gaps.md). The product documents are [01-Deal-Room-PRD.md](docs/01-Deal-Room-PRD.md) to [04-Deal-Room-Research.md](docs/04-Deal-Room-Research.md); what is covered is in [docs/deal-room-coverage.md](docs/deal-room-coverage.md) and the flow-by-flow test in [docs/deal-room-use-case-test.md](docs/deal-room-use-case-test.md).
 
 | Route | Persona | What it shows |
 | --- | --- | --- |
-| `/e/connected-africa-3/deal-room` | Public | Who it is for, the eligibility self-check, how it works, missions, questions |
-| `/e/connected-africa-3/deal-room/apply` | Applicant | One-time code (prototype: `482913`), seeker or provider form, autosave and resume link, gaps named on submit |
-| `/dr/[appId]` | Participant | Status, requests, decision, profile and teaser, verification and NDA, mandate; then directory, introductions with consent, meetings, deals and the access log. Try `dr_cs54` (seeker), `dr_fp19` (investor), `dr_cs24`, `dr_fp10` |
-| `/dealroom` | Deal Room team | Dashboard against the targets, applications and review, matching, meetings, live board, opportunities, reports, notifications, settings. Switch who you are in the rail |
+| `/e/connected-africa-3/deal-room` | Public | Who it is for, the participation fee, bringing a challenge and the open challenges, the eligibility self-check, how it works, missions and tracks, questions |
+| `/e/connected-africa-3/deal-room/apply` | Applicant | One-time code (prototype: `482913`); raising capital, providing finance, or bringing a challenge (`?type=challenge`); autosave and resume link, gaps named on submit |
+| `/dr/[appId]` | Participant | Status, requests, decision, the USD 250 fee by M-Pesa or card once approved, profile and teaser, verification and NDA, challenge, mandate; then directory, introductions with consent, meetings, the programme of sessions to accept or decline, deals and the access log. Try `dr_cs54` (seeker), `dr_cs50` (hosts a session), `dr_cs41` (approved, fee unpaid), `dr_fp29` (investor), `dr_ch01` (a ministry's challenge), `dr_cs24`, `dr_fp10` |
+| `/dealroom` | Deal Room team | Dashboard against the targets, applications and review, matching, meetings, live board, programme (sessions in the paper's 11 formats, each day's emphasis and close-out), pipeline (the paper's 13 statuses with date, owner and evidence), opportunities, reports, notifications, settings. Switch who you are in the rail: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight (read-only) |
 | `/scan?event=ev_ca3&post=drdesk` | Desk staff | Deal Room desk and room doors, judged against each participant's meetings |
 | `/print/deal-room` | Operations | Printable schedules per day, room or participant, and the briefs |
 | `/admin/deal-room` | Algotech | Staff accounts, support access under a grant, the live window, incidents, the archive date |
 
-**The demo clock.** The rail's clock starts at summit day 2, 10:40, and only moves forward: +25 minutes, 19:00 (daily report), 15 June (the seeded opportunities have moved on; weekly digests and monthly reports sent) and 19 September (archived, read-only). Expiries, lapses, late flags and overdue actions are worked out from it, never stored. Reset the demo data from the home page to start again.
+**The demo clock.** The rail's clock starts at summit day 2 (Tue 16 February 2027), 10:40, and only moves forward: +25 minutes, 19:00 (daily report), 18 May (the seeded opportunities have moved on; weekly digests and monthly reports sent) and 22 August (archived, read-only). A fee reminder goes three days after the payment link. Expiries, lapses, late flags and overdue actions are worked out from it, never stored. Reset the demo data from the home page to start again.
 
 **Where the rules live.** Every rule (clashes, caps, both-accept, consent, roles, second decider, read-only archive) is enforced in `src/lib/dealroom/` reducers; screens call the same functions in `logic.ts` to explain a refusal before it happens. Settings, Checks runs three 50-request booking bursts and the invariant check.
 
@@ -82,7 +82,7 @@ Halls, floor plans and booths; exhibitor applications and approval; booth holds,
 src/lib/types.ts     domain types (Event, Tier, Delegate, Order, Zone, Room, Session, Message)
 src/lib/seed.ts      deterministic mock data: 3 events, 5 tiers, 5 zones, 15 sessions, 212 delegates, orders
 src/lib/store.tsx    client store (reducer + localStorage, versioned) and domain helpers: scanVerdict, makeOrder, money
-src/lib/dealroom/    Deal Room types, rules (logic.ts), reducers (reducer, meetings, conversion) and seed
+src/lib/dealroom/    Deal Room types, rules (logic.ts), reducers (reducer, meetings, sessions, conversion) and seed
 src/lib/expo/        Exhibition types, rules (logic, onsite, ops), reducers (reducer, onsite-reducer) and seed
 src/lib/clock.ts     which module clock an event runs on (Deal Room, Exhibition, or the wall clock)
 src/lib/time.ts      minute and date arithmetic; csv.ts for exports

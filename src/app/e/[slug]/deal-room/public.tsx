@@ -6,6 +6,7 @@ import { Wordmark, fmtDate } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { initials, numberWord, readableOn } from "@/lib/brand";
 import type { Instrument, ProviderKind, Stage } from "@/lib/dealroom/types";
+import { PATHWAYS, feeLabel, isChallenge } from "@/lib/dealroom/logic";
 
 /*
   The public Deal Room page (PRD Module req. 9, CS-1). Built on the event site's contract: the
@@ -13,7 +14,7 @@ import type { Instrument, ProviderKind, Stage } from "@/lib/dealroom/types";
   Everything on it comes from the Deal Room configuration; it is live only when the event is.
 */
 
-const INSTRUMENTS: Instrument[] = ["Equity", "Debt", "Mezzanine", "Grant", "Trade finance", "Other"];
+const INSTRUMENTS: Instrument[] = PATHWAYS;
 const STAGES: Stage[] = ["Bankable project", "Early revenue", "Growth", "Expansion"];
 
 export function DealRoomPublic({ slug }: { slug: string }) {
@@ -29,7 +30,9 @@ export function DealRoomPublic({ slug }: { slug: string }) {
   const live = event.state === "Live";
   const r = cfg.rules;
   const open = live && state.dealRoom.clock.slice(0, 10) >= r.appOpen && state.dealRoom.clock.slice(0, 10) <= r.appClose;
-  const apply = (type: "seeker" | "provider") => `/e/${slug}/deal-room/apply?type=${type}`;
+  const apply = (type: "seeker" | "provider" | "challenge") => `/e/${slug}/deal-room/apply?type=${type}`;
+  // verified challenges are published: their title and owner, so businesses that could solve one apply for it
+  const challenges = state.dealRoom.apps.filter((a) => a.eventId === event.id && isChallenge(a) && a.verification?.state === "Verified");
   const dates = `${fmtDate(event.startDate, { day: "numeric" })} to ${fmtDate(event.endDate, { day: "numeric", month: "long", year: "numeric" })}`;
 
   return (
@@ -66,9 +69,9 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                   <span>{dates}</span>
                   <span>{event.city}</span>
                 </div>
-                <h1 id="dr-h">Meet decided investors, by introduction</h1>
+                <h1 id="dr-h">Meet the right counterparty, by introduction</h1>
                 <p className="hero__lead">
-                  The {event.name} Deal Room qualifies businesses raising capital and the investors, banks and buyers who fund them, then books {r.meetingMin}-minute meetings at the summit between pairs that both said yes.
+                  The {event.name} Deal Room qualifies businesses, projects and institutions with a clear ask, and the investors, buyers and partners who can act on it. Pairs that both say yes meet at the summit in a prepared {r.meetingMin}-minute meeting: for investment, procurement, partnership or market access.
                 </p>
                 <div className="btn-row">
                   {open ? (
@@ -77,7 +80,10 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                         Apply to raise capital
                       </Link>
                       <Link href={apply("provider")} className="btn btn-secondary">
-                        Apply as a finance provider
+                        Apply as an investor, buyer or partner
+                      </Link>
+                      <Link href="#challenges" className="link self-center">
+                        Bring a challenge
                       </Link>
                     </>
                   ) : (
@@ -97,7 +103,9 @@ export function DealRoomPublic({ slug }: { slug: string }) {
               </div>
               <div>
                 <dt>Missions</dt>
-                <dd>{numberWord(cfg.missions.length)[0].toUpperCase() + numberWord(cfg.missions.length).slice(1)} investment missions</dd>
+                <dd>
+                  {numberWord(cfg.missions.length)[0].toUpperCase() + numberWord(cfg.missions.length).slice(1)} missions, {numberWord(cfg.tracks.length)} tracks
+                </dd>
               </div>
               <div>
                 <dt>Meetings</dt>
@@ -117,7 +125,7 @@ export function DealRoomPublic({ slug }: { slug: string }) {
           <div className="wrap">
             <div className="section-head">
               <h2 id="who-h">Who the Deal Room is for</h2>
-              <p>Both sides are checked before anyone meets. A business is scored against written criteria; a finance provider is verified.</p>
+              <p>Both sides are checked before anyone meets. A business is scored against written criteria; an investor, buyer or partner is verified.</p>
             </div>
             <div className="grid">
               <div className="span-6">
@@ -131,16 +139,23 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                   <li>
                     <span className="rows__name">A named decision-maker who can attend</span>
                   </li>
+                  {cfg.seekerFee.amount > 0 && (
+                    <li>
+                      <span className="rows__name">
+                        Once approved, a {feeLabel(cfg.seekerFee)} participation fee by M-Pesa or card; matching and your badge follow payment
+                      </span>
+                    </li>
+                  )}
                 </ul>
               </div>
               <div className="span-6">
-                <h3 className="t-day">Investors and other finance providers</h3>
+                <h3 className="t-day">Investors, buyers and partners</h3>
                 <ul className="rows">
                   <li>
                     <span className="rows__name">{cfg.providerKinds.join(", ")}</span>
                   </li>
                   <li>
-                    <span className="rows__name">A written mandate: sectors, countries, stages, ticket range, instruments, exclusions</span>
+                    <span className="rows__name">A written mandate: sectors, countries, stages, ticket or contract range, transaction pathways, exclusions</span>
                   </li>
                   <li>
                     <span className="rows__name">Know-your-customer documents and a sanctions screening</span>
@@ -152,6 +167,64 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                     <span className="rows__name">A named decision-maker for meetings</span>
                   </li>
                 </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="section" id="challenges" aria-labelledby="ch-h">
+          <div className="wrap">
+            <div className="section-head">
+              <h2 id="ch-h">Bring a challenge</h2>
+              <p>
+                Public institutions and corporate buyers bring a problem, not a tender: the users who have it, the outcome they need, the budget and the route to a contract. Once verified, the team
+                matches it with businesses that can solve it, and the meetings happen in the Deal Room.
+              </p>
+            </div>
+            <div className="grid">
+              <div className="span-6">
+                <h3 className="t-day">What you describe</h3>
+                <ul className="rows">
+                  {["The problem and who has it", "What success looks like, measurably", "Constraints: data, systems, regulation", "Budget range, timeline and procurement route", "Who decides, and the steps to a contract"].map((x) => (
+                    <li key={x}>
+                      <span className="rows__name">{x}</span>
+                    </li>
+                  ))}
+                </ul>
+                {open && (
+                  <Link href={apply("challenge")} className="btn btn-secondary mt-4">
+                    Submit a challenge
+                  </Link>
+                )}
+              </div>
+              <div className="span-6">
+                <h3 className="t-day">Open challenges{challenges.length ? `, ${challenges.length}` : ""}</h3>
+                {challenges.length ? (
+                  <ul className="rows">
+                    {challenges.map((a) => (
+                      <li key={a.id}>
+                        <span className="rows__name">
+                          {a.challenge!.title}
+                          <span className="block text-[13px] text-slate">
+                            {a.providerKind === "Corporate buyer" ? "A corporate buyer" : a.org.name} · {a.challenge!.route}
+                            {a.challenge!.budget ? ` · ${a.challenge!.budget}` : ""}
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-slate">None published yet.</p>
+                )}
+                {open && challenges.length > 0 && (
+                  <p className="mt-3 text-[14px] text-slate">
+                    Can your business solve one?{" "}
+                    <Link className="link" href={apply("seeker")}>
+                      Apply to the Deal Room
+                    </Link>{" "}
+                    and name it in your use of funds.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -184,8 +257,8 @@ export function DealRoomPublic({ slug }: { slug: string }) {
         <section className="section" id="missions" aria-labelledby="missions-h">
           <div className="wrap">
             <div className="section-head">
-              <h2 id="missions-h">The missions</h2>
-              <p>Every application belongs to one mission.</p>
+              <h2 id="missions-h">The missions and strategic tracks</h2>
+              <p>Every application belongs to one mission and one of its tracks.</p>
             </div>
             <ul className="rows rows--spec">
               {cfg.missions.map((m) => (
@@ -193,6 +266,13 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                   <span className="rows__name">{m.code}</span>
                   <span className="rows__value">
                     <b className="font-medium">{m.name}</b>. {m.description}
+                    <span className="block mt-1" style={{ color: "var(--muted)" }}>
+                      Tracks:{" "}
+                      {cfg.tracks
+                        .filter((t) => t.missionId === m.id)
+                        .map((t) => t.name)
+                        .join("; ")}
+                    </span>
                   </span>
                 </li>
               ))}
@@ -221,6 +301,12 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                   <h3>How many meetings can I have?</h3>
                   <p>Businesses up to {r.seekerCap} across the summit; providers set their own daily cap at onboarding. Meetings are {r.meetingMin} minutes with {r.bufferMin} minutes between them.</p>
                 </div>
+                {cfg.seekerFee.amount > 0 && (
+                  <div className="faq__item">
+                    <h3>Is there a fee?</h3>
+                    <p>Applying is free. A business that is approved pays a {feeLabel(cfg.seekerFee)} participation fee, by M-Pesa or card, from the link sent with the decision. Investors and other providers pay nothing.</p>
+                  </div>
+                )}
                 <div className="faq__item">
                   <h3>What happens after the summit?</h3>
                   <p>Every meeting with a next step becomes an opportunity with an owner on the Deal Room team, who follows it up monthly until {fmtDate(r.conversionEnd, { day: "numeric", month: "long", year: "numeric" })}.</p>
@@ -253,15 +339,15 @@ function EligibilityCheck({ slug, sectors, countries, kinds, open }: { slug: str
   const [a, setA] = useState({ sector: "", country: "", stage: "", instrument: "", registered: "", kind: "", mandate: "" });
   const set = (k: keyof typeof a) => (e: React.ChangeEvent<HTMLSelectElement>) => setA({ ...a, [k]: e.target.value });
   const seekerRows = [
-    { q: "Sector in scope for a mission", ok: !a.sector ? undefined : sectors.slice(0, 9).includes(a.sector), why: "Each mission covers named sectors; others are out of scope this year." },
+    { q: "Sector in scope for a mission", ok: !a.sector ? undefined : sectors.includes(a.sector), why: "The Deal Room classifies every opportunity in the 19-sector taxonomy; others are out of scope." },
     { q: "Active in the mission geography", ok: !a.country ? undefined : a.country !== "Elsewhere", why: "The Deal Room covers businesses operating in Africa." },
     { q: "Post-revenue, or a bankable project", ok: !a.stage ? undefined : a.stage !== "Idea", why: "Investors meet businesses with customers, or projects with contracts and studies." },
-    { q: "Seeking a named instrument", ok: !a.instrument ? undefined : a.instrument !== "Not sure", why: "You will be matched on the instrument you seek." },
+    { q: "Asking for a named transaction pathway", ok: !a.instrument ? undefined : a.instrument !== "Not sure", why: "You will be matched on the pathway you ask for: equity, debt, a contract, a pilot, a partnership or market access." },
     { q: "Legally registered", ok: !a.registered ? undefined : a.registered === "Yes", why: "A registration certificate is required with the application." },
   ];
   const providerRows = [
-    { q: "A recognised type of finance provider", ok: !a.kind ? undefined : a.kind !== "Other", why: "Investors, funds, DFIs, banks, buyers, distributors and project sponsors." },
-    { q: "A written mandate", ok: !a.mandate ? undefined : a.mandate === "Yes", why: "You will describe sectors, countries, stages, ticket range, instruments and exclusions." },
+    { q: "A recognised type of finance provider", ok: !a.kind ? undefined : a.kind !== "Other", why: "Angel, venture and private-equity investors, funds, DFIs, banks, corporate buyers, distributors, public institutions and ecosystem partners." },
+    { q: "A written mandate", ok: !a.mandate ? undefined : a.mandate === "Yes", why: "You will describe sectors, countries, stages, ticket or contract range, transaction pathways and exclusions." },
   ];
   const rows = type === "seeker" ? seekerRows : providerRows;
   const answered = rows.every((r) => r.ok !== undefined);

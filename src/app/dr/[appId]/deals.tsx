@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
-import { askBand, canSee, compact, confirmBy, consentGranted, ics, introExpiresAt, lapsed, matchStage, matchable } from "@/lib/dealroom/logic";
+import { PATHWAYS, askBand, canSee, compact, confirmBy, consentGranted, ics, introExpiresAt, lapsed, matchStage, matchable } from "@/lib/dealroom/logic";
 import type { DrApplication, DrDocument, DrMatch, DrMeeting } from "@/lib/dealroom/types";
 import { downloadText } from "@/lib/csv";
 import { fmtStamp } from "@/lib/time";
@@ -62,9 +62,9 @@ export function Directory({ app }: { app: DrApplication }) {
               <option key={s}>{s}</option>
             ))}
           </select>
-          <select className="input h-9 text-[13px]" aria-label="Instrument" value={f.instrument} onChange={(e) => setF({ ...f, instrument: e.target.value })}>
+          <select className="input h-9 text-[13px]" aria-label="Transaction pathway" value={f.instrument} onChange={(e) => setF({ ...f, instrument: e.target.value })}>
             <option value="">Any instrument</option>
-            {["Equity", "Debt", "Mezzanine", "Grant", "Trade finance", "Other"].map((s) => (
+            {PATHWAYS.map((s) => (
               <option key={s}>{s}</option>
             ))}
           </select>

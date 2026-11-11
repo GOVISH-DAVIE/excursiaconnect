@@ -3,14 +3,16 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Empty, PageHeader, Section } from "@/components/ui";
-import { CLOSE_REASONS, OPEN_STAGES, OUTCOME_NEEDS, STAGE_EVIDENCE, canSeeInternal, compact, drCan, oppOpen, oppOverdue, oppParties, oppStalled, staffName } from "@/lib/dealroom/logic";
+import { CLOSE_REASONS, COMMITMENT_TIERS, OPEN_STAGES, OUTCOME_NEEDS, PATHWAYS, STAGE_EVIDENCE, canSeeInternal, compact, drCan, oppOpen, oppOverdue, oppParties, oppStalled, staffName } from "@/lib/dealroom/logic";
 import type { CloseReason, Currency, DrDocument, DrOpportunity, Instrument, OppStage, OutcomeKind } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
 import { DocLine, Labeled, Refusal, UploadDoc, When, useDr } from "../../bits";
 import { OppStagePill, oppTitle } from "../parts";
 
 const STAGES: OppStage[] = ["Follow-up", "Diligence", "Negotiation", "Closed – won", "Closed – lost"];
-const INSTRUMENTS: Instrument[] = ["Equity", "Debt", "Mezzanine", "Grant", "Trade finance", "Other"];
+const INSTRUMENTS: Instrument[] = PATHWAYS;
+// the tiers that rest on a signed document and carry an amount
+const SIGNED_TIERS: OutcomeKind[] = ["Signed commitment", "Approved, not disbursed", "Deployed"];
 
 /** One opportunity: its stage with the evidence for each, the outcomes recorded separately, updates and requests (PRD Conversion). */
 export function OpportunityDetail({ id }: { id: string }) {
@@ -114,8 +116,8 @@ function Stages({ o, works }: { o: DrOpportunity; works: boolean }) {
   const options = [...OPEN_STAGES, "Closed – won" as OppStage].filter((s) => s !== o.stage);
   const [to, setTo] = useState<OppStage>(options[0]);
   const [evidence, setEvidence] = useState("");
-  const committed = o.outcomes.some((x) => x.kind === "Commitment");
-  const refuse = to === "Closed – won" && !committed ? "Record the signed commitment first: a promise is not enough to call it won." : (to === "Diligence" || to === "Negotiation") && !evidence.trim() ? `Needs ${STAGE_EVIDENCE[to].toLowerCase()}.` : "";
+  const committed = o.outcomes.some((x) => SIGNED_TIERS.includes(x.kind));
+  const refuse = to === "Closed – won" && !committed ? "Record the signed commitment first: an indicative one is not enough to call it won." : (to === "Diligence" || to === "Negotiation") && !evidence.trim() ? `Needs ${STAGE_EVIDENCE[to].toLowerCase()}.` : "";
   return (
     <Section title="Stage">
       <ol className="grid gap-2 sm:grid-cols-5">
@@ -158,14 +160,14 @@ function Stages({ o, works }: { o: DrOpportunity; works: boolean }) {
   );
 }
 
-/** Interest, promise, signed commitment and funds received: separate records, never merged (PRD Conversion). */
+/** The paper's five tiers: expression of interest, indicative, signed, approved but not disbursed, deployed. Kept apart, never merged. */
 function Outcomes({ o, works }: { o: DrOpportunity; works: boolean }) {
   const { dr, dispatch, now } = useDr();
   const { seeker } = oppParties(dr, o);
-  const [kind, setKind] = useState<OutcomeKind>("Promise");
-  const [f, setF] = useState({ amount: "", currency: (seeker?.ask?.currency ?? "USD") as Currency, instrument: (seeker?.ask?.instrument ?? "Debt") as Instrument, date: now.slice(0, 10), evidence: "" });
+  const [kind, setKind] = useState<OutcomeKind>("Indicative commitment");
+  const [f, setF] = useState({ amount: "", currency: (seeker?.ask?.currency ?? "USD") as Currency, instrument: (seeker?.ask?.instrument ?? "Debt and credit") as Instrument, date: now.slice(0, 10), evidence: "" });
   const [doc, setDoc] = useState<DrDocument | null>(null);
-  const money = kind === "Commitment" || kind === "Funds received";
+  const money = SIGNED_TIERS.includes(kind);
   const evidence = doc ? doc.name : f.evidence;
   const missing = !f.date ? "a date" : f.date > now.slice(0, 10) ? "a date that has passed" : money && !(Number(f.amount) > 0) ? "the amount" : !evidence.trim() ? (money ? "the signed document or evidence" : "how it was expressed") : "";
   return (
@@ -194,7 +196,7 @@ function Outcomes({ o, works }: { o: DrOpportunity; works: boolean }) {
           <div className="grid gap-3 sm:grid-cols-3">
             <Labeled label="Outcome">
               <select className="input" value={kind} onChange={(e) => setKind(e.target.value as OutcomeKind)}>
-                {(["Interest", "Promise", "Commitment", "Funds received"] as OutcomeKind[]).map((k) => (
+                {COMMITMENT_TIERS.map((k) => (
                   <option key={k}>{k}</option>
                 ))}
               </select>
@@ -208,8 +210,8 @@ function Outcomes({ o, works }: { o: DrOpportunity; works: boolean }) {
                 <option>KES</option>
               </select>
             </Labeled>
-            {kind === "Commitment" && (
-              <Labeled label="Instrument">
+            {kind === "Signed commitment" && (
+              <Labeled label="Pathway">
                 <select className="input" value={f.instrument} onChange={(e) => setF({ ...f, instrument: e.target.value as Instrument })}>
                   {INSTRUMENTS.map((x) => (
                     <option key={x}>{x}</option>
@@ -230,7 +232,7 @@ function Outcomes({ o, works }: { o: DrOpportunity; works: boolean }) {
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
                   <input className="input flex-1 min-w-48" placeholder={money ? "Or describe it" : "Email, call note, letter"} value={f.evidence} onChange={(e) => setF({ ...f, evidence: e.target.value })} />
-                  {money && <UploadDoc kind={kind === "Commitment" ? "Commitment letter" : "Disbursement evidence"} at={now} label="Attach the document" onDone={setDoc} />}
+                  {money && <UploadDoc kind={kind === "Deployed" ? "Disbursement evidence" : "Commitment letter"} at={now} label="Attach the document" onDone={setDoc} />}
                 </div>
               )}
             </Labeled>
@@ -240,7 +242,7 @@ function Outcomes({ o, works }: { o: DrOpportunity; works: boolean }) {
               className="btn-primary btn-sm"
               disabled={!!missing}
               onClick={() => {
-                dispatch({ type: "dr/oppOutcome", oppId: o.id, outcome: { kind, amount: Number(f.amount) || undefined, currency: Number(f.amount) || money ? f.currency : undefined, instrument: kind === "Commitment" ? f.instrument : undefined, date: f.date, evidence } });
+                dispatch({ type: "dr/oppOutcome", oppId: o.id, outcome: { kind, amount: Number(f.amount) || undefined, currency: Number(f.amount) || money ? f.currency : undefined, instrument: kind === "Signed commitment" ? f.instrument : undefined, date: f.date, evidence } });
                 setF({ ...f, amount: "", evidence: "" });
                 setDoc(null);
               }}

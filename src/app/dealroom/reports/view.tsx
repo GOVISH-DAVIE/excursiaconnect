@@ -9,7 +9,7 @@ import { DR_ZONE, bothAccepted, funnel, ticketBand, compact, conversionValues, d
 import type { DrApplication, DrMeeting, DrOpportunity } from "@/lib/dealroom/types";
 import { downloadCsv, row } from "@/lib/csv";
 import { addMinutes, fmtStamp } from "@/lib/time";
-import { Refusal, useDr } from "../bits";
+import { Refusal, useDr, useOpenable } from "../bits";
 import { ChartCard, HBars, StackedColumns } from "./charts";
 
 const allTabs = ["Overview", "Mobilisation", "Qualification", "Verification", "Matchmaking", "Meetings", "Daily", "Conversion"] as const;
@@ -23,7 +23,8 @@ export default function Reports() {
   const review = drCan(me, "review");
   const ops = drCan(me, "schedule");
   // conversion values are the lead's alone (PRD Reporting req. 5)
-  const tabs = allTabs.filter((t) => (t === "Overview" ? true : t === "Conversion" ? drCan(me, "conversion") : ["Mobilisation", "Qualification", "Verification", "Matchmaking"].includes(t) ? review : ops || me?.role === "Lead"));
+  // Momentum's oversight reads every report; nothing in them opens a file
+  const tabs = allTabs.filter((t) => (t === "Overview" || me?.role === "Oversight" ? true : t === "Conversion" ? drCan(me, "conversion") : ["Mobilisation", "Qualification", "Verification", "Matchmaking"].includes(t) ? review : ops || me?.role === "Lead"));
   const [picked, setTab] = useState<Tab | null>(null);
   const asked = allTabs.find((t) => t === q.get("tab"));
   const tab = picked ?? (asked && tabs.includes(asked) ? asked : tabs[0]);
@@ -33,7 +34,7 @@ export default function Reports() {
 
   return (
     <>
-      <PageHeader title="Reports" kicker="Graphs on the Overview; every bar, segment and count opens the records behind it. Tables break down and download as CSV. What you see depends on your role." />
+      <PageHeader title="Reports" kicker="Graphs on the Overview; every bar, segment and count opens the records behind it, where your role can open them. Tables break down and download as CSV. What you see depends on your role." />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === "Overview" && <Overview />}
       {tab === "Mobilisation" && <Mobilisation apps={apps} />}
@@ -53,6 +54,7 @@ type Col<T> = { h: string; v: (x: T) => ReactNode; csv?: (x: T) => unknown; righ
 const qs = (o: Record<string, string | undefined>) => Object.entries(o).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join("&");
 
 function Table<T>({ title, rows, cols, file }: { title: string; rows: T[]; cols: Col<T>[]; file: string }) {
+  const open = useOpenable();
   return (
     <Section
       title={title}
@@ -78,7 +80,7 @@ function Table<T>({ title, rows, cols, file }: { title: string; rows: T[]; cols:
             <tr key={i} className="hover:bg-paper">
               {cols.map((c) => {
                 const v = c.v(r);
-                const href = c.href && v !== 0 && v !== "–" ? c.href(r) : undefined;
+                const href = c.href && v !== 0 && v !== "–" ? open(c.href(r)) : undefined;
                 return (
                   <td key={c.h} className={c.right ? "td-r" : "td"}>
                     {href ? (
@@ -166,9 +168,9 @@ function Qualification({ apps }: { apps: DrApplication[] }) {
           { h: by === "mission" ? "Mission" : "Reviewer", v: (x) => x.k },
           { h: "In review", v: (x) => x.list.filter((a) => a.status === "Submitted" || a.status === "In review").length, right: true, href: (x) => to(x, { status: "Submitted,In review" }) },
           { h: "Info requested", v: (x) => x.list.filter((a) => a.status === "Information requested").length, right: true, href: (x) => to(x, { status: "Information requested" }) },
-          { h: "Approved", v: (x) => dec(x.list, "Approved"), right: true, href: (x) => to(x, { decision: "Approved" }) },
+          { h: "Qualified", v: (x) => dec(x.list, "Qualified"), right: true, href: (x) => to(x, { decision: "Qualified" }) },
           { h: "Conditional", v: (x) => dec(x.list, "Conditional"), right: true, href: (x) => to(x, { decision: "Conditional" }) },
-          { h: "Waitlisted", v: (x) => dec(x.list, "Waitlisted"), right: true, href: (x) => to(x, { decision: "Waitlisted" }) },
+          { h: "Referred", v: (x) => dec(x.list, "Referred"), right: true, href: (x) => to(x, { decision: "Referred" }) },
           { h: "Declined", v: (x) => dec(x.list, "Declined"), right: true, href: (x) => to(x, { decision: "Declined" }) },
           { h: "Ready", v: (x) => x.list.filter((a) => qualified(a) && a.readiness === "Deal Room Ready").length, right: true, href: (x) => to(x, { flag: "ready" }) },
           { h: "Days to decision, median", v: (x) => medianDays(x.list.filter((a) => a.status === "Decided").map((a) => [a.submittedAt, a.statusAt])) ?? "–", right: true },
@@ -245,7 +247,7 @@ function MeetingsReport() {
     const booked = ms.filter((m) => occupies(m, cfg!, now) || m.status === "Held");
     return { d, proposed: ms.filter((m) => m.status === "Proposed").length, confirmed: ms.filter((m) => ["Confirmed", "In progress"].includes(m.status)).length, held: ms.filter((m) => m.status === "Held").length, cancelled: ms.filter((m) => m.status === "Cancelled").length, changed: ms.filter((m) => m.status === "Change requested" || m.history.some((h) => h.what.startsWith("Moved"))).length, noShow: ms.filter((m) => m.status === "No-show").length, use: Math.round((booked.filter((m) => !m.link).length / (tables * slotsPerDay)) * 100) };
   });
-  const byRoom = state.rooms.filter((r) => r.zoneId === DR_ZONE).map((r) => ({ r, n: list.filter((m) => m.roomId === r.id && m.status !== "Cancelled").length, cap: (cfg!.rooms[r.id]?.tables ?? 0) * slotsPerDay * event.days }));
+  const byRoom = state.rooms.filter((r) => r.zoneId === DR_ZONE && !!cfg!.rooms[r.id]).map((r) => ({ r, n: list.filter((m) => m.roomId === r.id && m.status !== "Cancelled").length, cap: (cfg!.rooms[r.id]?.tables ?? 0) * slotsPerDay * event.days }));
   return (
     <div className="space-y-4">
       <Table
@@ -298,23 +300,23 @@ function Daily({ day }: { day?: string }) {
               ["Scheduled", ms.length, ""],
               ["Held", ms.filter((m) => m.status === "Held").length, "Held"],
               ["No-shows", ms.filter((m) => m.status === "No-show").length, "No-show"],
-              ["Positive", cat("Positive"), "Held"],
-              ["Follow-up needed", cat("Follow-up needed"), "Held"],
-              ["Not a fit", cat("Not a fit"), "Held"],
+              ["Diligence or proposal", cat("Due diligence") + cat("Financing or partnership proposal") + cat("Commitment documented"), "Held"],
+              ["Follow-up or information", cat("Follow-up meeting") + cat("Information requested") + cat("Pilot or procurement"), "Held"],
+              ["No fit", cat("No fit"), "Held"],
             ] as const
           ).map(([k, v, st]) => (
-            <Link key={k} href={`/dealroom/meetings?${qs({ tab: "Schedule", day: d, status: st || undefined })}`} className="group">
+            <Go key={k} href={`/dealroom/meetings?${qs({ tab: "Schedule", day: d, status: st || undefined })}`} className="group">
               <div className="t-stat group-hover:underline underline-offset-4">{v}</div>
               <div className="text-[13px] text-slate">{k}</div>
-            </Link>
+            </Go>
           ))}
         </div>
         {missing.length > 0 && (
           <p className="mt-4 text-[14px] text-bad">
             {missing.length} meeting{missing.length > 1 ? "s" : ""} ended without an outcome: operations fixes them before the report is sent again.{" "}
-            <Link className="link" href="/dealroom/live">
+            <Go className="link" href="/dealroom/live">
               Open the live board
-            </Link>
+            </Go>
           </p>
         )}
       </Section>
@@ -325,13 +327,13 @@ function Daily({ day }: { day?: string }) {
               <tr key={m.id}>
                 <td className="td text-[13px]">
                   {dr.opportunities.find((o) => o.meetingId === m.id) ? (
-                    <Link className="hover:underline" href={`/dealroom/opportunities/${dr.opportunities.find((o) => o.meetingId === m.id)!.id}`}>
+                    <Go className="hover:underline" href={`/dealroom/opportunities/${dr.opportunities.find((o) => o.meetingId === m.id)!.id}`}>
                       {name(m)}
-                    </Link>
+                    </Go>
                   ) : (
-                    <Link className="hover:underline" href={`/dealroom/matches/${m.matchId}`}>
+                    <Go className="hover:underline" href={`/dealroom/matches/${m.matchId}`}>
                       {name(m)}
-                    </Link>
+                    </Go>
                   )}
                 </td>
                 <td className="td text-[13px]">{m.outcome!.nextAction}</td>
@@ -391,9 +393,9 @@ function Conversion() {
           { h: "Won", v: (x) => x.list.filter((o) => o.stage === "Closed – won").length, right: true, href: (x) => to(x, { stage: "Closed – won" }) },
           { h: "Lost", v: (x) => x.list.filter((o) => !!o.closed).length, right: true, href: (x) => to(x, { stage: "Closed – lost" }) },
           { h: "Sought", v: (x) => money(x.list, "sought"), right: true },
-          { h: "Promised", v: (x) => money(x.list, "promised"), right: true, href: (x) => to(x, { has: "Promise" }) },
-          { h: "Committed", v: (x) => money(x.list, "committed"), right: true, href: (x) => to(x, { has: "Commitment" }) },
-          { h: "Received", v: (x) => money(x.list, "received"), right: true, href: (x) => to(x, { has: "Funds received" }) },
+          { h: "Indicative", v: (x) => money(x.list, "promised"), right: true, href: (x) => to(x, { has: "Indicative commitment" }) },
+          { h: "Signed or approved", v: (x) => money(x.list, "committed"), right: true, href: (x) => to(x, { has: "Signed commitment" }) },
+          { h: "Deployed", v: (x) => money(x.list, "received"), right: true, href: (x) => to(x, { has: "Deployed" }) },
         ]}
       />
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -417,10 +419,12 @@ function Conversion() {
 /** The graphs: each answers one question, each mark opens the records it counts, each card links its table. What a role sees follows PRD Reporting req. 5. */
 function Overview() {
   const { dr, cfg, me, now, can, event } = useDr();
+  const open = useOpenable();
   if (!cfg) return null;
   const f = funnel(dr, cfg.eventId);
   const days = Array.from({ length: event.days }, (_, i) => addMinutes(`${event.startDate} 00:00`, i * 1440).slice(0, 10));
-  const lead = can("conversion");
+  // the lead and Momentum's oversight see every opportunity; anyone else sees their own
+  const lead = can("conversion") || me?.role === "Oversight";
   const opps = dr.opportunities.filter((o) => o.eventId === cfg.eventId && (lead || o.owner === me?.id));
   const stages = STAGES.map((st) => ({ st, n: dr.matches.filter((m) => matchStage(m, cfg, now) === st).length }));
   const usd = conversionValues(dr, dr.opportunities.filter((o) => o.eventId === cfg.eventId)).USD ?? { sought: 0, promised: 0, committed: 0, received: 0 };
@@ -428,10 +432,10 @@ function Overview() {
   return (
     <>
       <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Qualified, of 150" value={f.qualified} href="/dealroom/applications?flag=qualified" />
-        <Stat label="Ready on both sides, of 60" value={dr.matches.filter(bothAccepted).length} href="/dealroom/matching?tab=By%20mission&mission=All&stage=Accepted" />
-        <Stat label="Meetings booked or held, of 200" value={dr.meetings.filter((m) => occupies(m, cfg, now) || m.status === "Held").length} href="/dealroom/meetings?tab=Schedule" />
-        <Stat label={lead ? "Opportunities open" : "Your opportunities open"} value={opps.filter(oppOpen).length} href="/dealroom/opportunities" />
+        <Stat label="Qualified, of 150" value={f.qualified} href={open("/dealroom/applications?flag=qualified")} />
+        <Stat label="Ready on both sides, of 60" value={dr.matches.filter(bothAccepted).length} href={open("/dealroom/matching?tab=By%20mission&mission=All&stage=Accepted")} />
+        <Stat label="Meetings booked or held, of 200" value={dr.meetings.filter((m) => occupies(m, cfg, now) || m.status === "Held").length} href={open("/dealroom/meetings?tab=Schedule")} />
+        <Stat label={lead ? "Opportunities open" : "Your opportunities open"} value={opps.filter(oppOpen).length} href={open("/dealroom/opportunities")} />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {can("review") && (
@@ -485,9 +489,9 @@ function Overview() {
             <HBars
               rows={[
                 { label: "Sought", value: usd.sought, shown: compact(usd.sought), href: "/dealroom/opportunities" },
-                { label: "Promised", value: usd.promised, shown: compact(usd.promised), href: "/dealroom/opportunities?has=Promise" },
-                { label: "Committed", value: usd.committed, shown: compact(usd.committed), href: "/dealroom/opportunities?has=Commitment" },
-                { label: "Received", value: usd.received, shown: compact(usd.received), href: `/dealroom/opportunities?has=${encodeURIComponent("Funds received")}` },
+                { label: "Indicative", value: usd.promised, shown: compact(usd.promised), href: `/dealroom/opportunities?has=${encodeURIComponent("Indicative commitment")}` },
+                { label: "Signed or approved", value: usd.committed, shown: compact(usd.committed), href: `/dealroom/opportunities?has=${encodeURIComponent("Signed commitment")}` },
+                { label: "Deployed", value: usd.received, shown: compact(usd.received), href: "/dealroom/opportunities?has=Deployed" },
               ]}
             />
           </ChartCard>
@@ -495,4 +499,16 @@ function Overview() {
       </div>
     </>
   );
+}
+
+/** A link the viewer can open, or the same content plain: a report never ends in a refusal. */
+function Go({ href, className, children }: { href: string; className?: string; children: ReactNode }) {
+  const open = useOpenable();
+  if (open(href))
+    return (
+      <Link href={href} className={className}>
+        {children}
+      </Link>
+    );
+  return <span className={className?.includes("group") ? "block" : undefined}>{children}</span>;
 }

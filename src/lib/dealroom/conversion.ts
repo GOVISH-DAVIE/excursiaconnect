@@ -4,8 +4,18 @@
  */
 import type { AppState } from "../types";
 import { CLOSE_REASONS, OPEN_STAGES, acting, drCan, oppOpen, oppOverdue, oppParties, staffName } from "./logic";
-import type { CloseReason, DealRoomState, DrDocument, DrOpportunity, DrOppOutcome, DrScriptStep, OppStage } from "./types";
+import type { CloseReason, DealRoomState, DrDocument, DrOpportunity, DrOppOutcome, DrScriptStep, OppStage, OutcomeKind } from "./types";
 import { portal, send, uid, withDr } from "./util";
+
+/** The tiers that rest on a signed document: a signed commitment, financing approved but not disbursed, and deployed. */
+export const SIGNED: OutcomeKind[] = ["Signed commitment", "Approved, not disbursed", "Deployed"];
+const TIER_WORDS: Record<OutcomeKind, string> = {
+  "Expression of interest": "an expression of interest",
+  "Indicative commitment": "an indicative commitment",
+  "Signed commitment": "a signed commitment",
+  "Approved, not disbursed": "financing approved, not disbursed",
+  Deployed: "capital deployed or a contract implemented",
+};
 
 export type DrConvAction =
   | { type: "dr/oppStage"; oppId: string; stage: OppStage; evidence: string }
@@ -39,16 +49,17 @@ export function applyStep(dr: DealRoomState, o: DrOpportunity, step: DrScriptSte
       if (!oppOpen(o) || step.stage === o.stage || ![...OPEN_STAGES, "Closed – won"].includes(step.stage)) return null;
       if ((step.stage === "Diligence" || step.stage === "Negotiation") && !step.evidence.trim()) return null;
       // won means a signed commitment is on the record; a promise is not enough
-      if (step.stage === "Closed – won" && !o.outcomes.some((x) => x.kind === "Commitment")) return null;
+      if (step.stage === "Closed – won" && !o.outcomes.some((x) => SIGNED.includes(x.kind))) return null;
       const evidence = step.stage === "Closed – won" ? step.evidence.trim() || "Signed commitment on the record" : step.evidence.trim();
       return patchOpp(dr, o.id, (x) => log({ ...x, stage: step.stage, stageDates: { ...x.stageDates, [step.stage]: at }, stageEvidence: { ...x.stageEvidence, [step.stage]: evidence } }, `Moved to ${step.stage}${evidence ? `: ${evidence}` : ""}`));
     }
     case "outcome": {
       const x = step.outcome;
       if (o.closed || !x.date || x.date > day || !x.evidence.trim()) return null;
-      if ((x.kind === "Commitment" || x.kind === "Funds received") && (!x.amount || x.amount <= 0 || !x.currency)) return null;
-      if (x.kind === "Commitment" && !x.instrument) return null;
-      const what = { Interest: "interest", Promise: "a promise to invest", Commitment: "a signed commitment", "Funds received": "funds received" }[x.kind];
+      // a signed commitment and what follows it carry an amount; a signed one names its pathway
+      if (SIGNED.includes(x.kind) && (!x.amount || x.amount <= 0 || !x.currency)) return null;
+      if (x.kind === "Signed commitment" && !x.instrument) return null;
+      const what = TIER_WORDS[x.kind];
       return patchOpp(dr, o.id, (y) => log({ ...y, outcomes: [...y.outcomes, { ...x, evidence: x.evidence.trim(), id: uid("oo", at) + y.outcomes.length, by, at }] }, `Recorded ${what}, dated ${x.date}`));
     }
     case "update": {

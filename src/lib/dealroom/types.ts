@@ -5,14 +5,37 @@
  */
 
 export type DrType = "seeker" | "provider";
-export type ProviderKind = "Investor" | "Fund" | "DFI" | "Bank" | "Buyer or offtaker" | "Distributor" | "Project sponsor";
-export type Instrument = "Equity" | "Debt" | "Mezzanine" | "Grant" | "Trade finance" | "Other";
+/** The decision paper's participant model: capital providers, commercial counterparties, public and ecosystem institutions. */
+export type ProviderKind =
+  | "Angel investor"
+  | "Venture capital"
+  | "Private equity"
+  | "Fund"
+  | "DFI"
+  | "Bank"
+  | "Corporate buyer"
+  | "Distributor or channel partner"
+  | "Public institution"
+  | "Ecosystem partner";
+/** Who brings an opportunity: the paper's opportunity owners. */
+export type OwnerKind = "Startup or scale-up" | "Established enterprise" | "Technology provider" | "Project sponsor";
+/** The paper's eight transaction pathways; the field keeps its old name, instrument, throughout. */
+export type Instrument =
+  | "Equity"
+  | "Debt and credit"
+  | "Development and blended finance"
+  | "Procurement and contracts"
+  | "Strategic partnerships"
+  | "Project development"
+  | "Market access"
+  | "Pilots and deployment";
 export type Stage = "Bankable project" | "Early revenue" | "Growth" | "Expansion";
 export type Currency = "USD" | "KES";
 
 /** Application status: where the record is in the queue. Independent of the decision and readiness. */
 export type AppStatus = "Lead" | "Invited" | "Draft" | "Submitted" | "In review" | "Information requested" | "Decided";
-export type Decision = "Approved" | "Conditional" | "Waitlisted" | "Declined";
+/** The paper's qualification outcomes, each with a recorded reason. */
+export type Decision = "Qualified" | "Conditional" | "Referred" | "Declined";
 export type Readiness = "Not ready" | "In preparation" | "Deal Room Ready";
 export type VerificationState = "Not started" | "Verification pending" | "Verified" | "Declined";
 
@@ -89,7 +112,7 @@ export interface DrRfi {
   at: string;
   response?: { text: string; docIds: string[]; at: string };
   /** the lead's handling once the request has expired unanswered */
-  expiry?: { how: "Extended" | "Waitlisted" | "Declined" | "Withdrawn"; by: string; at: string; note: string };
+  expiry?: { how: "Extended" | "Referred" | "Declined" | "Withdrawn"; by: string; at: string; note: string };
 }
 
 export interface DrHistory {
@@ -126,7 +149,9 @@ export interface DrApplication {
   ref?: string; // issued on submit: CA3-CS-00123, CA3-FP-00045
   type: DrType;
   providerKind?: ProviderKind;
+  ownerKind?: OwnerKind; // a seeker's kind of organisation
   mission: string; // mission id
+  track?: string; // strategic track id, under the mission
   source: string;
   owner: string; // staff id who brought the lead
   assignee?: string; // reviewer
@@ -153,9 +178,44 @@ export interface DrApplication {
   teaser?: { title: string; summary: string; anonymous: boolean; approved?: { by: string; at: string } };
   profileCompletedAt?: string;
   history: DrHistory[];
-  delegateId?: string; // the platform badge, issued on approval or verification
+  delegateId?: string; // the platform badge, issued on approval or verification (a seeker's once the fee is settled)
+  fee?: DrFee; // a capital seeker's participation fee, asked for on approval
+  challenge?: DrChallenge; // a public institution or corporate buyer bringing a problem to solve
   invite?: { token: string; sentAt?: string };
   draftSavedAt?: string;
+}
+
+/** How the institution or buyer means to engage a solution. */
+export type ChallengeRoute = "Request for proposals" | "Pilot" | "Public-private partnership" | "Direct procurement" | "Innovation challenge" | "Co-development";
+
+/**
+ * A challenge brought by a public institution or a corporate buyer: the problem, who has it, what a solution must
+ * respect, what success looks like, the budget, the procurement route and how the decision is made. It is matched
+ * against businesses through the same mandate as any provider, so its sectors, stages and pathways do the matching.
+ */
+export interface DrChallenge {
+  title: string;
+  problem: string;
+  users: string; // who has the problem
+  constraints: string;
+  outcome: string; // what success looks like
+  budget: string; // a range, for example USD 200k to 500k
+  route: ChallengeRoute | "";
+  timeline: string;
+  decisionProcess: string;
+}
+
+/**
+ * The participation fee a capital seeker pays once approved. Approval sends the payment link; paying, or the
+ * lead waiving it, issues the badge and opens matching.
+ */
+export interface DrFee {
+  amount: number;
+  currency: Currency;
+  sentAt: string; // when the payment link went out, with the decision
+  reminderAt?: string; // the one reminder, after the configured days
+  paid?: { at: string; method: "M-Pesa" | "Card"; reference: string; kes?: number };
+  waived?: { by: string; at: string; reason: string };
 }
 
 /* ---------- matching and introductions (Cut 2) ---------- */
@@ -213,8 +273,18 @@ export interface DrAccess {
 
 export type MeetingStatus = "Proposed" | "Confirmed" | "Change requested" | "Cancelled" | "In progress" | "Held" | "No-show" | "Rescheduled";
 
+/** The paper's seven meeting outcomes: what happens next, standardised. */
+export type MeetingOutcome =
+  | "No fit"
+  | "Information requested"
+  | "Follow-up meeting"
+  | "Due diligence"
+  | "Pilot or procurement"
+  | "Financing or partnership proposal"
+  | "Commitment documented";
+
 export interface DrOutcome {
-  category: "Positive" | "Follow-up needed" | "Not a fit";
+  category: MeetingOutcome;
   nextAction?: string;
   owner?: string; // staff id
   due?: string;
@@ -249,7 +319,8 @@ export interface DrMeeting {
 /* ---------- conversion (Cut 3) ---------- */
 
 export type OppStage = "Follow-up" | "Diligence" | "Negotiation" | "Closed – won" | "Closed – lost";
-export type OutcomeKind = "Interest" | "Promise" | "Commitment" | "Funds received";
+/** The paper's commitment tiers, always reported apart. */
+export type OutcomeKind = "Expression of interest" | "Indicative commitment" | "Signed commitment" | "Approved, not disbursed" | "Deployed";
 
 export interface DrOppOutcome {
   id: string;
@@ -312,12 +383,17 @@ export interface DrOpportunity {
 
 /* ---------- people, rules, logs ---------- */
 
-export type DrRole = "Lead" | "Reviewer" | "Operations";
+/**
+ * Bouer sources and qualifies (lead, reviewers); Excursia Connect coordinates matching, meetings, the floor and
+ * reporting (coordinators, operations); Momentum oversees, read-only (the paper's delivery responsibilities).
+ */
+export type DrRole = "Lead" | "Reviewer" | "Operations" | "Coordinator" | "Oversight";
 
 export interface DrStaff {
   id: string;
   eventId: string;
   name: string;
+  org?: "Bouer" | "Excursia Connect" | "Momentum"; // who they work for, per the paper's governance
   email: string;
   role: DrRole;
   canDecide: boolean;
@@ -355,6 +431,7 @@ export interface DrRules {
 export interface DrConfig {
   eventId: string;
   missions: { id: string; code: string; name: string; description: string }[];
+  tracks: { id: string; code: string; name: string; missionId: string; description: string }[]; // the paper's six strategic tracks
   sources: string[];
   providerKinds: ProviderKind[];
   sectors: string[];
@@ -367,8 +444,10 @@ export interface DrConfig {
   rules: DrRules;
   freezeDate: string;
   secondReview: { decline: boolean; askAbove: number }; // USD
+  seekerFee: { amount: number; currency: Currency; reminderDays: number }; // 0 charges nothing
   multiplePerOrg: boolean;
   rooms: Record<string, { tables: number; from: string; to: string }>;
+  sessionRooms: string[]; // the presentation area and roundtable room: sessions only, no meeting tables
   log: DrHistory[];
 }
 
@@ -430,6 +509,43 @@ export interface DrIncident {
   conflicts: number;
 }
 
+/** The decision paper's activity formats beyond the curated one-to-one meeting. */
+export type SessionFormat =
+  | "Investment opportunity presentation"
+  | "Reverse pitch or mandate briefing"
+  | "Corporate procurement and supplier discovery"
+  | "Government challenge session"
+  | "Project finance presentation"
+  | "VC, PE and growth-capital clinic"
+  | "DFI and blended-finance roundtable"
+  | "Technology deployment and pilot meeting"
+  | "Market-entry and cross-border partnership"
+  | "Deal advisory and readiness clinic"
+  | "Negotiation and deal progression";
+
+/**
+ * A programmed session in one of the paper's formats: hosted, in a room, with invited participants who accept or
+ * decline, attendance taken on the day, and an outcome per participant in the paper's seven categories.
+ */
+export interface DrSession {
+  id: string;
+  eventId: string;
+  format: SessionFormat;
+  title: string;
+  start: string; // "YYYY-MM-DD HH:MM"
+  end: string;
+  roomId: string;
+  host?: string; // the application presenting or hosting: a seeker pitching, a provider briefing, an institution's challenge
+  track?: string; // strategic track id
+  owner: string; // the staff member running it
+  invitees: string[]; // application ids
+  responses: Record<string, { answer: "Accepted" | "Declined"; at: string }>;
+  attended: string[];
+  outcomes: { appId: string; category: MeetingOutcome; note: string; by: string; at: string }[];
+  cancelled?: { by: string; at: string; reason: string };
+  history: DrHistory[];
+}
+
 export interface DealRoomState {
   clock: string; // the demo clock, "YYYY-MM-DD HH:MM"; every Deal Room rule reads "now" from here
   actingStaffId: string; // the staff member the workspace is signed in as (prototype stand-in for sign-in)
@@ -440,6 +556,7 @@ export interface DealRoomState {
   consents: DrConsent[];
   access: DrAccess[];
   meetings: DrMeeting[];
+  sessions: DrSession[]; // programmed sessions in the paper's formats, beyond one-to-ones
   opportunities: DrOpportunity[];
   exceptions: DrException[];
   grants: DrSupportGrant[];

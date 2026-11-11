@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Suspense, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import type { DelegateStatus, EventState } from "@/lib/types";
 
 /* ---------- brand ----------
@@ -70,18 +70,73 @@ export function Tone({ tone, children }: { tone: "ok" | "warn" | "bad" | "mute";
 
 export type NavItem = { href: string; label: string; exact?: boolean };
 
-function RailNav({ nav }: { nav: NavItem[] }) {
+function RailNav({ nav, onNavigate }: { nav: NavItem[]; onNavigate?: () => void }) {
   const path = usePathname();
   return (
     <>
       {nav.map((n) => {
         const active = n.exact ? path === n.href : path === n.href || path.startsWith(n.href + "/");
         return (
-          <Link key={n.href} href={n.href} className={`rounded-md px-3 py-2 text-[14px] whitespace-nowrap transition-colors ${active ? "bg-white/12 text-white font-medium" : "text-white/70 hover:text-white hover:bg-white/8"}`}>
+          <Link key={n.href} href={n.href} onClick={onNavigate} aria-current={active ? "page" : undefined} className={`rounded-md px-3 py-2 text-[14px] whitespace-nowrap transition-colors ${onNavigate ? "py-3 text-[15px]" : ""} ${active ? "bg-white/12 text-white font-medium" : "text-white/70 hover:text-white hover:bg-white/8"}`}>
             {n.label}
           </Link>
         );
       })}
+    </>
+  );
+}
+
+/** The phone's rail when there are more than four pages: a slim bar, and the whole menu in a drawer from the left. */
+function RailDrawer({ persona, who, nav, context }: { persona: string; who: string; nav: NavItem[]; context?: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  // Escape closes it, as a dialog should
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  return (
+    <>
+      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 bg-ink px-4 text-white lg:hidden">
+        {/* the icon alone; who is signed in and where are in the drawer */}
+        <Link href="/" className="mr-auto shrink-0" aria-label="Excursia Connect home">
+          <Logo variant="icon" className="h-7" />
+        </Link>
+        <button className="flex h-10 shrink-0 items-center gap-2 rounded-md bg-white/10 px-3 text-[14px] font-medium" aria-expanded={open} aria-controls="rail-drawer" onClick={() => setOpen(true)}>
+          <span aria-hidden="true" className="grid gap-[3px]">
+            <span className="block h-[2px] w-4 rounded bg-white" />
+            <span className="block h-[2px] w-4 rounded bg-white" />
+            <span className="block h-[2px] w-4 rounded bg-white" />
+          </span>
+          Menu
+        </button>
+      </header>
+      {open && (
+        <div className="lg:hidden">
+          <button className="fixed inset-0 z-50 bg-black/45" aria-label="Close the menu" onClick={() => setOpen(false)} />
+          <aside id="rail-drawer" role="dialog" aria-modal="true" aria-label="Menu" className="fixed inset-y-0 left-0 z-50 flex w-[84vw] max-w-[320px] flex-col overflow-y-auto bg-ink text-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
+              <div className="min-w-0">
+                <Link href="/" className="block" onClick={() => setOpen(false)}>
+                  <Wordmark light />
+                </Link>
+                <div className="mt-3 text-[13px] text-white/60">{persona}</div>
+                <div className="truncate text-[14px] font-medium">{who}</div>
+              </div>
+              <button className="h-10 shrink-0 rounded-md bg-white/10 px-3 text-[14px]" onClick={() => setOpen(false)} autoFocus>
+                Close
+              </button>
+            </div>
+            <nav className="flex flex-col gap-0.5 p-3" aria-label="Pages">
+              <Suspense fallback={null}>
+                <RailNav nav={nav} onNavigate={() => setOpen(false)} />
+              </Suspense>
+            </nav>
+            {context && <div className="mt-auto border-t border-white/10 px-5 py-4">{context}</div>}
+          </aside>
+        </div>
+      )}
     </>
   );
 }
@@ -101,9 +156,12 @@ export function Rail({
   children: ReactNode;
   accent?: "ink" | "coral";
 }) {
+  // on a phone, more than four pages go in a drawer behind a Menu button; four or fewer stay as a row of tabs
+  const drawer = nav.length > 4;
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr]">
-      <aside className="bg-ink text-white lg:min-h-screen lg:sticky lg:top-0 lg:h-screen flex flex-col">
+      {drawer && <RailDrawer persona={persona} who={who} nav={nav} context={context} />}
+      <aside className={`bg-ink text-white lg:min-h-screen lg:sticky lg:top-0 lg:h-screen flex-col ${drawer ? "hidden lg:flex" : "flex"}`}>
         <div className="px-5 py-5 border-b border-white/10">
           <Link href="/" className="block">
             <Wordmark light />
