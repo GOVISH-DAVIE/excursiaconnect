@@ -8,6 +8,23 @@ const forbid = (files, patterns) => ({
   rules: { "no-restricted-imports": ["error", { patterns }] },
 });
 
+/** The API's layers (docs/architecture.md, "The API process"). Later entries override earlier ones for the same files. */
+function apiLayers() {
+  const db = { group: ["@excursia/db", "@prisma/*", "pg"], allowTypeImports: true, message: "Only *.repo.ts files query the database." };
+  const repo = { group: ["**/*.repo"], message: "Only a service calls a repository." };
+  const service = { group: ["**/*.service"], message: "Routes call controllers; controllers call services." };
+  const layer = (files, patterns, ignores = []) => ({
+    files,
+    ignores,
+    rules: { "@typescript-eslint/no-restricted-imports": ["error", { patterns }] },
+  });
+  return [
+    layer(["apps/api/src/**/*.ts"], [db], ["apps/api/src/**/*.repo.ts", "apps/api/src/server.ts", "apps/api/src/**/index.ts"]),
+    layer(["apps/api/src/**/*.controller.ts"], [db, repo]),
+    layer(["apps/api/src/**/*.routes.ts"], [db, repo, service]),
+  ];
+}
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -30,6 +47,10 @@ const eslintConfig = defineConfig([
   ),
   // the API has no UI
   forbid(["apps/api/**"], [{ group: ["react", "react-dom", "next", "next/*"], message: "The API has no UI." }]),
+
+  // inside the API, each layer reaches only the one below it: routes → controller → service → repo → database.
+  // Type imports of the database stay allowed, so modules can be assembled from a Db passed in.
+  ...apiLayers(),
 
   globalIgnores([
     "**/.next/**",

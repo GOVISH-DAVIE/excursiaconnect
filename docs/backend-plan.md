@@ -296,7 +296,7 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 | M0.2a | **The API as its own process**: npm workspaces; Express with checked settings, security headers, CORS for the web app's origins, the error contract, health checks and a clean shutdown; the lint rules for the workspace boundaries | The prototype runs unchanged from `apps/web`; the API answers `/health/ready` against PostgreSQL; lint fails the web app importing the database. **Done 11 Nov 2026.** Notes below |
 | M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record |
 | M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL |
-| M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the module pattern in the API (`routes`, `service`, `repo`); the first POST and GET routes with their contracts; the Origin check on writes; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` client, `ApiError`); the feature-folder pattern in the web app | Assigning a reviewer runs from a screen through a hook, the API client, the Express route, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; a write from another origin is refused |
+| M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the module pattern in the API (`routes`, `controller`, `service`, `repo`, as `health` already does); the first POST and GET routes with their contracts; the Origin check on writes; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` client, `ApiError`); the feature-folder pattern in the web app | Assigning a reviewer runs from a screen through a hook, the API client, the Express route, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; a write from another origin is refused |
 | M0.6 | **CI and staging**: type-check, lint, tests and both builds on every push; staging deployed behind nginx as in `deploy.md`, with the web app and the API on their two names | CI is green; both names are reachable over HTTPS with the security headers; the deploy switches the API and then the web app with no failed request |
 
 **Notes on M0.0, done 11 Nov 2026:**
@@ -334,9 +334,10 @@ What applicants and reviewers need on day one comes first. Anything that can fol
   - CORS for `WEB_ORIGINS` only, with credentials.
   - A 100 kB JSON limit, `trust proxy` for loopback only, and one `ErrorBody` shape for every failure.
   - `/health/live` and `/health/ready`. Ready reports 503 within 2 s when PostgreSQL doesn't answer.
+  - Health is the first module, split into routes, controller, service and repo. Lint keeps each layer to the one below it.
   - SIGTERM drains open requests, then closes the pool.
   - `npm run build` bundles it with the workspace packages into `dist/server.js`.
-- **Tests:** one Vitest run at the root covers all three suites, 198 tests: the rules, the database's guarantees, and 15 on the API (health, CORS, headers, error shapes, settings).
+- **Tests:** one Vitest run at the root covers all three suites, 203 tests: the rules, the database's guarantees, and 20 on the API (health, CORS, headers, error shapes, settings, and each health layer with a stand-in below it).
 - **Lint** fails if the web app imports the database, Prisma or Express, if the rules import React, Next.js, Express or the database, or if the contracts import anything of ours.
 - **Running it:** `npm run dev` (web, port 3010) and `npm run dev:api` (API, port 4000). The README has the rest.
 

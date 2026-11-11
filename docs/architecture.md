@@ -57,11 +57,15 @@ Each layer imports only from the layers below it.
    │
    │ HTTPS, cookie included ── api.example.co.ke ─────────────────────────────────────────────────────────────
    ▼
- apps/api
- Routes             src/modules/<module>/routes.ts         Express router: session → Zod parse → service → JSON
- Services           src/modules/<module>/service.ts        commands (lock, load, apply the rule, save, audit, outbox)
-                                                           and queries (per-viewer projections, DTOs)
- Repositories       src/modules/<module>/repo.ts           Prisma, and only here
+ apps/api           src/modules/<module>/
+ Routes             <module>.routes.ts                     paths and middleware (session guard), each pointing at a
+                                                           controller handler; no logic
+ Controllers        <module>.controller.ts                 HTTP in and out: params, query and body parsed with the
+                                                           contract, call the service, status and JSON
+ Services           <module>.service.ts                    commands (lock, load, apply the rule, save, audit, outbox)
+                                                           and queries (per-viewer projections, DTOs); no req or res
+ Repositories       <module>.repo.ts                       Prisma, and only here
+ Assembly           index.ts                               repo → service → controller → routes; app.ts mounts it
    │
  packages
  Rules              @excursia/domain                       pure: types, rules, reducers, apply(state, action, ctx)
@@ -72,7 +76,10 @@ Each layer imports only from the layers below it.
 **Why this shape:**
 - **Screens stay simple:** they render what a hook returns and call what a hook offers.
 - **Every network detail lives in one file per module** (`api.ts`). The Flutter apps and any other client call the same routes.
-- **Routes are thin:** they authenticate, validate and delegate. The decisions are made in services, by the same rule functions the prototype runs, so they can't drift.
+- **Routes say where, controllers say how HTTP looks, services decide.**
+  - A routes file reads as the module's table of endpoints.
+  - A controller is the only code that touches `req` and `res`.
+  - The decisions are made in services, by the same rule functions the prototype runs, so they can't drift. Services are tested without HTTP.
 - **Prisma appears in one layer of one process.** A change of query, index or table never reaches a service's logic, and never reaches the web app at all.
 - **The web app holds no secrets.** It has no database URL and no payment keys; if it were compromised, the API's checks still stand between it and the data.
 
@@ -97,9 +104,19 @@ Each layer imports only from the layers below it.
   ```
 
   A Zod failure becomes `bad_request`, with the paths of the wrong fields (never their values). A body over 100 kB is `payload_too_large`, and malformed JSON is `bad_request`. Anything else is a bug: it is logged with the method and path only, and the browser gets `internal` with no detail.
-- **`routes/health.ts`** answers `/health/live` (the process answers) and `/health/ready` (the database answered `SELECT 1` within 2 s, else 503).
+- **`modules/health/`** is the first module, and the pattern every other one follows:
 
-Modules arrive as `src/modules/<module>/{routes,service,repo}.ts`, mounted in `app.ts` under `/v1/<module>`.
+  | File | What it does |
+  | --- | --- |
+  | `health.routes.ts` | `GET /live` and `GET /ready`, each naming its controller handler |
+  | `health.controller.ts` | `live` answers 200; `ready` asks the service and answers 200 or 503, never cached |
+  | `health.service.ts` | `databaseAnswers()`: the repo's ping within 2 s, else down |
+  | `health.repo.ts` | `ping()`: `SELECT 1` |
+  | `index.ts` | `healthModule({ db })` builds the four and returns the router; `app.ts` mounts it at `/health` |
+
+  `apps/api/tests/health.test.ts` tests each layer with a stand-in for the one below: the controller with a fake service, the service with a fake repo.
+
+Every module has the same five files in `src/modules/<module>/`, and is mounted in `app.ts` under `/v1/<module>`. Each layer is a factory that takes the layer below (`createXController(service)`), with no module-level singletons, so tests can swap any layer.
 
 ## Sessions and cookies across the two subdomains
 
@@ -147,34 +164,52 @@ export const ApplicationSummary = z.object({ id: z.string(), ref: z.string().nul
 export type ApplicationSummary = z.infer<typeof ApplicationSummary>;
 ```
 
-**2. The route, thin:** `apps/api/src/modules/dealroom/routes.ts`
+**2. The routes, a table of endpoints:** `apps/api/src/modules/dealroom/dealroom.routes.ts`
 
 ```ts
 import { Router } from "express";
-import { AssignReviewerInput } from "@excursia/contracts/dealroom";
 import { requireSession } from "../../http/session";
-import type { DealRoomService } from "./service";
+import type { DealRoomController } from "./dealroom.controller";
 
-export function dealRoomRoutes(service: DealRoomService): Router {
+export function dealRoomRoutes(c: DealRoomController): Router {
   const r = Router();
-  r.post("/:eventId/applications/assign", async (req, res) => {
-    const session = await requireSession(req, { staff: true, eventId: req.params.eventId });
-    const input = AssignReviewerInput.parse(req.body); // a ZodError becomes 400 bad_request
-    res.json(await service.assignReviewer(session, input)); // a refusal throws HttpError("conflict", reason)
-  });
+  r.get("/:eventId/applications", requireSession({ staff: true }), c.listApplications);
+  r.post("/:eventId/applications/assign", requireSession({ staff: true }), c.assignReviewer);
   return r;
 }
 ```
 
-Express 5 passes a rejected promise to the error handler by itself, so routes have no try/catch.
+`requireSession` is middleware. It loads the session from the cookie, checks the role and that the session belongs to `:eventId`, and puts it on `res.locals.session`.
 
-**3. The service runs the rule:** `apps/api/src/modules/dealroom/service.ts`
+**3. The controller, HTTP in and out:** `apps/api/src/modules/dealroom/dealroom.controller.ts`
 
 ```ts
-export function dealRoomService(deps: { db: Db; repo: DealRoomRepo }) {
+import type { RequestHandler } from "express";
+import { AssignReviewerInput, EventParams } from "@excursia/contracts/dealroom";
+import type { DealRoomService } from "./dealroom.service";
+
+export function createDealRoomController(service: DealRoomService) {
   return {
-    assignReviewer: (session: Session, input: AssignReviewerInput) =>
-      runCommand(deps, session, session.eventId, { type: "dr/assign", appIds: input.appIds, staffId: input.staffId }),
+    assignReviewer: (async (req, res) => {
+      const { eventId } = EventParams.parse(req.params);
+      const input = AssignReviewerInput.parse(req.body); // a ZodError becomes 400 bad_request
+      res.json(await service.assignReviewer(res.locals.session, eventId, input)); // a refusal throws HttpError("conflict", reason)
+    }) satisfies RequestHandler,
+    // listApplications: …
+  };
+}
+export type DealRoomController = ReturnType<typeof createDealRoomController>;
+```
+
+Express 5 passes a rejected promise to the error handler by itself, so controllers have no try/catch.
+
+**4. The service runs the rule:** `apps/api/src/modules/dealroom/dealroom.service.ts`
+
+```ts
+export function createDealRoomService(repo: DealRoomRepo) {
+  return {
+    assignReviewer: (session: Session, eventId: string, input: AssignReviewerInput) =>
+      runCommand(repo, session, eventId, { type: "dr/assign", appIds: input.appIds, staffId: input.staffId }),
   };
 }
 ```
@@ -189,7 +224,7 @@ export function dealRoomService(deps: { db: Db; repo: DealRoomRepo }) {
 
 Action objects exist only inside services. The client never sends one.
 
-**4. Query contract:** `apps/web/src/features/dealroom/queries.ts`
+**5. Query contract:** `apps/web/src/features/dealroom/queries.ts`
 
 ```ts
 import { queryOptions } from "@tanstack/react-query";
@@ -202,7 +237,7 @@ export const applicationsQuery = {
 };
 ```
 
-**5. API client, the only file that knows the network:** `apps/web/src/features/dealroom/api.ts`
+**6. API client, the only file that knows the network:** `apps/web/src/features/dealroom/api.ts`
 
 ```ts
 import { z } from "zod";
@@ -223,7 +258,7 @@ export const dealRoomApi = {
 
 It parses a success with the given schema. It turns an `ErrorBody` into a thrown `ApiError` that carries the code and the rule's own message, such as "Your role cannot assign reviewers".
 
-**6. The custom hook a screen uses:** `apps/web/src/features/dealroom/hooks/use-assign-reviewer.ts`
+**7. The custom hook a screen uses:** `apps/web/src/features/dealroom/hooks/use-assign-reviewer.ts`
 
 ```ts
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -238,7 +273,7 @@ export function useAssignReviewer(eventId: string) {
 }
 ```
 
-**7. The screen renders and calls the hook, nothing else:**
+**8. The screen renders and calls the hook, nothing else:**
 
 ```tsx
 "use client";
@@ -253,7 +288,7 @@ export function AssignButton({ eventId, appIds, staffId }: Props) {
 }
 ```
 
-**8. The page prefetches on the server, so the first paint has data:** `apps/web/src/app/dealroom/applications/page.tsx`
+**9. The page prefetches on the server, so the first paint has data:** `apps/web/src/app/dealroom/applications/page.tsx`
 
 ```tsx
 export default function Page() {
@@ -311,9 +346,17 @@ Each context has its own file, a typed `use…` hook that throws outside its pro
 - Query keys come only from the query contracts, never written inline.
 
 **API:**
-- Each module is a `routes.ts`, a `service.ts` and a `repo.ts`, built from their dependencies (no module-level singletons), so tests pass a test database.
-- Routes stay under about 20 lines each: session, parse, service, respond.
-- Every request body and query string is parsed with its contract before use.
+- Each module is `<module>.routes.ts`, `.controller.ts`, `.service.ts` and `.repo.ts`, plus an `index.ts` that assembles them.
+  - Every layer is built from the one below, with no module-level singletons, so tests swap any layer.
+- Each layer imports only the one below it. ESLint checks this:
+  - A routes file may not import a service or a repo.
+  - A controller may not import a repo.
+  - Only repos import `@excursia/db` values; others may import its types.
+- A routes file holds paths and middleware only. A handler written inline in a routes file is a review comment.
+- A controller handler stays under about 15 lines: parse, call the service, respond.
+  - It is the only code that reads `req` or writes `res`.
+  - Services never see either.
+- Every path parameter, query string and request body is parsed with its contract in the controller before use.
 - Services return DTOs from `@excursia/contracts`, never Prisma models.
 - Expected refusals throw `HttpError("conflict", reason)`, with the reason from the rules (`apply()`), so the screen shows exactly what the rule says.
 - Unexpected errors throw. The error handler logs them without personal data and answers `internal`.

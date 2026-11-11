@@ -97,7 +97,7 @@ apps/web/                      the Next.js app (@excursia/web): the prototype's 
   src/lib/store.tsx            client store (reducer + localStorage, versioned); re-exports scanVerdict, makeOrder, money
   src/lib/download.ts          CSV and text downloads; brand.ts, media.ts, use-today.ts
   public/brand/                ExcursiaConnect logo files
-apps/api/                      the Express API (@excursia/api): config, app, health, error contract; tests/
+apps/api/                      the Express API (@excursia/api): config, app, error contract, modules/<name>/{routes,controller,service,repo}; tests/
 packages/domain/               the rules (@excursia/domain), pure TypeScript; tests/ holds the rule suites
   src/types.ts                 domain types (Event, Tier, Delegate, Order, Zone, Room, Session, Message)
   src/seed.ts                  deterministic mock data: 3 events, 5 tiers, 5 zones, 15 sessions, 212 delegates, orders
