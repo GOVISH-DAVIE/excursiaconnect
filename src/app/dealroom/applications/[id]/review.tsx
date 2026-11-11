@@ -51,6 +51,8 @@ export function Review({ id }: { id: string }) {
   const expired = rfi && rfiExpired(rfi, cfg, now);
   const dl = app.type === "seeker" && qualified(app) && !app.profileCompletedAt ? profileDeadline(app, cfg) : undefined;
   const tabs = app.type === "seeker" ? tabsSeeker : tabsProvider;
+  // the first render can come before the saved state loads, when the type is not yet known: never show a tab this type does not have
+  const view: Tab = (tabs as readonly Tab[]).includes(tab) ? tab : tabs[0];
 
   return (
     <>
@@ -114,16 +116,16 @@ export function Review({ id }: { id: string }) {
       )}
       {dl && <Banner tone={dl < now.slice(0, 10) ? "bad" : "mute"}>Matching profile due {fmtStamp(dl, false)}{dl < now.slice(0, 10) ? ", overdue" : ""}. The applicant completes it from their status page.</Banner>}
 
-      <Tabs tabs={tabs as readonly Tab[]} value={tab} onChange={setTab} counts={{ Requests: app.rfis.filter((r) => !r.response && !r.expiry).length }} />
+      <Tabs tabs={tabs as readonly Tab[]} value={view} onChange={setTab} counts={{ Requests: app.rfis.filter((r) => !r.response && !r.expiry).length }} />
 
-      {tab === "Assessment" && <Assessment app={app} />}
-      {tab === "Verification" && <VerificationTab app={app} />}
-      {tab === "Application" && <ApplicationTab app={app} />}
-      {tab === "Requests" && <Requests app={app} />}
-      {tab === "Decision" && <DecisionTab app={app} />}
-      {tab === "Teaser" && <TeaserTab app={app} />}
-      {tab === "In the Deal Room" && <Activity app={app} />}
-      {tab === "History" && <History app={app} />}
+      {view === "Assessment" && <Assessment app={app} />}
+      {view === "Verification" && <VerificationTab app={app} />}
+      {view === "Application" && <ApplicationTab app={app} />}
+      {view === "Requests" && <Requests app={app} />}
+      {view === "Decision" && <DecisionTab app={app} />}
+      {view === "Teaser" && <TeaserTab app={app} />}
+      {view === "In the Deal Room" && <Activity app={app} />}
+      {view === "History" && <History app={app} />}
 
       {can("grantSupport") && <SupportGrant app={app} />}
     </>
@@ -499,6 +501,7 @@ function DecisionTab({ app }: { app: DrApplication }) {
                 {blockers.map((b) => (
                   <li key={b} className="text-slate">
                     · {b}
+                    {b === "Decision-maker not confirmed" && ": confirm them on the Application tab"}
                   </li>
                 ))}
               </ul>

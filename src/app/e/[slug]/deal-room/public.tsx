@@ -4,41 +4,30 @@ import Link from "next/link";
 import { useState } from "react";
 import { Wordmark, fmtDate } from "@/components/ui";
 import { useStore } from "@/lib/store";
-import { initials, numberWord, readableOn } from "@/lib/brand";
+import { initials, readableOn } from "@/lib/brand";
 import type { Instrument, ProviderKind, Stage } from "@/lib/dealroom/types";
-import { CAPITAL_KINDS, PATHWAYS, PATHWAY_COPY, PARTNER_KINDS, ROLES, feeLabel, isChallenge, isPartnerKind } from "@/lib/dealroom/logic";
+import { CAPITAL_KINDS, PATHWAYS, PATHWAY_COPY, PARTNER_KINDS, ROLES, ROLE_LABEL, feeLabel, isChallenge, isPartnerKind, type DrRole } from "@/lib/dealroom/logic";
 
 /*
   The public Deal Room page (PRD Module req. 9, CS-1). Built on the event site's contract: the
-  organiser's colour as the accent, one wrap, the dark hero, sections the height of their content.
+  organiser's colour as the accent, one wrap, the dark hero with a panel, sections the height of their content.
   Everything on it comes from the Deal Room configuration; it is live only when the event is.
-  The wording follows the organiser's brief: who should participate, the activities, and the four
-  registration pathways (capital seeker, capital provider, commercial or strategic partner, institutional challenge).
+  One route through the page: what it is, what happens in it, how to register (the four pathways),
+  how it works and what is checked, the self-check, open challenges, missions, questions.
 */
 
 const INSTRUMENTS: Instrument[] = PATHWAYS;
 const STAGES: Stage[] = ["Bankable project", "Early revenue", "Growth", "Expansion"];
 
-type Pathway = "seeker" | "capital" | "partner" | "challenge";
+type Pathway = DrRole;
 
-const GROUPS: { title: string; text: string }[] = [
-  {
-    title: "Opportunity owners",
-    text: "Startups, scale-ups, established enterprises, technology providers and project sponsors seeking capital, customers, commercial opportunities, strategic partnerships or market access.",
-  },
-  {
-    title: "Investors and capital providers",
-    text: "Angel investors, venture capital firms, private equity funds, banks, development finance institutions and other capital providers seeking qualified investment opportunities.",
-  },
-  {
-    title: "Commercial counterparties",
-    text: "Corporates, procurement teams, distributors, channel partners and regional operators seeking suppliers, technology solutions and commercial partnerships.",
-  },
-  {
-    title: "Public and ecosystem institutions",
-    text: "Government ministries, agencies, regulators, trade and investment agencies, accelerators and ecosystem partners with institutional priorities, defined challenges or partnership interests.",
-  },
-];
+/** Who each pathway is for, in the organiser's group names, and a short line for the hero panel. */
+const GROUP: Record<Pathway, { name: string; short: string }> = {
+  seeker: { name: "Opportunity owners", short: "Startups, enterprises and project sponsors" },
+  capital: { name: "Investors and capital providers", short: "Angels, VC, PE, banks, DFIs and funds" },
+  partner: { name: "Commercial counterparties", short: "Corporates, distributors and regional operators" },
+  challenge: { name: "Public and ecosystem institutions", short: "Ministries, agencies and regulators" },
+};
 
 const ACTIVITIES = [
   "Curated business-to-business meetings",
@@ -50,8 +39,6 @@ const ACTIVITIES = [
   "Technology demonstrations and pilot discussions",
   "Market-entry and cross-border partnership engagements",
 ];
-
-const PATHWAY_CARDS = ROLES.map((type) => ({ type, ...PATHWAY_COPY[type] }));
 
 /** "15–18 February 2027", or "28 February – 3 March 2027" when the event spans two months. */
 function dateRange(start: string, end: string) {
@@ -79,6 +66,7 @@ export function DealRoomPublic({ slug }: { slug: string }) {
   const dates = dateRange(event.startDate, event.endDate);
   const capitalKinds = cfg.providerKinds.filter((k) => CAPITAL_KINDS.includes(k));
   const partnerKinds = cfg.providerKinds.filter((k) => PARTNER_KINDS.includes(k));
+  const closedNote = live ? "Applications are closed." : "Registration opens when the summit goes live.";
 
   return (
     <div className="site brand" style={{ "--accent": accent, "--accent-ink": accentInk } as React.CSSProperties}>
@@ -104,33 +92,22 @@ export function DealRoomPublic({ slug }: { slug: string }) {
       </header>
 
       <main>
+        {/* ---- hero: the name and the promise on the left, the four ways in on the right, the facts at the foot */}
         <section className="hero hero--dark" id="top" aria-labelledby="dr-h">
           <div className="hero__bg" aria-hidden="true" />
           <div className="wrap">
             <div className="hero-text grid hero__grid">
               <div className="hero__text span-7">
-                <div className="hero__kicker">
-                  <span>The Deal Room</span>
-                  <span>{dates}</span>
-                  <span>{event.city}</span>
-                </div>
-                <h1 id="dr-h">A curated platform for business, investment and strategic partnerships</h1>
-                <p className="hero__lead">
-                  The {event.name} Deal Room provides a platform for businesses, investors, public institutions, corporate organisations and ecosystem partners to engage around business opportunities, investment
-                  propositions, commercial requirements and strategic interests.
-                </p>
-                <p className="hero__lead">The platform facilitates opportunity sourcing, participant qualification, counterparty matching and structured business engagements across key sectors.</p>
+                <h1 id="dr-h">{event.name} Deal Room</h1>
+                <p className="hero__lead">A curated platform for business, investment and strategic partnerships.</p>
                 <div className="btn-row">
                   {open ? (
                     <>
                       <Link href={apply("seeker")} className="btn btn-primary btn-cta">
                         Register an opportunity
                       </Link>
-                      <Link href={apply("capital")} className="btn btn-secondary">
-                        Register as an investor or capital provider
-                      </Link>
-                      <Link href="#register" className="link self-center">
-                        All registration pathways
+                      <Link href="#register" className="btn btn-secondary">
+                        See every pathway
                       </Link>
                     </>
                   ) : (
@@ -140,24 +117,45 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                   )}
                 </div>
               </div>
+              <aside className="hero__panel span-4 begin-9" aria-label="Registration pathways">
+                <div className="hero__panel-head">
+                  <span className="t-label">Register</span>
+                  <a className="link" href="#register">
+                    Who each is for
+                  </a>
+                </div>
+                <ul className="rows rows--quick">
+                  {ROLES.map((p) => (
+                    <li key={p}>
+                      <span className="rows__name">
+                        {ROLE_LABEL[p]}
+                        <small>{GROUP[p].short}</small>
+                      </span>
+                      {open ? (
+                        <Link href={apply(p)} className="rows__act" aria-label={PATHWAY_COPY[p].cta}>
+                          {p === "challenge" ? "Submit" : "Register"}
+                        </Link>
+                      ) : (
+                        <span className="rows__act rows__act--off">–</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </aside>
             </div>
             <dl className="hero__facts">
+              <div>
+                <dt>Dates</dt>
+                <dd>{dates}</dd>
+              </div>
+              <div>
+                <dt>Where</dt>
+                <dd>{event.city}</dd>
+              </div>
               <div>
                 <dt>Applications</dt>
                 <dd>
                   {fmtDate(r.appOpen, { day: "numeric", month: "short" })} to {fmtDate(r.appClose, { day: "numeric", month: "short" })}
-                </dd>
-              </div>
-              <div>
-                <dt>Missions</dt>
-                <dd>
-                  {numberWord(cfg.missions.length)[0].toUpperCase() + numberWord(cfg.missions.length).slice(1)} missions, {numberWord(cfg.tracks.length)} tracks
-                </dd>
-              </div>
-              <div>
-                <dt>Meetings</dt>
-                <dd>
-                  {r.meetingMin} minutes, in a booked room
                 </dd>
               </div>
               <div>
@@ -168,80 +166,91 @@ export function DealRoomPublic({ slug }: { slug: string }) {
           </div>
         </section>
 
-        <section className="section" id="who" aria-labelledby="who-h">
+        {/* ---- what happens: the organiser's description beside the formats */}
+        <section className="section" id="about" aria-labelledby="act-h">
           <div className="wrap">
-            <div className="section-head">
-              <h2 id="who-h">Who should participate?</h2>
-            </div>
             <div className="grid">
-              {GROUPS.map((g) => (
-                <div className="span-6" key={g.title}>
-                  <h3 className="t-day">{g.title}</h3>
-                  <p className="max-w-[60ch]">{g.text}</p>
+              <div className="span-6">
+                <div className="section-head">
+                  <h2 id="act-h">Deal Room activities</h2>
+                  <p>
+                    The {event.name} Deal Room provides a platform for businesses, investors, public institutions, corporate organisations and ecosystem partners to engage around business
+                    opportunities, investment propositions, commercial requirements and strategic interests.
+                  </p>
+                  <p>The platform facilitates opportunity sourcing, participant qualification, counterparty matching and structured business engagements across key sectors.</p>
                 </div>
-              ))}
+              </div>
+              <div className="span-5 begin-8">
+                <p className="mb-4" style={{ color: "var(--muted)" }}>
+                  The programme will feature a range of structured business engagement formats, including:
+                </p>
+                <ul className="rows">
+                  {ACTIVITIES.map((x) => (
+                    <li key={x}>
+                      <span className="rows__name">{x}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           </div>
         </section>
 
-        <section className="section" id="activities" aria-labelledby="act-h">
-          <div className="wrap">
-            <div className="section-head">
-              <h2 id="act-h">Deal Room activities</h2>
-              <p>The programme will feature a range of structured business engagement formats, including:</p>
-            </div>
-            <div className="grid">
-              {[ACTIVITIES.slice(0, 4), ACTIVITIES.slice(4)].map((half, i) => (
-                <div className="span-6" key={i}>
-                  <ul className="rows">
-                    {half.map((x) => (
-                      <li key={x}>
-                        <span className="rows__name">{x}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
+        {/* ---- register: the four pathways, each with who it is for and its own way in */}
         <section className="section" id="register" aria-labelledby="reg-h">
           <div className="wrap">
             <div className="section-head">
               <h2 id="reg-h">Participate in the {event.name} Deal Room</h2>
-              <p>Applications are invited from businesses, investors, institutions and commercial partners interested in participating in the Deal Room.</p>
-              <p>Participation is subject to application, qualification and programme selection.</p>
+              <p>
+                Applications are invited from businesses, investors, institutions and commercial partners interested in participating in the Deal Room. Participation is subject to application,
+                qualification and programme selection.
+              </p>
+              <p>Select the registration pathway that best reflects your role and the purpose of your participation in the Deal Room.</p>
             </div>
-            <h3 className="t-day">Registration pathways</h3>
-            <p className="mb-6 max-w-[60ch]">Select the registration pathway that best reflects your role and the purpose of your participation in the Deal Room.</p>
-            <ol className="dr-steps dr-steps--paths">
-              {PATHWAY_CARDS.map((p, i) => (
-                <li key={p.type}>
-                  <span className="dr-steps__n">{i + 1}</span>
-                  <h3>{p.title}</h3>
-                  <p>{p.text}</p>
-                  {open && (
-                    <Link href={apply(p.type)} className="btn btn-secondary">
-                      {p.cta}
+            <ul className="paths">
+              {ROLES.map((p) => (
+                <li key={p} className="paths__row">
+                  <div className="paths__copy">
+                    <h3>{PATHWAY_COPY[p].title}</h3>
+                    <p className="paths__who">{GROUP[p].name}</p>
+                    <p>{PATHWAY_COPY[p].text}</p>
+                  </div>
+                  {open ? (
+                    <Link href={apply(p)} className="btn btn-secondary paths__act">
+                      {PATHWAY_COPY[p].cta}
                     </Link>
-                  )}
+                  ) : null}
                 </li>
               ))}
-            </ol>
-            {!open && <p className="mt-6 text-slate">{live ? "Applications are closed." : "Registration opens when the summit goes live."}</p>}
+            </ul>
+            {!open && <p className="mt-6" style={{ color: "var(--muted)" }}>{closedNote}</p>}
           </div>
         </section>
 
-        <section className="section" id="qualify" aria-labelledby="qualify-h">
+        {/* ---- how it works, and what is checked before anyone meets */}
+        <section className="section" id="how" aria-labelledby="how-h">
           <div className="wrap">
             <div className="section-head">
-              <h2 id="qualify-h">How participants are qualified</h2>
+              <h2 id="how-h">How it works</h2>
               <p>Both sides are checked before anyone meets. An opportunity is scored against written criteria; an investor, partner or institution is verified.</p>
             </div>
-            <div className="grid">
+            <ol className="dr-steps">
+              {[
+                ["Apply and get a decision", "A reviewer scores your application against the criteria and may ask for more information. You get a reference number and see your status at any time."],
+                ["Complete your profile", "Approved businesses write a short teaser and finish their profile. Investors, partners and institutions sign the NDA once and are verified."],
+                ["Accept an introduction", "The Deal Room team proposes a match and a one-page brief. Nothing is shared until both of you accept."],
+                ["Meet at the summit", "Operations books a slot and a room; you confirm it and get a calendar invite. Your badge checks you in at the Deal Room desk."],
+              ].map(([t, d], i) => (
+                <li key={t}>
+                  <span className="dr-steps__n">{i + 1}</span>
+                  <h3>{t}</h3>
+                  <p>{d}</p>
+                </li>
+              ))}
+            </ol>
+            <div className="grid mt-14" id="qualify">
               <div className="span-6">
-                <h3 className="t-day">Opportunity owners</h3>
+                <h3 className="t-day">What we check: opportunity owners</h3>
                 <ul className="rows">
                   {cfg.rubric.eligibility.map((c) => (
                     <li key={c.id}>
@@ -253,15 +262,13 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                   </li>
                   {cfg.seekerFee.amount > 0 && (
                     <li>
-                      <span className="rows__name">
-                        Once approved, a {feeLabel(cfg.seekerFee)} participation fee by M-Pesa or card; matching and your badge follow payment
-                      </span>
+                      <span className="rows__name">Once approved, a {feeLabel(cfg.seekerFee)} participation fee by M-Pesa or card; matching and your badge follow payment</span>
                     </li>
                   )}
                 </ul>
               </div>
               <div className="span-6">
-                <h3 className="t-day">Investors, partners and institutions</h3>
+                <h3 className="t-day">What we check: investors, partners and institutions</h3>
                 <ul className="rows">
                   {capitalKinds.length > 0 && (
                     <li>
@@ -291,32 +298,16 @@ export function DealRoomPublic({ slug }: { slug: string }) {
           </div>
         </section>
 
+        <EligibilityCheck slug={slug} sectors={cfg.sectors} countries={cfg.countries.slice(0, 9)} kinds={cfg.providerKinds} open={open} />
+
+        {/* ---- institutional challenges: what one describes, and the ones open now */}
         <section className="section" id="challenges" aria-labelledby="ch-h">
           <div className="wrap">
             <div className="section-head">
-              <h2 id="ch-h">Submit an institutional challenge</h2>
-              <p>
-                For government ministries, public agencies, county governments, regulators and corporate institutions seeking innovative solutions, technical capabilities, investment or implementation partners
-                to address defined institutional, operational, infrastructure and service-delivery priorities. Once verified, the Deal Room team matches the challenge with businesses that can solve it, and
-                the meetings happen in the Deal Room.
-              </p>
+              <h2 id="ch-h">Institutional challenges</h2>
+              <p>An institution or corporate buyer describes a defined need. Once verified, the Deal Room team matches it with businesses that can solve it, and the meetings happen in the Deal Room.</p>
             </div>
             <div className="grid">
-              <div className="span-6">
-                <h3 className="t-day">What you describe</h3>
-                <ul className="rows">
-                  {["The problem and who has it", "What success looks like, measurably", "Constraints: data, systems, regulation", "Budget range, timeline and procurement route", "Who decides, and the steps to a contract"].map((x) => (
-                    <li key={x}>
-                      <span className="rows__name">{x}</span>
-                    </li>
-                  ))}
-                </ul>
-                {open && (
-                  <Link href={apply("challenge")} className="btn btn-secondary mt-4">
-                    Submit a challenge
-                  </Link>
-                )}
-              </div>
               <div className="span-6">
                 <h3 className="t-day">Open challenges{challenges.length ? `, ${challenges.length}` : ""}</h3>
                 {challenges.length ? (
@@ -325,7 +316,7 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                       <li key={a.id}>
                         <span className="rows__name">
                           {a.challenge!.title}
-                          <span className="block text-[13px] text-slate">
+                          <span className="block text-[13px]" style={{ color: "var(--muted)" }}>
                             {a.providerKind === "Corporate buyer" ? "A corporate buyer" : a.org.name} · {a.challenge!.route}
                             {a.challenge!.budget ? ` · ${a.challenge!.budget}` : ""}
                           </span>
@@ -334,10 +325,10 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-slate">None published yet.</p>
+                  <p style={{ color: "var(--muted)" }}>None published yet.</p>
                 )}
                 {open && challenges.length > 0 && (
-                  <p className="mt-3 text-[14px] text-slate">
+                  <p className="mt-3 text-[14px]" style={{ color: "var(--muted)" }}>
                     Can your business solve one?{" "}
                     <Link className="link" href={apply("seeker")}>
                       Register an opportunity
@@ -346,31 +337,22 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                   </p>
                 )}
               </div>
+              <div className="span-5 begin-8">
+                <h3 className="t-day">What a challenge describes</h3>
+                <ul className="rows">
+                  {["The problem and who has it", "What success looks like, measurably", "Constraints: data, systems, regulation", "Budget range and procurement route", "Who decides, and the steps to a contract"].map((x) => (
+                    <li key={x}>
+                      <span className="rows__name">{x}</span>
+                    </li>
+                  ))}
+                </ul>
+                {open && (
+                  <Link href={apply("challenge")} className="btn btn-secondary mt-5">
+                    Submit an institutional challenge
+                  </Link>
+                )}
+              </div>
             </div>
-          </div>
-        </section>
-
-        <EligibilityCheck slug={slug} sectors={cfg.sectors} countries={cfg.countries.slice(0, 9)} kinds={cfg.providerKinds} open={open} />
-
-        <section className="section" id="how" aria-labelledby="how-h">
-          <div className="wrap">
-            <div className="section-head">
-              <h2 id="how-h">How it works</h2>
-            </div>
-            <ol className="dr-steps">
-              {[
-                ["Apply and get a decision", `A reviewer scores your application against the criteria and may ask for more information. You get a reference number and see your status at any time.`],
-                ["Complete your profile", `Approved businesses write a short teaser and finish their profile within ${r.profileDays} working days. Investors and partners sign the NDA once and are verified.`],
-                ["Accept an introduction", `The Deal Room team proposes a match and a one-page brief. Nothing is shared until both of you accept, within ${r.introDays} days.`],
-                ["Meet at the summit", `Operations books a ${r.meetingMin}-minute slot and a room; you confirm it and get a calendar invite. Your badge checks you in at the Deal Room desk.`],
-              ].map(([t, d], i) => (
-                <li key={t}>
-                  <span className="dr-steps__n">{i + 1}</span>
-                  <h3>{t}</h3>
-                  <p>{d}</p>
-                </li>
-              ))}
-            </ol>
           </div>
         </section>
 
@@ -422,9 +404,11 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                 </div>
                 <div className="faq__item">
                   <h3>How many meetings can I have?</h3>
-                  <p>
-                    Businesses up to {r.seekerCap} across the summit; investors and partners set their own daily cap at onboarding. Meetings are {r.meetingMin} minutes with {r.bufferMin} minutes between them.
-                  </p>
+                  <p>Businesses up to {r.seekerCap} across the summit; investors and partners set their own daily cap at onboarding.</p>
+                </div>
+                <div className="faq__item">
+                  <h3>Can a meeting be moved?</h3>
+                  <p>Yes. Suggest a new time from your portal; the other party agrees or declines, and the Deal Room team confirms the new slot. Until then the meeting keeps its place.</p>
                 </div>
                 {cfg.seekerFee.amount > 0 && (
                   <div className="faq__item">
@@ -485,7 +469,7 @@ function EligibilityCheck({ slug, sectors, countries, kinds, open }: { slug: str
   const answered = rows.every((r) => r.ok !== undefined);
   const pass = answered && rows.every((r) => r.ok);
   // a commercial kind goes to the partner pathway, every other kind to the capital provider pathway
-  const pathway = type === "seeker" ? "seeker" : isPartnerKind(a.kind as ProviderKind) ? "partner" : "capital";
+  const pathway = type === "seeker" ? "seeker" : a.kind === "Public institution" ? "challenge" : isPartnerKind(a.kind as ProviderKind) ? "partner" : "capital";
 
   return (
     <section className="section" id="apply" aria-labelledby="check-h">
@@ -595,7 +579,7 @@ function EligibilityCheck({ slug, sectors, countries, kinds, open }: { slug: str
               ) : pass ? (
                 <>
                   <p>
-                    <b>You look eligible.</b> The application takes about 20 minutes; you can save it and continue on another device.
+                    <b>You look eligible.</b> The application saves as you go, so you can continue on another device.
                   </p>
                   {open && (
                     <Link className="btn btn-primary btn-cta" href={`/e/${slug}/deal-room/apply?type=${pathway}${a.sector ? `&sector=${encodeURIComponent(a.sector)}` : ""}${a.country && a.country !== "Elsewhere" ? `&country=${encodeURIComponent(a.country)}` : ""}${a.instrument && a.instrument !== "Not sure" ? `&instrument=${encodeURIComponent(a.instrument)}` : ""}${type === "provider" && a.kind && a.kind !== "Other" ? `&kind=${encodeURIComponent(a.kind)}` : ""}`}>

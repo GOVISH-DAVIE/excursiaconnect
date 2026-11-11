@@ -404,7 +404,7 @@ function Profile({ app }: { app: DrApplication }) {
   return (
     <>
       <Card title="Your teaser" aside={app.teaser?.approved ? <span className="pill bg-ok-50 text-ok">Approved</span> : app.teaser ? <span className="pill bg-warn-50 text-warn">Waiting for the team</span> : null}>
-        <p className="-mt-1 mb-3 text-[13px] text-slate">The only thing verified investors and partners see before an introduction: a title, one paragraph, your sector, country, the size of the ask and the instrument.</p>
+        <p className="-mt-1 mb-3 text-[13px] text-slate">The only thing verified investors and partners see before an introduction: a title, one paragraph, your sector, country, the size of the ask and the transaction pathway.</p>
         <label className="block">
           <span className="label">Title</span>
           <input className="input" value={teaser.title} onChange={(e) => setTeaser({ ...teaser, title: e.target.value })} />

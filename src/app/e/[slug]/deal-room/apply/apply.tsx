@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
-import { CAPITAL_KINDS, CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PARTNER_KINDS, PATHWAYS, ROLE_LABEL, SEEKER_DOCS, formGaps, roleOf, type DrRole } from "@/lib/dealroom/logic";
+import { CAPITAL_KINDS, CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PARTNER_KINDS, PATHWAYS, PATHWAY_COPY, ROLE_LABEL, SEEKER_DOCS, formGaps, roleOf, type DrRole } from "@/lib/dealroom/logic";
 import type { ChallengeRoute, Currency, DrApplication, DrChallenge, Instrument, OwnerKind, ProviderKind, Stage } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
 import { DocLine, UploadDoc } from "@/app/dealroom/bits";
@@ -101,9 +101,12 @@ export function Apply({ slug }: { slug: string }) {
   const inviteToken = search.get("invite");
   const linked = dr.apps.find((a) => (resumeId && a.id === resumeId) || (inviteToken && a.invite?.token === inviteToken));
   const [pickedMode, setMode] = useState<Mode>(modeFrom(search.get("type")));
+  // a link from a pathway lands on sign-in; the bare apply page asks which pathway first, as registration asks for a ticket
+  const [chosen, setChosen] = useState(() => !!search.get("type"));
   const [typed, setWho] = useState<string | null>(null);
   // a resume or invitation link fills these in once the saved state has loaded, so they are derived, not initial state
   const mode: Mode = linked ? roleOf(linked) : pickedMode;
+  const choosing = !linked && !chosen;
   const type = mode === "seeker" ? "seeker" : "provider";
   const who = typed ?? (linked ? linked.contact.email || linked.contact.phone : "");
   const [codeSent, setCodeSent] = useState(false);
@@ -146,7 +149,14 @@ export function Apply({ slug }: { slug: string }) {
       setMode(was);
       // a lead or an early draft may not have the ask or traction yet: start them blank so every field can be filled
       const fill = blank(event.id, was, email, phone, dr.clock);
-      setApp({ ...existing, ask: existing.ask ?? fill.ask, traction: existing.traction ?? fill.traction, mandate: existing.mandate ?? fill.mandate, contact: { ...existing.contact, email: existing.contact.email || email, phone: existing.contact.phone || phone } });
+      const resumed = { ...existing, ask: existing.ask ?? fill.ask, traction: existing.traction ?? fill.traction, mandate: existing.mandate ?? fill.mandate, contact: { ...existing.contact, email: existing.contact.email || email, phone: existing.contact.phone || phone } };
+      setApp(resumed);
+      // a draft picks up where it stands: the first step with something missing, the steps before it ticked
+      const ks = STEPS[was];
+      const miss = formGaps(resumed, cfg).missing;
+      const firstGap = ks.findIndex((k) => k !== "review" && miss.some((g) => stepOf(g) === k));
+      setStep(firstGap < 0 ? ks.length - 1 : firstGap);
+      setReached(ks.length - 1);
       return;
     }
     const a = blank(event.id, mode, email, phone, dr.clock);
@@ -186,6 +196,10 @@ export function Apply({ slug }: { slug: string }) {
     router.push(`/dr/${app.id}`);
   };
   const up = (patch: Partial<DrApplication>) => setApp((a) => (a ? { ...a, ...patch } : a));
+  // one person may register on more than one pathway; each is its own application, and they should know of the others
+  const others = app
+    ? dr.apps.filter((a) => a.id !== app.id && a.eventId === event.id && !!a.ref && ((!!app.contact.email && a.contact.email.toLowerCase() === app.contact.email.toLowerCase()) || (!!app.contact.phone && a.contact.phone === app.contact.phone)))
+    : [];
   // the organisation types offered on each provider-side pathway
   function kindsFor(m: Mode): ProviderKind[] {
     if (m === "challenge") return CHALLENGE_KINDS;
@@ -211,12 +225,17 @@ export function Apply({ slug }: { slug: string }) {
 
       <main className="wrap wrap--narrow py-10 space-y-5">
         <div>
-          <h1 className="h1">{TITLE[mode]}</h1>
-          <p className="mt-2 text-[15px] max-w-[60ch]">{WHO_FOR[mode]}</p>
+          <h1 className="h1">{choosing ? `Register for the ${event.name} Deal Room` : TITLE[mode]}</h1>
+          <p className="mt-2 text-[15px] max-w-[60ch]">{choosing ? "Select the registration pathway that best reflects your role and the purpose of your participation in the Deal Room." : WHO_FOR[mode]}</p>
           <p className="mt-1 text-slate text-[15px]">
-            {closed ? "Applications are closed." : `Open until ${fmtStamp(cfg.rules.appClose, false)}. About 20 minutes; it saves as you type.`}
+            {closed ? "Applications are closed." : `Open until ${fmtStamp(cfg.rules.appClose, false)}. Your answers save as you type.`}
             {linked?.status === "Invited" && " You were invited by the Deal Room team; your details are filled in."}
           </p>
+          {!choosing && !linked && !app && !closed && hydrated && (
+            <button type="button" className="link mt-3 text-[14px]" onClick={() => { setChosen(false); router.replace(`/e/${slug}/deal-room/apply`, { scroll: false }); }}>
+              Choose another pathway
+            </button>
+          )}
         </div>
 
         {!hydrated ? null : closed ? (
@@ -228,36 +247,60 @@ export function Apply({ slug }: { slug: string }) {
               See its status
             </Link>
           </Card>
+        ) : choosing ? (
+          <section className="surface p-6" aria-label="Registration pathways">
+            {MODES.map((m) => (
+              <button key={m} type="button" className="choice" aria-label={PATHWAY_COPY[m].title} onClick={() => { setMode(m); setChosen(true); router.replace(`/e/${slug}/deal-room/apply?type=${m}`, { scroll: false }); window.scrollTo({ top: 0 }); }}>
+                <span className="choice__title">{ROLE_LABEL[m]}</span>
+                <span className="choice__act btn btn-secondary btn-sm" aria-hidden="true">
+                  {m === "challenge" ? "Submit" : "Register"} <span aria-hidden="true">→</span>
+                </span>
+                <span className="choice__text">{WHO_FOR[m]}</span>
+              </button>
+            ))}
+          </section>
         ) : !app ? (
           <Card title="Sign in with a one-time code">
-            {!linked && (
-              <div className="dr-toggle dr-toggle--wrap mb-4" role="tablist" aria-label="Registration pathway">
-                {MODES.map((m) => (
-                  <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}>
-                    {ROLE_LABEL[m]}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-end">
-              <F label="Email or phone">
-                <input className="input" value={who} onChange={(e) => setWho(e.target.value)} placeholder="you@company.com or +254…" />
-              </F>
-              <button className="btn btn-secondary" disabled={!who.trim()} onClick={() => setCodeSent(true)}>
-                Send a code
-              </button>
-            </div>
-            {codeSent && (
-              <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] items-end">
-                <F label={`Code sent to ${who}`} help="Prototype: the code is 482913.">
-                  <input className="input tracking-[0.3em]" inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
+            <p className="-mt-1 mb-5 text-[14px] text-slate">No password. If you started an application before, the same email or phone brings it back.</p>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!codeSent) {
+                  if (who.trim()) setCodeSent(true);
+                } else if (code === "482913") signIn();
+              }}
+            >
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-end">
+                <F label="Email or phone">
+                  <input className="input" autoComplete="email" value={who} onChange={(e) => { setWho(e.target.value); setCodeSent(false); setCode(""); }} placeholder="you@company.com or +254…" />
                 </F>
-                <button className="btn btn-primary" disabled={code !== "482913"} onClick={signIn}>
-                  Continue
-                </button>
+                {codeSent ? (
+                  <button type="button" className="btn btn-secondary" onClick={() => setCode("")}>
+                    Send again
+                  </button>
+                ) : (
+                  <button type="submit" className="btn btn-primary" disabled={!who.trim()}>
+                    Send a code
+                  </button>
+                )}
               </div>
-            )}
-            <p className="mt-3 text-[13px] text-slate">No password needed. If you started an application before, signing in with the same email or phone brings it back.</p>
+              {codeSent && (
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-end">
+                  <F label={`Code sent to ${who}`} help={code.length === 6 && code !== "482913" ? undefined : "Prototype: the code is 482913."}>
+                    <input className="input tracking-[0.3em] tabular-nums" inputMode="numeric" autoComplete="one-time-code" maxLength={6} autoFocus value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
+                  </F>
+                  <button type="submit" className="btn btn-primary" disabled={code !== "482913"}>
+                    Continue
+                  </button>
+                </div>
+              )}
+              {codeSent && code.length === 6 && code !== "482913" && (
+                <p role="alert" className="text-[13px] text-bad">
+                  That code does not match. Check the message, or send another.
+                </p>
+              )}
+            </form>
           </Card>
         ) : (
           <>
@@ -270,6 +313,21 @@ export function Apply({ slug }: { slug: string }) {
                 </Link>
               </span>
             </div>
+
+            {others.length > 0 && (
+              <p className="rounded-md bg-paper-200 px-4 py-3 text-[14px]">
+                {others.map((o, i) => (
+                  <span key={o.id}>
+                    {i === 0 ? "This email or phone also has " : " and "}a {ROLE_LABEL[roleOf(o)].toLowerCase()} application, {o.ref} (
+                    <Link className="link" href={`/dr/${o.id}`}>
+                      its status
+                    </Link>
+                    )
+                  </span>
+                ))}
+                . This one is separate.
+              </p>
+            )}
 
             <nav aria-label="Application steps">
               <ol className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[14px]">

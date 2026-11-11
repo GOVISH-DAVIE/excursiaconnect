@@ -71,14 +71,18 @@ export function draftBrief(dr: DealRoomState, m: DrMatch) {
   const p = dr.apps.find((a) => a.id === m.providerId)!;
   const ask = s.ask ? `${s.ask.currency} ${s.ask.amount.toLocaleString("en")}` : "–";
   const range = `${p.mandate?.currency} ${p.mandate?.ticketMin.toLocaleString("en")} to ${p.mandate?.ticketMax.toLocaleString("en")}`;
-  // a partner buys, distributes or partners rather than invests, so its side of the brief says so
-  const partner = roleOf(p) === "partner";
-  const side = partner
-    ? `${p.org.name} (${p.providerKind}) works with businesses in ${p.mandate?.sectors.join(", ")} on ${(p.mandate?.instruments ?? []).join(", ").toLowerCase()}, with contracts of ${range}, typically deciding in ${p.mandate?.timeline || "weeks"}.`
-    : `${p.org.name} (${p.providerKind}) invests ${range} in ${p.mandate?.sectors.join(", ")}, typically deciding in ${p.mandate?.timeline || "weeks"}.`;
+  // a partner buys, distributes or partners and a challenge brings a problem; only an investor invests
+  const role = roleOf(p);
+  const partner = role === "partner";
+  const ch = p.challenge;
+  const side = ch
+    ? `${p.org.name} (${p.providerKind}) brings a challenge: ${ch.title.replace(/\.+$/, "")}. ${ch.problem.replace(/\.+$/, "")}. It looks for ${(p.mandate?.instruments ?? []).join(", ").toLowerCase() || "a solution"}, with contracts of ${range}. Route: ${ch.route || "to be agreed"}${ch.timeline ? `. Timeline: ${ch.timeline.replace(/\.+$/, "")}` : ""}.`
+    : partner
+      ? `${p.org.name} (${p.providerKind}) works with businesses in ${p.mandate?.sectors.join(", ")} on ${(p.mandate?.instruments ?? []).join(", ").toLowerCase()}, with contracts of ${range}, typically deciding in ${p.mandate?.timeline || "weeks"}.`
+      : `${p.org.name} (${p.providerKind}) invests ${range} in ${p.mandate?.sectors.join(", ")}, typically deciding in ${p.mandate?.timeline || "weeks"}.`;
   return {
     text: `${s.org.name} (${s.org.sector}, ${s.org.country}) seeks ${ask} in ${s.ask?.instrument.toLowerCase()} for: ${(s.ask?.useOfFunds ?? "").replace(/\.+$/, "")}. ${s.traction?.revenueBand ?? ""}; ${(s.traction?.metrics ?? "").replace(/\.+$/, "")}.\n\n${side}\n\nWhy this pair: ${(m.note || `meets ${m.met.join(", ")}`).replace(/\.+$/, "")}.\n\nDecision-makers: ${s.decisionMaker.name}, ${s.decisionMaker.title}; ${p.decisionMaker.name}, ${p.decisionMaker.title}.`,
-    agenda: ["Introductions and the ask, 5 minutes", partner ? "The partner's requirements and questions, 10 minutes" : "The investor's mandate and questions, 10 minutes", "Next step and who follows up, 5 minutes"],
+    agenda: ["Introductions and the ask, 5 minutes", ch ? "The challenge and the institution's questions, 10 minutes" : partner ? "The partner's requirements and questions, 10 minutes" : "The investor's mandate and questions, 10 minutes", "Next step and who follows up, 5 minutes"],
   };
 }
 
