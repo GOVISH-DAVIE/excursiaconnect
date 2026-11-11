@@ -40,3 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .taste-profile
+
+# the visitor log's SQLite file (VISITS_DB_PATH), on the server only
+/data/
+*.db
+*.db-wal
+*.db-shm
