@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { Wordmark } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
 import { CAPITAL_KINDS, CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PARTNER_KINDS, PATHWAYS, PATHWAY_COPY, ROLE_LABEL, SEEKER_DOCS, formGaps, roleOf, type DrRole } from "@/lib/dealroom/logic";
@@ -659,6 +660,12 @@ export function Apply({ slug }: { slug: string }) {
           </div>
         )}
       </main>
+
+      <footer className={wide ? "wrap pb-10" : "wrap wrap--narrow pb-10"}>
+        <p className="flex items-center justify-center gap-2 border-t border-line pt-6 text-[13px] text-slate">
+          Powered by <Wordmark size="sm" />
+        </p>
+      </footer>
     </div>
   );
 }
