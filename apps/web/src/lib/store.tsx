@@ -19,7 +19,7 @@ export * from "@excursia/domain/core/orders";
 export const STORAGE_KEY = "excursiaconnect-proto-v1";
 /** Bumped whenever the seed gains records in arrays that already exist, so a saved browser resets instead of
  *  keeping an older copy that lacks them (hydrate only merges top-level keys). */
-export const SEED_VERSION = 17;
+export const SEED_VERSION = 18;
 
 /** The rules with the prototype's Ctx: what screens and the rule tests call. */
 export function reducer(state: AppState, action: CoreAction): AppState {

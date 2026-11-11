@@ -11,7 +11,7 @@ npm install
 npm run dev      # the web app (the prototype): http://localhost:3000
 ```
 
-The prototype needs no environment variables, database or payment keys. The Rethink Sans font is bundled locally so it builds offline.
+The demo needs no database or payment keys: its data lives in each browser. The one server-side piece of the prototype is the visitor log below, which needs two environment variables to open. The Rethink Sans font is bundled locally so it builds offline.
 
 The backend being built on branch `backend` ([docs/backend-plan.md](docs/backend-plan.md)) is an Express API, separate from Next.js, on PostgreSQL through Prisma. To work on it locally:
 
@@ -25,6 +25,10 @@ npm run db:admin -- --email you@algotech.example --name "Your Name"   # an Algot
 npm run dev:api      # the API: http://localhost:4000/health/ready; sign-in codes print in its console
 npm run dev:worker   # sends the outbox; away from production, real mail only to MAIL_ALLOW, the rest is printed
 npm run mail:check   # logs in to the mail server (SMTP_* in .env.local) without sending; -- --to you@x sends a test
+npm test             # every suite: the rules, the database's guarantees, the API
+npm run typecheck    # each workspace
+npm run lint         # including the workspace boundaries
+npm run build        # the web app, then the API bundle (apps/api/dist/server.js)
 ```
 
 To walk the product from nothing, on real screens and without the demo seed, use a second, empty database. The demo database is left alone:
@@ -34,10 +38,6 @@ scripts/db/add-local-db.sh excursia_fresh                 # set up like excursia
 LOCAL_DATABASE=excursia_fresh npm run db:deploy            # the schema
 LOCAL_DATABASE=excursia_fresh npm run db:admin -- --email you@algotech.example --name "Your Name"
 LOCAL_DATABASE=excursia_fresh npm run dev:api              # then sign up an organiser at /organisers/signup
-npm test             # every suite: the rules, the database's guarantees, the API
-npm run typecheck    # each workspace
-npm run lint         # including the workspace boundaries
-npm run build        # the web app, then the API bundle (apps/api/dist/server.js)
 ```
 
 One design language covers every screen: tokens, type, buttons and the public site's page rhythm are in [docs/design-system.md](docs/design-system.md). What the prototype covers of the use cases, and what is still missing, is in [docs/coverage.md](docs/coverage.md); a click-through of every screen, with the dead controls and the gaps, is in [docs/qa-findings.md](docs/qa-findings.md).
@@ -72,12 +72,12 @@ Scan verdict order (as in the PRD): valid badge → entitled here, now → anti-
 
 ## Deal Room module
 
-An add-on switched on per event that qualifies opportunity owners (businesses raising capital, and public institutions or corporate buyers bringing a challenge) and the investors, buyers and partners who can meet them, matches them only when both are ready and have accepted an introduction, schedules timed meetings and programmed sessions, and tracks each opportunity to evidenced money for six months. It runs on a seeded Bouer event, Connected Africa 3.0 (15 to 18 February 2027), in the terms of the decision paper *Deal Room Vis a Vis*: three missions, six strategic tracks, 19 sectors, eight transaction pathways, Qualified / Conditional / Referred / Declined, the paper's seven meeting outcomes and five commitment tiers. How the prototype stands against that paper is in [docs/deal-room-vis-a-vis-gaps.md](docs/deal-room-vis-a-vis-gaps.md). The product documents are [01-Deal-Room-PRD.md](docs/01-Deal-Room-PRD.md) to [04-Deal-Room-Research.md](docs/04-Deal-Room-Research.md); what is covered is in [docs/deal-room-coverage.md](docs/deal-room-coverage.md) and the flow-by-flow test in [docs/deal-room-use-case-test.md](docs/deal-room-use-case-test.md).
+An add-on switched on per event that qualifies opportunity owners (businesses raising capital, and public institutions or corporate buyers bringing a challenge) and the investors and commercial or strategic partners who can meet them, matches them only when both are ready and have accepted an introduction, schedules timed meetings and programmed sessions, and tracks each opportunity to evidenced money for six months. It runs on a seeded Bouer event, Connected Africa 3.0 (15 to 18 February 2027), in the terms of the decision paper *Deal Room Vis a Vis*: three missions, six strategic tracks, 19 sectors, eight transaction pathways, Qualified / Conditional / Referred / Declined, the paper's seven meeting outcomes and five commitment tiers. How the prototype stands against that paper is in [docs/deal-room-vis-a-vis-gaps.md](docs/deal-room-vis-a-vis-gaps.md). The product documents are [01-Deal-Room-PRD.md](docs/01-Deal-Room-PRD.md) to [04-Deal-Room-Research.md](docs/04-Deal-Room-Research.md); what is covered is in [docs/deal-room-coverage.md](docs/deal-room-coverage.md) and the flow-by-flow test in [docs/deal-room-use-case-test.md](docs/deal-room-use-case-test.md).
 
 | Route | Persona | What it shows |
 | --- | --- | --- |
-| `/e/connected-africa-3/deal-room` | Public | Who it is for, the participation fee, bringing a challenge and the open challenges, the eligibility self-check, how it works, missions and tracks, questions |
-| `/e/connected-africa-3/deal-room/apply` | Applicant | One-time code (prototype: `482913`); raising capital, providing finance, or bringing a challenge (`?type=challenge`); autosave and resume link, gaps named on submit |
+| `/e/connected-africa-3/deal-room` | Public | The hero with the four pathways in a panel, the Deal Room activities, the four registration pathways, how it works and what is checked (with the fee), the eligibility self-check, institutional challenges and the open ones, missions and tracks, questions |
+| `/e/connected-africa-3/deal-room/apply` | Applicant | One-time code (prototype: `482913`); four pathways: capital seeker, capital provider, commercial or strategic partner, institutional challenge (`?type=seeker|capital|partner|challenge`; the old `provider` opens capital provider; no type opens a pathway chooser); a stepper per pathway; autosave and resume link, gaps named on submit |
 | `/dr/[appId]` | Participant | Status, requests, decision, the USD 250 fee by M-Pesa or card once approved, profile and teaser, verification and NDA, challenge, mandate; then directory, introductions with consent, meetings, the programme of sessions to accept or decline, deals and the access log. Try `dr_cs54` (seeker), `dr_cs50` (hosts a session), `dr_cs41` (approved, fee unpaid), `dr_fp29` (investor), `dr_ch01` (a ministry's challenge), `dr_cs24`, `dr_fp10` |
 | `/dealroom` | Deal Room team | Dashboard against the targets, applications and review, matching, meetings, live board, programme (sessions in the paper's 11 formats, each day's emphasis and close-out), pipeline (the paper's 13 statuses with date, owner and evidence), opportunities, reports, notifications, settings. Switch who you are in the rail: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight (read-only) |
 | `/scan?event=ev_ca3&post=drdesk` | Desk staff | Deal Room desk and room doors, judged against each participant's meetings |
@@ -103,12 +103,58 @@ Halls, floor plans and booths; exhibitor applications and approval; booth holds,
 
 **Where the rules live.** In `packages/domain/src/expo/`: `logic.ts`, `onsite.ts` and `ops.ts` hold the rules as pure functions; `reducer.ts` and `onsite-reducer.ts` enforce them, and the store's `accredit` and `scanVerdict` apply the desk and door rules. Settings, Checks sends 50 hold requests through the real reducer and runs the invariant check.
 
+## Visitor log
+
+Every page opened in the prototype is recorded on the server in SQLite:
+- the visitor's IP address and browser;
+- the session, which ends after 30 minutes idle;
+- each page with the seconds it was in view;
+- each click on a link, button or tab, by its label;
+- a screen recording for replay (rrweb): the page, scrolling, the mouse and clicks. Every input field is masked in the browser before anything is sent.
+
+Text a visitor's actions put on the page (a message they sent, say) shows in the replay. Query strings are never recorded. Records older than 90 days are deleted, recordings with them. One session keeps at most 25 MB of recording. The home page says all this.
+
+It is read at `/adminwatch`, which is not linked from the prototype, is not indexed, and opens with a password:
+- **Sessions:** a list with a **Play** button for each recorded one.
+- **A session's page:** the replay, with a button per page that jumps to it, then the pages and clicks in order.
+- **Its own pages:** nothing in `/adminwatch` is ever recorded or replayed.
+
+| Variable | What it does |
+| --- | --- |
+| `ADMINWATCH_PASSWORD` | The password for `/adminwatch`. Unset, the page says it is not set up and nothing opens |
+| `ADMINWATCH_SECRET` | 32 characters or more, signs the 12-hour sign-in cookie (`openssl rand -base64 48`) |
+| `VISITS_DB_PATH` | Where the SQLite file lives; default `data/visits.db`. The Node process must be able to write there; back it up |
+
+After five wrong passwords from one address in 15 minutes, sign-in is refused. Every attempt is recorded.
+
+**Deployment.** The app runs as one `next start`, behind nginx, listening on loopback only so that the forwarded IP can be trusted:
+
+```bash
+npm run build && npm start -- -H 127.0.0.1 -p 3000
+```
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:3000;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Requirements:
+- **Node:** 20 or 22.
+- **SQLite library:** `better-sqlite3` installs from a prebuilt binary. Where there is none, it builds with `python3`, `make` and `g++`.
+- **Instances:** one only. The SQLite file belongs to one process, so it does not suit several instances.
+
 ## Structure
 
 ```
 apps/web/                      the Next.js app (@excursia/web): the prototype's screens
-  src/app/                     routes per persona
-  src/components/              ui primitives, programme view, floor plan, reset button
+  src/app/                     routes per persona; api/visit takes the beacon's events, adminwatch reads the log
+  src/components/              ui primitives, programme view, floor plan, reset button, visit beacon
+  src/server/visits/           the visitor log on the server: SQLite (db), IP, browser, sign-in, writes and reads
   src/lib/store.tsx            client store (reducer + localStorage, versioned); re-exports scanVerdict, makeOrder, money
   src/lib/download.ts          CSV and text downloads; brand.ts, media.ts, use-today.ts
   public/brand/                ExcursiaConnect logo files

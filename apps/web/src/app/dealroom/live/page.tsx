@@ -208,7 +208,7 @@ function Tile({ m, on, onPick }: { m: DrMeeting; on: boolean; onPick: () => void
       <div className="mt-1 truncate">{dr.apps.find((a) => a.id === mm.seekerId)?.org.name}</div>
       <div className="truncate text-slate">{dr.apps.find((a) => a.id === mm.providerId)?.org.name}</div>
       <div className="mt-1 text-slate">
-        {m.arrivals.seeker ? "●" : "○"} seeker {m.arrivals.provider ? "●" : "○"} provider
+        {m.arrivals.seeker ? "●" : "○"} seeker {m.arrivals.provider ? "●" : "○"} counterparty
       </div>
     </button>
   );
@@ -234,7 +234,7 @@ function Actions({ m }: { m: DrMeeting }) {
         <b className="font-medium">{s.org.name}</b> ({s.decisionMaker.name}) with <b className="font-medium">{p.org.name}</b> ({p.decisionMaker.name})
       </div>
       <div className="mt-1 text-[13px] text-slate">
-        Arrived: seeker {m.arrivals.seeker ? m.arrivals.seeker.slice(11) : "not yet"}, provider {m.arrivals.provider ? m.arrivals.provider.slice(11) : "not yet"}
+        Arrived: seeker {m.arrivals.seeker ? m.arrivals.seeker.slice(11) : "not yet"}, counterparty {m.arrivals.provider ? m.arrivals.provider.slice(11) : "not yet"}
       </div>
       {m.status === "Confirmed" && can("liveboard") && (
         <button className="btn-secondary btn-sm mt-3" onClick={() => dispatch({ type: "dr/startMeeting", meetingId: m.id })}>
@@ -273,7 +273,7 @@ function Actions({ m }: { m: DrMeeting }) {
           {attendance === "No-show" ? (
             <select className="input h-9 text-[13px]" value={noShow} onChange={(e) => setNoShow(e.target.value as typeof noShow)}>
               <option value="seeker">The seeker did not come</option>
-              <option value="provider">The provider did not come</option>
+              <option value="provider">The counterparty did not come</option>
               <option value="both">Neither came</option>
             </select>
           ) : (

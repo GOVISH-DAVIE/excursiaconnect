@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
-import { MATCH_LABEL, ticketBand, blockedPair, candidates, compact, drCan, matchStage, matchable, missionName, staffName, type MatchStage } from "@excursia/domain/dealroom/logic";
+import { fieldLabel, ticketBand, blockedPair, candidates, compact, drCan, matchStage, matchable, missionName, staffName, type MatchStage } from "@excursia/domain/dealroom/logic";
 import type { DrApplication } from "@excursia/domain/dealroom/types";
 import { row } from "@excursia/domain/csv";
 import { downloadCsv } from "@/lib/download";
@@ -31,7 +31,7 @@ function MatchingBody() {
   const suggestions = dr.matches.filter((m) => m.decision === "Suggested").length;
   return (
     <>
-      <PageHeader title="Matching" kicker="Only Deal Room Ready seekers and verified providers are searched. Every pair shows what it meets and misses; a person approves, rejects or defers it." />
+      <PageHeader title="Matching" kicker="Only Deal Room Ready seekers and verified investors and partners are searched. Every pair shows what it meets and misses; a person approves, rejects or defers it." />
       <Tabs tabs={tabs} value={tab} onChange={setTab} counts={{ Suggestions: suggestions }} />
       {tab === "Find matches" && <Find />}
       {tab === "Suggestions" && <Suggestions />}
@@ -62,7 +62,7 @@ function Find() {
               Seekers
             </button>
             <button role="tab" aria-selected={side === "provider"} onClick={() => { setSide("provider"); setPickedId(""); }}>
-              Providers
+              Investors and partners
             </button>
           </div>
           <select className="input h-9 text-[13px]" value={mission} onChange={(e) => { setMission(e.target.value); setPickedId(""); }}>
@@ -139,12 +139,12 @@ function CandidateRow({ c, now }: { c: ReturnType<typeof candidates>[number]; no
           <div className="mt-1 flex flex-wrap gap-1">
             {c.met.map((f) => (
               <span key={f} className="pill bg-ok-50 text-ok">
-                ✓ {MATCH_LABEL[f]}
+                ✓ {fieldLabel(f, c.provider)}
               </span>
             ))}
             {c.missed.map((f) => (
               <span key={f} className={`pill ${c.mandatoryMiss.includes(f) ? "bg-bad-50 text-bad" : "bg-paper-200 text-slate"}`}>
-                ✗ {MATCH_LABEL[f]}
+                ✗ {fieldLabel(f, c.provider)}
                 {f === "exclusions" && c.exclusionHit ? `: ${c.exclusionHit}` : ""}
               </span>
             ))}
@@ -233,12 +233,12 @@ function Suggestions() {
                 <div className="text-[14px]">
                   <b className="font-medium">{p.org.name}</b> is interested in <b className="font-medium">{s.org.name}</b>
                   <div className="text-[12px] text-slate">
-                    {fmtStamp(m.at)} · meets {m.met.map((f) => MATCH_LABEL[f].toLowerCase()).join(", ") || "nothing yet scored"}
+                    {fmtStamp(m.at)} · meets {m.met.map((f) => fieldLabel(f, p).toLowerCase()).join(", ") || "nothing yet scored"}
                   </div>
                   <input className="input h-8 text-[13px] mt-2" placeholder="Note" value={notes[m.id] ?? ""} onChange={(e) => setNotes({ ...notes, [m.id]: e.target.value })} />
                 </div>
                 <div className="flex gap-2">
-                  <button className="btn-primary btn-sm" onClick={() => dispatch({ type: "dr/matchDecide", seekerId: s.id, providerId: p.id, decision: "Approved", note: notes[m.id] || "Provider's interest from the directory" })}>
+                  <button className="btn-primary btn-sm" onClick={() => dispatch({ type: "dr/matchDecide", seekerId: s.id, providerId: p.id, decision: "Approved", note: notes[m.id] || "Interest from the directory" })}>
                     Turn into a match
                   </button>
                   <button className="btn-secondary btn-sm" onClick={() => dispatch({ type: "dr/matchDecide", seekerId: s.id, providerId: p.id, decision: "Rejected", note: notes[m.id] || "Declined after review" })}>
@@ -276,8 +276,8 @@ function ByMission() {
   const list = stage ? all.filter((x) => x.st === stage) : all;
   const exportCsv = () =>
     downloadCsv(`deal-room-matches-${cfg.missions.find((m) => m.id === mission)?.code}`, [
-      row(["Seeker", "Provider", "Stage", "Meets", "Misses", "Note", "Decided by", "Brief"]),
-      ...list.map((x) => row([x.s.org.name, x.p.org.name, x.st, x.m.met.join(" "), x.m.missed.join(" "), x.m.note, staffName(dr, x.m.by), x.m.brief?.text ?? ""])),
+      row(["Seeker", "Counterparty", "Counterparty type", "Stage", "Meets", "Misses", "Note", "Decided by", "Brief"]),
+      ...list.map((x) => row([x.s.org.name, x.p.org.name, typeLabel(x.p), x.st, x.m.met.join(" "), x.m.missed.join(" "), x.m.note, staffName(dr, x.m.by), x.m.brief?.text ?? ""])),
     ]);
   return (
     <>
@@ -332,7 +332,7 @@ function ByMission() {
           <thead>
             <tr>
               <th className="th">Seeker</th>
-              <th className="th">Provider</th>
+              <th className="th">Counterparty</th>
               <th className="th">Fit</th>
               <th className="th">Stage</th>
             </tr>

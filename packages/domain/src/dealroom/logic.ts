@@ -112,18 +112,63 @@ export const CHALLENGE_KINDS: ProviderKind[] = ["Public institution", "Corporate
 export const CHALLENGE_ROUTES: ChallengeRoute[] = ["Request for proposals", "Pilot", "Public-private partnership", "Direct procurement", "Innovation challenge", "Co-development"];
 /** A provider-side application that brings a problem to solve rather than capital. */
 export const isChallenge = (a: DrApplication) => a.type === "provider" && !!a.challenge;
+
+/* ---------- the four registration pathways ---------- */
+
+/** Who brings capital. Every other provider-side kind is a commercial or strategic partner. */
+export const CAPITAL_KINDS: ProviderKind[] = ["Angel investor", "Venture capital", "Private equity", "Fund", "DFI", "Bank"];
+/** Corporates, procurement teams, distributors, technology providers and regional operators: they buy, distribute or partner rather than invest. */
+export const PARTNER_KINDS: ProviderKind[] = ["Corporate buyer", "Distributor or channel partner", "Ecosystem partner", "Technology partner", "Regional operator"];
+/**
+ * The role a participant registered under. Storage keeps two sides (seeker and provider), so a partner, like a
+ * challenge, is the provider side of a pair: the role is worked out from the provider's kind and its challenge.
+ */
+export type DrRole = "seeker" | "capital" | "partner" | "challenge";
+export const ROLES: DrRole[] = ["seeker", "capital", "partner", "challenge"];
+export const ROLE_LABEL: Record<DrRole, string> = { seeker: "Capital seeker", capital: "Capital provider", partner: "Commercial or strategic partner", challenge: "Institutional challenge" };
+export const ROLE_SHORT: Record<DrRole, string> = { seeker: "Seeker", capital: "Investor", partner: "Partner", challenge: "Challenge" };
+/** The organiser's words for each registration pathway: the public page and the apply page both read them from here. */
+export const PATHWAY_COPY: Record<DrRole, { title: string; text: string; cta: string }> = {
+  seeker: {
+    title: "Register as a capital seeker",
+    text: "For startups, scale-ups, established enterprises and project sponsors seeking investment or financing to establish, expand or scale their businesses and projects. This includes equity investment, venture capital, growth capital, debt financing, project finance and blended finance opportunities.",
+    cta: "Register an opportunity",
+  },
+  capital: {
+    title: "Register as a capital provider",
+    text: "For angel investors, venture capital and private equity firms, banks, development finance institutions, institutional investors and funds seeking to identify and engage with qualified businesses, investment propositions and projects aligned with their investment mandates.",
+    cta: "Register as an investor or capital provider",
+  },
+  partner: {
+    title: "Register as a commercial or strategic partner",
+    text: "For corporates, enterprises, procurement teams, distributors, technology providers and regional operators seeking commercial relationships, qualified suppliers, innovative solutions, distribution networks, market-entry opportunities and strategic partnerships.",
+    cta: "Register as a commercial or strategic partner",
+  },
+  challenge: {
+    title: "Submit an institutional challenge",
+    text: "For government ministries, public agencies, county governments, regulators and corporate institutions seeking innovative solutions, technical capabilities, investment or implementation partners to address defined institutional, operational, infrastructure and service-delivery priorities.",
+    cta: "Submit an institutional challenge",
+  },
+};
+/** A partner kind; a public institution without a challenge counts as one too, as it brings partnership interests rather than capital. */
+export const isPartnerKind = (k?: ProviderKind) => !!k && (PARTNER_KINDS.includes(k) || k === "Public institution");
+export function roleOf(a: DrApplication): DrRole {
+  if (a.type === "seeker") return "seeker";
+  if (a.challenge) return "challenge";
+  return isPartnerKind(a.providerKind) ? "partner" : "capital";
+}
 /* ---------- sessions: the paper's activity formats and four-day programme ---------- */
 
-export const SESSION_FORMATS: { format: SessionFormat; short: string; what: string; hostKind: "seeker" | "provider" | "challenge" | "none" }[] = [
+export const SESSION_FORMATS: { format: SessionFormat; short: string; what: string; hostKind: "seeker" | "provider" | "partner" | "challenge" | "none" }[] = [
   { format: "Investment opportunity presentation", short: "Presentation", what: "Curated investment cases for relevant funders, timed with moderated questions. Record investor interest, information requests and diligence steps.", hostKind: "seeker" },
   { format: "Reverse pitch or mandate briefing", short: "Reverse pitch", what: "A capital provider or buyer explains sectors, geography, ticket or contract range, pathways, criteria, exclusions and decision process.", hostKind: "provider" },
-  { format: "Corporate procurement and supplier discovery", short: "Supplier discovery", what: "Buyer-led discovery around a defined need: specifications, vendor eligibility, vetted suppliers and the pilot or RFP route. No award is promised.", hostKind: "challenge" },
+  { format: "Corporate procurement and supplier discovery", short: "Supplier discovery", what: "Buyer-led discovery around a defined need: specifications, vendor eligibility, vetted suppliers and the pilot or RFP route. No award is promised.", hostKind: "partner" },
   { format: "Government challenge session", short: "Challenge session", what: "An institution presents a service-delivery challenge: users, constraints, outcome and approval context. Capture a solution shortlist and the procurement, PPP or feasibility route.", hostKind: "challenge" },
   { format: "Project finance presentation", short: "Project finance", what: "Project sponsors present structure and bankability: stage, capital need, repayment, risk allocation and approvals. Record diligence gaps and preparation actions.", hostKind: "seeker" },
   { format: "VC, PE and growth-capital clinic", short: "Capital clinic", what: "Focused investor consultations matched to stage and mandate. Capture fit, information requests, diligence pathway and readiness gaps; no funding guarantee.", hostKind: "provider" },
   { format: "DFI and blended-finance roundtable", short: "DFI roundtable", what: "Closed-door discussion of bankability, risk mitigation, additionality, eligibility and safeguards. Does not imply funding is available.", hostKind: "provider" },
   { format: "Technology deployment and pilot meeting", short: "Pilot scoping", what: "From interest to a testable scope: use case, integration and security, success measures, indicative cost, sponsor, technical owner and decision date.", hostKind: "challenge" },
-  { format: "Market-entry and cross-border partnership", short: "Market entry", what: "Expanding businesses meet distributors, local partners, trade agencies and logistics or payment providers; capture partner diligence and market-entry actions.", hostKind: "none" },
+  { format: "Market-entry and cross-border partnership", short: "Market entry", what: "Expanding businesses meet distributors, local partners, trade agencies and logistics or payment providers; capture partner diligence and market-entry actions.", hostKind: "partner" },
   { format: "Deal advisory and readiness clinic", short: "Readiness clinic", what: "Diagnose gaps in governance, financial information, data rooms, project preparation or pitch materials; leave a written action list.", hostKind: "none" },
   { format: "Negotiation and deal progression", short: "Negotiation", what: "Authorised parties progress terms, diligence, pilot scope and commercial structure. Record agreed points and open issues; no commitment claimed without evidence.", hostKind: "none" },
 ];
@@ -313,12 +358,12 @@ export const SEEKER_FIELDS: { key: string; label: string; get: (a: DrApplication
 
 export const PROVIDER_FIELDS: { key: string; label: string; get: (a: DrApplication) => unknown }[] = [
   { key: "org.name", label: "Organisation", get: (a) => a.org.name },
-  { key: "providerKind", label: "Provider type", get: (a) => a.providerKind },
+  { key: "providerKind", label: "Organisation type", get: (a) => a.providerKind },
   { key: "org.country", label: "Headquarters", get: (a) => a.org.country },
   { key: "mandate.sectors", label: "Sectors", get: (a) => a.mandate?.sectors.length },
   { key: "mandate.countries", label: "Countries", get: (a) => a.mandate?.countries.length },
   { key: "mandate.stages", label: "Stages", get: (a) => a.mandate?.stages.length },
-  { key: "mandate.ticket", label: "Ticket range", get: (a) => a.mandate && a.mandate.ticketMax > 0 && a.mandate.ticketMax >= a.mandate.ticketMin },
+  { key: "mandate.ticket", label: "Ticket or contract range", get: (a) => a.mandate && a.mandate.ticketMax > 0 && a.mandate.ticketMax >= a.mandate.ticketMin },
   { key: "mandate.instruments", label: "Transaction pathways", get: (a) => a.mandate?.instruments.length },
   { key: "mandate.exclusions", label: "Exclusions", get: (a) => a.mandate?.exclusions.length },
   { key: "mandate.timeline", label: "Decision timeline", get: (a) => a.mandate?.timeline },
@@ -451,6 +496,10 @@ export function consentGranted(dr: DealRoomState, seekerId: string, providerId: 
 /* ---------- matching (Cut 2) ---------- */
 
 export const MATCH_LABEL: Record<MatchField, string> = { sector: "Sector", country: "Country", stage: "Stage", ticket: "Ticket size", instrument: "Pathway", exclusions: "Exclusions" };
+/** A match field's name for this provider: a partner's or a challenge's range is a contract size, not a ticket. */
+export const fieldLabel = (field: MatchField, provider?: DrApplication) => (field === "ticket" && provider && roleOf(provider) !== "capital" ? "Contract size" : MATCH_LABEL[field]);
+/** The two sides of a pair as people read them: the provider side may be an investor, a partner or a challenge. */
+export const sideName = (side: "seeker" | "provider") => (side === "provider" ? "counterparty" : "seeker");
 
 /** Which matching fields a pair meets and misses; an exclusion hit is named, not hidden (PRD Matching req. 2). */
 export function fit(seeker: DrApplication, provider: DrApplication, cfg: DrConfig) {
@@ -532,6 +581,12 @@ export function funnel(dr: DealRoomState, eventId: string) {
     ready: count(seekers, (a) => qualified(a) && a.readiness === "Deal Room Ready"),
     seekers: seekers.length,
     providers: providers.length,
+    // the provider side split by registration pathway
+    capital: count(providers, (a) => roleOf(a) === "capital"),
+    partners: count(providers, (a) => roleOf(a) === "partner"),
+    challenges: count(providers, (a) => roleOf(a) === "challenge"),
+    verifiedCapital: count(providers, (a) => roleOf(a) === "capital" && a.verification?.state === "Verified"),
+    verifiedPartners: count(providers, (a) => roleOf(a) === "partner" && a.verification?.state === "Verified"),
   };
 }
 
@@ -729,6 +784,20 @@ export function slotProblems(
   return { clashes, caps, end };
 }
 
+/**
+ * Where a meeting could go at a new start time: its own room and table when free, otherwise the first free table
+ * in any Deal Room room (an online meeting keeps its link). Undefined when either party, or every table, is taken.
+ */
+export function moveSpot(state: Parameters<typeof slotProblems>[0], mt: DrMeeting, start: string): { roomId?: string; table?: number; link?: string } | undefined {
+  const base = { matchId: mt.matchId, start, flagged: mt.flagged, ignore: mt.id };
+  if (mt.link) return slotProblems(state, { ...base, link: mt.link }).clashes.length ? undefined : { link: mt.link };
+  const cfg = state.dealRoom.configs[mt.eventId];
+  const tables: [string, number][] = Object.entries(cfg.rooms).flatMap(([id, rc]) => Array.from({ length: rc.tables }, (_, i) => [id, i + 1] as [string, number]));
+  const tries: [string, number][] = mt.roomId && mt.table ? [[mt.roomId, mt.table], ...tables] : tables;
+  for (const [roomId, table] of tries) if (!slotProblems(state, { ...base, roomId, table }).clashes.length) return { roomId, table };
+  return undefined;
+}
+
 /** The slot grid for a day: every start time from the day's opening, a meeting plus a buffer apart. */
 export function slotTimes(cfg: DrConfig) {
   const out: string[] = [];
@@ -768,7 +837,7 @@ export const CLOSE_REASONS: CloseReason[] = ["No fit", "Timing", "Terms", "Dilig
 /** What each stage needs before an opportunity may enter it (PRD Conversion, stages table). */
 export const STAGE_EVIDENCE: Record<OppStage, string> = {
   "Follow-up": "The meeting outcome",
-  Diligence: "A note or the provider's data request",
+  Diligence: "A note or the counterparty's data request",
   Negotiation: "A term sheet or written proposal",
   "Closed – won": "A signed commitment, recorded as an outcome",
   "Closed – lost": "A close reason and a note",
@@ -866,7 +935,7 @@ export function fitDetail(seeker: DrApplication, provider: DrApplication, cfg: D
       : field === "ticket" ? [a ? compact(a.amount, a.currency) : "–", m ? `${compact(m.ticketMin, m.currency)} to ${compact(m.ticketMax, m.currency)}` : "none set"]
       : field === "instrument" ? [a?.instrument ?? "–", list(m?.instruments)]
       : [f.exclusionHit ? `Hits “${f.exclusionHit}”` : "No exclusion hit", list(m?.exclusions)];
-    return { field, label: MATCH_LABEL[field], mandatory, ok: f.met.includes(field), has, wants };
+    return { field, label: fieldLabel(field, provider), mandatory, ok: f.met.includes(field), has, wants };
   });
 }
 

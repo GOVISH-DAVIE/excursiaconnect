@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
-import { EV_CA3, acting, canSeeInternal, decisionOf, drCan, publicStatus, type DrCap } from "@excursia/domain/dealroom/logic";
+import { EV_CA3, ROLE_LABEL, acting, canSeeInternal, decisionOf, drCan, publicStatus, roleOf, type DrCap } from "@excursia/domain/dealroom/logic";
 import type { DealRoomState, DocKind, DrApplication, DrDocument, DrStaff } from "@excursia/domain/dealroom/types";
 import { fmtStamp } from "@excursia/domain/time";
 
@@ -80,7 +80,14 @@ export function ApplicantStatus({ app }: { app: DrApplication }) {
   return <Pill tone={tone}>{s}</Pill>;
 }
 
-export const typeLabel = (a: DrApplication) => (a.type === "seeker" ? "Capital seeker" : a.challenge ? `Challenge, ${(a.providerKind ?? "institution").toLowerCase()}` : a.providerKind ?? "Finance provider");
+/** The role and kind in a few words: "Capital seeker", "Venture capital", "Partner, distributor or channel partner", "Challenge, public institution". */
+export const typeLabel = (a: DrApplication) => {
+  const role = roleOf(a);
+  if (role === "seeker") return ROLE_LABEL.seeker;
+  if (role === "challenge") return `Challenge, ${(a.providerKind ?? "institution").toLowerCase()}`;
+  if (role === "partner") return a.providerKind ? `Partner, ${a.providerKind.toLowerCase()}` : ROLE_LABEL.partner;
+  return a.providerKind ?? ROLE_LABEL.capital;
+};
 
 export function When({ at, time = true }: { at?: string; time?: boolean }) {
   if (!at) return <span className="text-slate">–</span>;

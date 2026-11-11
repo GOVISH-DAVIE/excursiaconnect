@@ -32,7 +32,9 @@ export function Apply({ slug }: { slug: string }) {
   if (form.isPending) return <div className="p-10 text-slate">Loading…</div>;
   if (form.isError) return <div className="p-10">{form.error.message}</div>;
   const typeParam = search.get("type");
-  return <Page slug={slug} form={form.data} initialMode={typeParam === "provider" || typeParam === "challenge" ? typeParam : "seeker"} invite={search.get("invite")} />;
+  // the Deal Room page's four pathways: capital providers and partners apply on the provider form for now
+  const initialMode: ApplyMode = typeParam === "challenge" ? "challenge" : typeParam === "provider" || typeParam === "capital" || typeParam === "partner" ? "provider" : "seeker";
+  return <Page slug={slug} form={form.data} initialMode={initialMode} invite={search.get("invite")} />;
 }
 
 function Page({ slug, form, initialMode, invite }: { slug: string; form: ApplyForm; initialMode: ApplyMode; invite: string | null }) {

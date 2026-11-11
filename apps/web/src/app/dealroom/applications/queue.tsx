@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
-import { FLAGS, decisionOf, drCan, missionName, pendingSecond, staffName, type FlagKey } from "@excursia/domain/dealroom/logic";
+import { FLAGS, decisionOf, drCan, missionName, pendingSecond, roleOf, staffName, type FlagKey } from "@excursia/domain/dealroom/logic";
 import type { AppStatus, DealRoomState, DrApplication } from "@excursia/domain/dealroom/types";
 import { splitCsv } from "@excursia/domain/csv";
 import { DecisionPill, ReadinessPill, Refusal, StatusPill, When, typeLabel, useDr } from "../bits";
@@ -15,7 +15,7 @@ const tabs = ["Queue", "Import leads", "Duplicates"] as const;
 /** Filters a drill-down can add on top of the bar's own: a decision, a provider type, a verification state, a source, a sector. */
 const DRILL: { key: string; label: string; test: (a: DrApplication, v: string) => boolean; show?: (v: string, dr: DealRoomState) => string }[] = [
   { key: "decision", label: "Decision", test: (a, v) => decisionOf(a)?.decision === v },
-  { key: "kind", label: "Provider type", test: (a, v) => a.providerKind === v },
+  { key: "kind", label: "Organisation type", test: (a, v) => a.providerKind === v },
   { key: "verification", label: "Verification", test: (a, v) => a.verification?.state === v },
   { key: "nda", label: "NDA", test: (a) => !!a.verification?.nda, show: () => "signed" },
   { key: "source", label: "Source", test: (a, v) => a.source === v },
@@ -67,7 +67,8 @@ export function Queue() {
     const needle = q.trim().toLowerCase();
     return dr.apps
       .filter((a) => a.eventId === cfg.eventId)
-      .filter((a) => filters.type === "All" || a.type === filters.type)
+      // "provider" is the whole provider side, as older links have it; the other values are the four pathways
+      .filter((a) => filters.type === "All" || (filters.type === "provider" ? a.type === "provider" : roleOf(a) === filters.type))
       .filter((a) => filters.mission === "All" || a.mission === filters.mission)
       .filter((a) => !statuses.length || statuses.includes(a.status))
       .filter((a) => extra.every((d) => d.test(a, d.value)))
@@ -96,7 +97,10 @@ export function Queue() {
               <select className="input" aria-label="Type" value={filters.type} onChange={(e) => setFilter("type", e.target.value)}>
                 <option value="All">All types</option>
                 <option value="seeker">Capital seekers</option>
-                <option value="provider">Finance providers</option>
+                <option value="capital">Capital providers</option>
+                <option value="partner">Commercial partners</option>
+                <option value="challenge">Institutional challenges</option>
+                <option value="provider">Investors, partners and challenges</option>
               </select>
               <select className="input" aria-label="Mission" value={filters.mission} onChange={(e) => setFilter("mission", e.target.value)}>
                 <option value="All">All missions</option>

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Empty, PageHeader, Section } from "@/components/ui";
-import { MEETING_OUTCOMES, MEETING_OUTCOME_HELP, PROGRAMME_DAYS, SESSION_FORMATS, eventDay, formatInfo, occupies, sessionOpenOutcomes, staffName, trackName } from "@excursia/domain/dealroom/logic";
+import { MEETING_OUTCOMES, MEETING_OUTCOME_HELP, PROGRAMME_DAYS, SESSION_FORMATS, eventDay, formatInfo, occupies, PARTNER_KINDS, roleOf, sessionOpenOutcomes, staffName, trackName } from "@excursia/domain/dealroom/logic";
 import { acceptProblems, invitable, sessionProblems, type DrSessionDraft } from "@excursia/domain/dealroom/sessions";
 import type { DrSession, MeetingOutcome, SessionFormat } from "@excursia/domain/dealroom/types";
 import { addMinutes, fmtStamp } from "@excursia/domain/time";
@@ -198,7 +198,7 @@ function PlanForm({ date, session, onDone }: { date: string; session?: DrSession
   const info = formatInfo(format);
   const hosts = dr.apps
     .filter((a) => a.eventId === cfg!.eventId && invitable(a))
-    .filter((a) => (info.hostKind === "seeker" ? a.type === "seeker" : info.hostKind === "provider" ? a.type === "provider" && !a.challenge : info.hostKind === "challenge" ? !!a.challenge || a.providerKind === "Corporate buyer" : true))
+    .filter((a) => (info.hostKind === "seeker" ? a.type === "seeker" : info.hostKind === "provider" ? a.type === "provider" && !a.challenge : info.hostKind === "partner" ? roleOf(a) === "partner" || (!!a.challenge && !!a.providerKind && PARTNER_KINDS.includes(a.providerKind)) : info.hostKind === "challenge" ? !!a.challenge || a.providerKind === "Corporate buyer" : true))
     .sort((a, b) => a.org.name.localeCompare(b.org.name));
   const draft: DrSessionDraft = { id: session?.id, eventId: cfg!.eventId, format, title, start: `${day} ${start}`, end: `${day} ${end}`, roomId, host: host || undefined, track: track || undefined };
   const problems = sessionProblems(state, draft);
@@ -244,7 +244,7 @@ function PlanForm({ date, session, onDone }: { date: string; session?: DrSession
             ))}
           </select>
         </Labeled>
-        <Labeled label="Host" help={info.hostKind === "none" ? "Optional: the team runs this format" : info.hostKind === "challenge" ? "An institution or buyer with a verified challenge" : info.hostKind === "seeker" ? "A qualified business presenting" : "A verified provider"} span>
+        <Labeled label="Host" help={info.hostKind === "none" ? "Optional: the team runs this format" : info.hostKind === "challenge" ? "An institution or buyer with a verified challenge" : info.hostKind === "partner" ? "A verified commercial or strategic partner" : info.hostKind === "seeker" ? "A qualified business presenting" : "A verified investor or partner"} span>
           <select className="input" value={host} onChange={(e) => setHost(e.target.value)}>
             <option value="">{info.hostKind === "none" ? "The Deal Room team" : "Choose"}</option>
             {hosts.map((a) => (

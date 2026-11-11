@@ -114,7 +114,7 @@ function Forms({ cfg, lead }: { cfg: DrConfig; lead: boolean }) {
             {SEEKER_DOCS.map((d) => row(d.key, `Document: ${d.kind}`))}
           </ul>
         </Section>
-        <Section title="Finance provider form">
+        <Section title="Capital provider and partner form">
           <ul>{PROVIDER_FIELDS.filter((f) => f.key !== "org.name").map((f) => row(f.key, f.label))}</ul>
         </Section>
       </div>
@@ -238,7 +238,7 @@ function Rules({ cfg, lead }: { cfg: DrConfig; lead: boolean }) {
             {num("bufferMin", "Buffer between meetings, minutes")}
             {num("flaggedMin", "Flagged meetings, minutes", "Lead-sponsor or DFI meetings")}
             {num("seekerCap", "Meetings per seeker, whole summit")}
-            {num("providerCapDay", "Default provider meetings a day", "Each provider's own cap is set at onboarding")}
+            {num("providerCapDay", "Default meetings a day, investors and partners", "Each investor's or partner's own cap is set at onboarding")}
             {num("lateMin", "A party later than this is a no-show, minutes")}
             <Labeled label="Second decider for asks over, USD">
               <input className="input" type="number" min={0} disabled={!lead} value={second.askAbove} onChange={(e) => setSecond({ ...second, askAbove: Number(e.target.value) })} />

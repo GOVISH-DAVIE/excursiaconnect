@@ -39,6 +39,22 @@
         "@excursia/api"
       ],
       "port": 4000
+    },
+    {
+      "name": "excursiaconnect-prod",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "start",
+        "-w",
+        "@excursia/web",
+        "--",
+        "-H",
+        "127.0.0.1",
+        "-p",
+        "3012"
+      ],
+      "port": 3012
     }
   ]
 }

@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { Wordmark } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
 import { PATHWAYS, formatInfo, askBand, compact, decisionOf, feeInKes, feeLabel, feeOwed, feeSettled, matchStage, missionName, openConditions, openRfi, profileDeadline, publicStatus, qualified, rfiDue } from "@excursia/domain/dealroom/logic";
 import type { DrApplication, DrDocument, Instrument, KycItem } from "@excursia/domain/dealroom/types";
 import { fmtStamp } from "@excursia/domain/time";
-import { ApplicantStatus, DocLine, UploadDoc } from "@/app/dealroom/bits";
+import { ApplicantStatus, DocLine, UploadDoc, typeLabel } from "@/app/dealroom/bits";
 import { ChallengeFields, MandateFields } from "@/app/e/[slug]/deal-room/apply/fields";
 import { AccessLog, Deals, Directory, Introductions, Meetings } from "./deals";
 import { acceptProblems } from "@excursia/domain/dealroom/sessions";
@@ -101,6 +102,12 @@ export function Portal({ id }: { id: string }) {
         {tab === "Mandate" && <Mandate app={app} />}
         {tab === "Messages" && <Messages app={app} />}
       </main>
+
+      <footer className="mx-auto max-w-3xl px-5 pb-8">
+        <p className="flex items-center justify-center gap-2 border-t border-line pt-6 text-[13px] text-slate">
+          Powered by <Wordmark size="sm" />
+        </p>
+      </footer>
     </div>
   );
 }
@@ -206,7 +213,7 @@ function Status({ app }: { app: DrApplication }) {
           <div className="text-[13px] text-slate text-right">
             Last change {fmtStamp(app.statusAt)}
             <div>
-              {app.type === "seeker" ? "Capital seeker" : app.challenge ? `Challenge, ${app.providerKind?.toLowerCase() ?? "institution"}` : app.providerKind} · {missionName(cfg, app.mission) || "no mission yet"}
+              {typeLabel(app)} · {missionName(cfg, app.mission) || "no mission yet"}
             </div>
           </div>
         </div>
@@ -262,7 +269,7 @@ function Status({ app }: { app: DrApplication }) {
         <Card title="Complete your matching profile">
           <p className="text-[14px]">
             Due {fmtStamp(dl, false)}
-            {dl < dr.clock.slice(0, 10) ? ", now overdue" : ""}. Investors see a short teaser first; write it on the Profile tab.
+            {dl < dr.clock.slice(0, 10) ? ", now overdue" : ""}. Investors and partners see a short teaser first; write it on the Profile tab.
           </p>
         </Card>
       )}
@@ -404,7 +411,7 @@ function Profile({ app }: { app: DrApplication }) {
   return (
     <>
       <Card title="Your teaser" aside={app.teaser?.approved ? <span className="pill bg-ok-50 text-ok">Approved</span> : app.teaser ? <span className="pill bg-warn-50 text-warn">Waiting for the team</span> : null}>
-        <p className="-mt-1 mb-3 text-[13px] text-slate">The only thing verified investors see before an introduction: a title, one paragraph, your sector, country, the size of the ask and the instrument.</p>
+        <p className="-mt-1 mb-3 text-[13px] text-slate">The only thing verified investors and partners see before an introduction: a title, one paragraph, your sector, country, the size of the ask and the transaction pathway.</p>
         <label className="block">
           <span className="label">Title</span>
           <input className="input" value={teaser.title} onChange={(e) => setTeaser({ ...teaser, title: e.target.value })} />

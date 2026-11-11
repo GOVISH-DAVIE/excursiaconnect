@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Empty, KV, PageHeader, Section } from "@/components/ui";
-import { MATCH_LABEL, compact, consentGranted, drCan, introExpiresAt, matchStage, staffName } from "@excursia/domain/dealroom/logic";
+import { ROLE_SHORT, fieldLabel, compact, consentGranted, drCan, introExpiresAt, matchStage, roleOf, staffName } from "@excursia/domain/dealroom/logic";
 import type { DrApplication, DrMatch } from "@excursia/domain/dealroom/types";
 import { fmtStamp } from "@excursia/domain/time";
 import { Pill, Refusal, typeLabel, useDr } from "../../bits";
@@ -25,7 +25,7 @@ export function MatchDetail({ id }: { id: string }) {
         crumbs={[{ href: "/dealroom/matching", label: "Matching" }, { label: `${s.org.name} and ${p.org.name}` }]}
         title={`${s.org.name} · ${p.org.name}`}
         badge={<StagePill m={m} />}
-        kicker={`${m.origin === "interest" ? "From the provider's interest" : "From the match search"}. ${m.decision} by ${staffName(dr, m.by)}, ${fmtStamp(m.at)}.${m.note ? ` “${m.note}”` : ""}`}
+        kicker={`${m.origin === "interest" ? `From the ${ROLE_SHORT[roleOf(p)].toLowerCase()}'s interest` : "From the match search"}. ${m.decision} by ${staffName(dr, m.by)}, ${fmtStamp(m.at)}.${m.note ? ` “${m.note}”` : ""}`}
       />
       <div className="grid gap-4 lg:grid-cols-2">
         <Party app={s} />
@@ -35,12 +35,12 @@ export function MatchDetail({ id }: { id: string }) {
         <div className="flex flex-wrap gap-1">
           {m.met.map((f) => (
             <span key={f} className="pill bg-ok-50 text-ok">
-              ✓ {MATCH_LABEL[f]}
+              ✓ {fieldLabel(f, p)}
             </span>
           ))}
           {m.missed.map((f) => (
             <span key={f} className="pill bg-bad-50 text-bad">
-              ✗ {MATCH_LABEL[f]}
+              ✗ {fieldLabel(f, p)}
               {f === "exclusions" && m.exclusionHit ? `: ${m.exclusionHit}` : ""}
             </span>
           ))}
@@ -78,7 +78,7 @@ function Party({ app }: { app: DrApplication }) {
         rows={
           app.type === "seeker"
             ? [["Organisation", app.org.name], ["Ask", app.ask ? `${compact(app.ask.amount, app.ask.currency)} ${app.ask.instrument.toLowerCase()}` : "–"], ["Sector, country", `${app.org.sector}, ${app.org.country}`], ["Decision-maker", `${app.decisionMaker.name}, ${app.decisionMaker.title}`]]
-            : [["Organisation", app.org.name], ["Ticket", app.mandate ? `${compact(app.mandate.ticketMin)} to ${compact(app.mandate.ticketMax)}` : "–"], ["Instruments", app.mandate?.instruments.join(", ") ?? "–"], ["Decision-maker", `${app.decisionMaker.name}, ${app.decisionMaker.title}`]]
+            : [["Organisation", app.org.name], [roleOf(app) === "capital" ? "Ticket" : "Contract size", app.mandate ? `${compact(app.mandate.ticketMin)} to ${compact(app.mandate.ticketMax)}` : "–"], ["Pathways", app.mandate?.instruments.join(", ") ?? "–"], ["Decision-maker", `${app.decisionMaker.name}, ${app.decisionMaker.title}`]]
         }
       />
     </Section>
@@ -120,7 +120,7 @@ function Introduction({ m, s, p }: { m: DrMatch; s: DrApplication; p: DrApplicat
   if (!m.intro) {
     return (
       <Section title="Send the introduction" className="mt-4">
-        <p className="text-[14px] text-slate">Choose what the provider may see once both accept. The teaser and the full profile always go; each document needs the seeker&apos;s consent for this provider, given when the seeker accepts.</p>
+        <p className="text-[14px] text-slate">Choose what {p.org.name} may see once both accept. The teaser and the full profile always go; each document needs the seeker&apos;s consent for {p.org.name}, given when the seeker accepts.</p>
         <ul className="mt-3 space-y-1.5">
           <li className="text-[14px]">✓ Teaser and full profile</li>
           {s.documents.map((d) => (

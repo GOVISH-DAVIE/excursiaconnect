@@ -2,10 +2,10 @@
 
 import { useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
-import { PATHWAYS, askBand, canSee, compact, confirmBy, consentGranted, ics, introExpiresAt, lapsed, matchStage, matchable } from "@excursia/domain/dealroom/logic";
+import { PATHWAYS, roleOf, moveSpot, slotTimes, askBand, canSee, compact, confirmBy, consentGranted, ics, introExpiresAt, lapsed, matchStage, matchable } from "@excursia/domain/dealroom/logic";
 import type { DrApplication, DrDocument, DrMatch, DrMeeting } from "@excursia/domain/dealroom/types";
 import { downloadText } from "@/lib/download";
-import { fmtStamp } from "@excursia/domain/time";
+import { addMinutes, fmtStamp } from "@excursia/domain/time";
 import { UploadDoc } from "@/app/dealroom/bits";
 
 function Card({ title, children, aside }: { title?: string; children: ReactNode; aside?: ReactNode }) {
@@ -63,7 +63,7 @@ export function Directory({ app }: { app: DrApplication }) {
             ))}
           </select>
           <select className="input h-9 text-[13px]" aria-label="Transaction pathway" value={f.instrument} onChange={(e) => setF({ ...f, instrument: e.target.value })}>
-            <option value="">Any instrument</option>
+            <option value="">Any pathway</option>
             {PATHWAYS.map((s) => (
               <option key={s}>{s}</option>
             ))}
@@ -306,18 +306,34 @@ export function Meetings({ app }: { app: DrApplication }) {
   const { state, dispatch } = useStore();
   const dr = state.dealRoom;
   const cfg = dr.configs[app.eventId];
+  const event = state.events.find((e) => e.id === app.eventId)!;
   const [asking, setAsking] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [day, setDay] = useState("");
+  const [time, setTime] = useState("");
+  const [declining, setDeclining] = useState<string | null>(null);
+  const [why, setWhy] = useState("");
   const list = dr.meetings
     .filter((mt) => mt.status !== "Cancelled" && dr.matches.some((m) => m.id === mt.matchId && (m.seekerId === app.id || m.providerId === app.id)))
     .sort((a, b) => a.start.localeCompare(b.start));
   if (!list.length) return <Card title="No meetings yet">A meeting is proposed once you and the other party both accept an introduction. You confirm it here.</Card>;
   const side = app.type;
+  // the summit days still ahead, and on the chosen day every slot when both of you and a table are free
+  const today = dr.clock.slice(0, 10);
+  const days = Array.from({ length: event.days }, (_, i) => addMinutes(`${event.startDate} 00:00`, i * 1440).slice(0, 10)).filter((d) => d >= today);
+  const freeTimes = (mt: DrMeeting, d: string) => (d ? slotTimes(cfg).filter((t) => `${d} ${t}` > dr.clock && `${d} ${t}` !== mt.start && !!moveSpot(state, mt, `${d} ${t}`)) : []);
   const label = (mt: DrMeeting) => {
     if (lapsed(mt, cfg, dr.clock)) return "Lapsed: the slot was released";
-    if (mt.status === "Change requested" && mt.change) return mt.change.by === side ? "You asked to move it" : "The other side asked to move it";
-    if (mt.status === "Proposed" || mt.status === "Change requested") return mt.confirm[side] ? "You confirmed; waiting for the other side" : `Please confirm by ${fmtStamp(confirmBy(mt, cfg))}`;
+    if (mt.status === "Change requested" && mt.change) return mt.change.agreed ? "Move agreed; with the team" : mt.change.by === side ? "You asked to move it" : "Asks to move it";
+    if (mt.status === "Proposed") return mt.confirm[side] ? "You confirmed; waiting for the other side" : `Please confirm by ${fmtStamp(confirmBy(mt, cfg))}`;
     return mt.status;
+  };
+  const openAsk = (mt: DrMeeting) => {
+    const d = asking === mt.id ? "" : days.find((x) => freeTimes(mt, x).length) ?? "";
+    setAsking(asking === mt.id ? null : mt.id);
+    setDay(d);
+    setTime("");
+    setReason("");
   };
   return (
     <>
@@ -326,25 +342,66 @@ export function Meetings({ app }: { app: DrApplication }) {
         const other = dr.apps.find((a) => a.id === (side === "seeker" ? m.providerId : m.seekerId))!;
         const room = state.rooms.find((r) => r.id === mt.roomId);
         const where = mt.link ? `Online: ${mt.link}` : `${room?.name}${mt.table && (cfg.rooms[mt.roomId!]?.tables ?? 1) > 1 ? `, table ${mt.table}` : ""}`;
-        const canConfirm = (mt.status === "Proposed" || mt.status === "Change requested") && !mt.confirm[side] && !lapsed(mt, cfg, dr.clock);
+        const ch = mt.status === "Change requested" ? mt.change : undefined;
+        const unconfirmed = mt.status === "Proposed" || (mt.status === "Change requested" && ch?.was === "Proposed");
+        const canConfirm = unconfirmed && !mt.confirm[side] && !lapsed(mt, cfg, dr.clock);
+        const times = asking === mt.id ? freeTimes(mt, day) : [];
         return (
           <Card key={mt.id} title={`${fmtStamp(mt.start)} to ${mt.end.slice(11)}`} aside={<span className={`pill whitespace-nowrap ${mt.status === "Confirmed" ? "bg-ok-50 text-ok" : mt.status === "Held" ? "bg-ink text-white" : "bg-warn-50 text-warn"}`}>{label(mt)}</span>}>
             <p className="text-[15px]">
               With <b className="font-medium">{other.org.name}</b> ({other.decisionMaker.name}), {where}.
             </p>
-            {mt.change && mt.status === "Change requested" && (
-              <p className="mt-1 text-[13px] text-slate">
-                {mt.change.by === side ? "You" : other.org.name} asked to move it: {mt.change.reason} The Deal Room team will propose another slot; until then this one stands.
+
+            {/* a move request: who asked, the time they propose, and where it stands */}
+            {ch && !ch.start && (
+              <p className="mt-2 text-[13px] text-slate">
+                {ch.by === side ? "You" : other.org.name} asked to move it: {ch.reason} The Deal Room team will propose another slot; until then this one stands.
               </p>
             )}
+            {ch?.start && (
+              <div className="mt-3 rounded-md bg-paper p-3 text-[14px]">
+                <p>
+                  {ch.by === side ? "You asked" : `${other.org.name} asks`} to move it to <b className="font-medium">{fmtStamp(ch.start)}</b>: {ch.reason}
+                </p>
+                <p className="mt-1 text-[13px] text-slate">
+                  {ch.agreed
+                    ? "Both of you agreed. The Deal Room team will confirm the new slot; until then this one stands."
+                    : ch.by === side
+                      ? `Waiting for ${other.org.name} to agree. Once they do, the Deal Room team confirms it; until then this slot stands.`
+                      : "If you agree, the Deal Room team confirms the new slot. If you decline, the meeting stays where it is."}
+                </p>
+                {!ch.agreed && ch.by !== side && declining !== mt.id && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button className="btn-primary btn-sm" onClick={() => dispatch({ type: "dr/answerChange", meetingId: mt.id, side, agree: true })}>
+                      Agree to {fmtStamp(ch.start)}
+                    </button>
+                    <button className="btn-secondary btn-sm" onClick={() => { setDeclining(mt.id); setWhy(""); }}>
+                      Decline
+                    </button>
+                  </div>
+                )}
+                {declining === mt.id && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <input className="input h-9 flex-1 min-w-48 text-[13px]" placeholder="Why, optional" value={why} onChange={(e) => setWhy(e.target.value)} />
+                    <button className="btn-primary btn-sm" onClick={() => { dispatch({ type: "dr/answerChange", meetingId: mt.id, side, agree: false, reason: why }); setDeclining(null); }}>
+                      Decline the move
+                    </button>
+                    <button className="btn-quiet" onClick={() => setDeclining(null)}>
+                      Back
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="mt-3 flex flex-wrap gap-2">
               {canConfirm && (
                 <button className="btn-primary btn-sm" onClick={() => dispatch({ type: "dr/confirm", meetingId: mt.id, side })}>
                   Confirm this slot
                 </button>
               )}
-              {["Proposed", "Confirmed"].includes(mt.status) && !lapsed(mt, cfg, dr.clock) && (
-                <button className="btn-secondary btn-sm" onClick={() => setAsking(asking === mt.id ? null : mt.id)}>
+              {["Proposed", "Confirmed"].includes(mt.status) && mt.start > dr.clock && !lapsed(mt, cfg, dr.clock) && (
+                <button className="btn-secondary btn-sm" onClick={() => openAsk(mt)}>
                   Ask to move it
                 </button>
               )}
@@ -354,12 +411,44 @@ export function Meetings({ app }: { app: DrApplication }) {
                 </button>
               )}
             </div>
+
             {asking === mt.id && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                <input className="input h-9 flex-1 min-w-48 text-[13px]" placeholder="What works instead" value={reason} onChange={(e) => setReason(e.target.value)} />
-                <button className="btn-primary btn-sm" disabled={!reason.trim()} onClick={() => { dispatch({ type: "dr/requestChange", meetingId: mt.id, side, reason }); setAsking(null); setReason(""); }}>
-                  Send to the team
-                </button>
+              <div className="mt-3 rounded-md bg-paper p-3">
+                <p className="mb-2 text-[13px] text-slate">Suggest a new time. {other.org.name} agrees or declines first, then the Deal Room team confirms it. Only times when you are both free and a table is open are listed.</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="label">Day</span>
+                    <select className="input" value={day} onChange={(e) => { setDay(e.target.value); setTime(""); }}>
+                      <option value="">Choose</option>
+                      {days.map((d) => (
+                        <option key={d} value={d}>
+                          {fmtStamp(`${d} 00:00`, false)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="label">Time</span>
+                    <select className="input" value={time} disabled={!times.length} onChange={(e) => setTime(e.target.value)}>
+                      <option value="">{!day ? "Choose a day first" : times.length ? "Choose" : "No free time that day"}</option>
+                      {times.map((t) => (
+                        <option key={t}>{t}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="label">Why, for {other.org.name}</span>
+                    <input className="input" placeholder="For example, our CEO lands at noon" value={reason} onChange={(e) => setReason(e.target.value)} />
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button className="btn-primary btn-sm" disabled={!day || !time || !reason.trim()} onClick={() => { dispatch({ type: "dr/requestChange", meetingId: mt.id, side, reason, start: `${day} ${time}` }); setAsking(null); }}>
+                    Send to {other.org.name}
+                  </button>
+                  <button className="btn-quiet" onClick={() => setAsking(null)}>
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
             {mt.status === "Confirmed" && <p className="mt-2 text-[12px] text-slate">Reminders come 24 hours and 30 minutes before. Check in with your badge at the Deal Room desk.</p>}
@@ -407,7 +496,10 @@ export function Deals({ app }: { app: DrApplication }) {
   const mine = dr.opportunities.filter((o) => dr.matches.some((m) => m.id === o.matchId && (side === "seeker" ? m.seekerId : m.providerId) === app.id));
   const [text, setText] = useState<Record<string, string>>({});
   const [docs, setDocs] = useState<Record<string, DrDocument | undefined>>({});
-  const [kind, setKind] = useState<DrDocument["kind"]>(side === "provider" ? "Commitment letter" : "Financial statements");
+  // a partner's evidence is commercial (an order, a contract, a pilot), an investor's is financial
+  const partner = roleOf(app) === "partner";
+  const evidence: DrDocument["kind"][] = side === "seeker" ? ["Financial statements", "Term sheet", "Other"] : partner ? ["Purchase order or contract", "Pilot or partnership agreement", "Term sheet", "Other"] : ["Commitment letter", "Disbursement evidence", "Term sheet", "Other"];
+  const [kind, setKind] = useState<DrDocument["kind"]>(evidence[0]);
   if (!mine.length) return <Card title="No deals yet">An opportunity opens when a meeting ends with an agreed next step.</Card>;
   return (
     <>
@@ -438,7 +530,7 @@ export function Deals({ app }: { app: DrApplication }) {
             )}
             {open && !dr.archivedAt && (
               <div className="mt-3 border-t border-line pt-3">
-                <textarea className="input min-h-20" placeholder={side === "provider" ? "Where the decision stands: committee date, terms, disbursement" : "Where it stands on your side"} value={text[o.id] ?? ""} onChange={(e) => setText({ ...text, [o.id]: e.target.value })} />
+                <textarea className="input min-h-20" placeholder={side === "seeker" ? "Where it stands on your side" : partner ? "Where it stands: contract terms, start date, pilot scope" : "Where the decision stands: committee date, terms, disbursement"} value={text[o.id] ?? ""} onChange={(e) => setText({ ...text, [o.id]: e.target.value })} />
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {docs[o.id] ? (
                     <span className="text-[13px]">
@@ -450,7 +542,7 @@ export function Deals({ app }: { app: DrApplication }) {
                   ) : (
                     <>
                       <select className="input h-9 w-auto text-[13px]" aria-label="Evidence kind" value={kind} onChange={(e) => setKind(e.target.value as DrDocument["kind"])}>
-                        {(side === "provider" ? ["Commitment letter", "Disbursement evidence", "Term sheet", "Other"] : ["Financial statements", "Term sheet", "Other"]).map((k) => (
+                        {evidence.map((k) => (
                           <option key={k}>{k}</option>
                         ))}
                       </select>

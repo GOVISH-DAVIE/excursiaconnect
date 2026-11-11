@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
 import { useStore } from "@/lib/store";
-import { DR_ZONE, compact, drCan, lapsed, occupies, readyToSchedule, slotTimes } from "@excursia/domain/dealroom/logic";
+import { DR_ZONE, compact, drCan, lapsed, occupies, readyToSchedule, sideName, slotTimes } from "@excursia/domain/dealroom/logic";
 import type { DrMeeting } from "@excursia/domain/dealroom/types";
 import { row } from "@excursia/domain/csv";
 import { downloadCsv } from "@/lib/download";
@@ -237,7 +237,12 @@ function Changes() {
                     <span>
                       {s.org.name} · {p.org.name}
                       <span className="block text-[12px] text-slate">
-                        {fmtStamp(m.start)} · {m.change ? `the ${m.change.by} asks: ${m.change.reason}` : `to confirm: ${!m.confirm.seeker ? "seeker" : ""}${!m.confirm.seeker && !m.confirm.provider ? " and " : ""}${!m.confirm.provider ? "provider" : ""}`}
+                        {fmtStamp(m.start)} ·{" "}
+                        {m.change?.start
+                          ? `${m.change.by === "seeker" ? s.org.name : p.org.name} asks to move it to ${fmtStamp(m.change.start)}; ${m.change.agreed ? "both agreed, ready to accept" : `waiting for ${m.change.by === "seeker" ? p.org.name : s.org.name} to agree`}`
+                          : m.change
+                            ? `the ${sideName(m.change.by)} asks: ${m.change.reason}`
+                            : `to confirm: ${!m.confirm.seeker ? "seeker" : ""}${!m.confirm.seeker && !m.confirm.provider ? " and " : ""}${!m.confirm.provider ? "counterparty" : ""}`}
                       </span>
                     </span>
                     <MeetingPill m={m} />
@@ -262,11 +267,11 @@ function Caps() {
   const seekers = dr.apps.filter((a) => a.type === "seeker" && of(a.id).length > 0);
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Section title="Providers, per day against their cap" flush>
+      <Section title="Investors and partners, per day against their cap" flush>
         <table className="w-full">
           <thead>
             <tr>
-              <th className="th">Provider</th>
+              <th className="th">Counterparty</th>
               {days.map((d) => (
                 <th key={d} className="th-r">
                   {fmtStamp(d, false).split(" ").slice(1).join(" ")}
@@ -389,7 +394,7 @@ function Export() {
   const { dr, cfg, event } = useDr();
   const days = Array.from({ length: event.days }, (_, i) => addMinutes(`${event.startDate} 00:00`, i * 1440).slice(0, 10));
   const lines = (filter: (m: DrMeeting) => boolean) => {
-    const out = [row(["Day", "Start", "End", "Room", "Table", "Seeker", "Provider", "Status"])];
+    const out = [row(["Day", "Start", "End", "Room", "Table", "Seeker", "Counterparty", "Status"])];
     for (const m of dr.meetings.filter((x) => x.status !== "Cancelled" && filter(x)).sort((a, b) => a.start.localeCompare(b.start))) {
       const mm = dr.matches.find((x) => x.id === m.matchId)!;
       out.push(row([m.start.slice(0, 10), m.start.slice(11), m.end.slice(11), m.link ? "Online" : state.rooms.find((r) => r.id === m.roomId)?.name, m.table ?? "", dr.apps.find((a) => a.id === mm.seekerId)?.org.name, dr.apps.find((a) => a.id === mm.providerId)?.org.name, m.status]));

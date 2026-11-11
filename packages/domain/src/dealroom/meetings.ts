@@ -16,9 +16,12 @@ import {
   introExpired,
   lapsed,
   matchable,
+  moveSpot,
   mustHaveMisses,
   occupies,
   readyToSchedule,
+  roleOf,
+  sideName,
   slotProblems,
   slotTimes,
   staffName,
@@ -38,7 +41,10 @@ export type DrMeetAction =
   | { type: "dr/propose"; req: SlotRequest; override?: string }
   | { type: "dr/autoPropose"; limit: number }
   | { type: "dr/confirm"; meetingId: string; side: "seeker" | "provider" }
-  | { type: "dr/requestChange"; meetingId: string; side: "seeker" | "provider"; reason: string }
+  | { type: "dr/requestChange"; meetingId: string; side: "seeker" | "provider"; reason: string; start: string }
+  | { type: "dr/answerChange"; meetingId: string; side: "seeker" | "provider"; agree: boolean; reason?: string }
+  | { type: "dr/acceptChange"; meetingId: string }
+  | { type: "dr/declineChange"; meetingId: string; reason: string }
   | { type: "dr/reschedule"; meetingId: string; req: SlotRequest; override?: string }
   | { type: "dr/cancelMeeting"; meetingId: string; reason: string }
   | { type: "dr/arrive"; delegateId: string }
@@ -65,9 +71,19 @@ export function draftBrief(dr: DealRoomState, m: DrMatch) {
   const s = dr.apps.find((a) => a.id === m.seekerId)!;
   const p = dr.apps.find((a) => a.id === m.providerId)!;
   const ask = s.ask ? `${s.ask.currency} ${s.ask.amount.toLocaleString("en")}` : "–";
+  const range = `${p.mandate?.currency} ${p.mandate?.ticketMin.toLocaleString("en")} to ${p.mandate?.ticketMax.toLocaleString("en")}`;
+  // a partner buys, distributes or partners and a challenge brings a problem; only an investor invests
+  const role = roleOf(p);
+  const partner = role === "partner";
+  const ch = p.challenge;
+  const side = ch
+    ? `${p.org.name} (${p.providerKind}) brings a challenge: ${ch.title.replace(/\.+$/, "")}. ${ch.problem.replace(/\.+$/, "")}. It looks for ${(p.mandate?.instruments ?? []).join(", ").toLowerCase() || "a solution"}, with contracts of ${range}. Route: ${ch.route || "to be agreed"}${ch.timeline ? `. Timeline: ${ch.timeline.replace(/\.+$/, "")}` : ""}.`
+    : partner
+      ? `${p.org.name} (${p.providerKind}) works with businesses in ${p.mandate?.sectors.join(", ")} on ${(p.mandate?.instruments ?? []).join(", ").toLowerCase()}, with contracts of ${range}, typically deciding in ${p.mandate?.timeline || "weeks"}.`
+      : `${p.org.name} (${p.providerKind}) invests ${range} in ${p.mandate?.sectors.join(", ")}, typically deciding in ${p.mandate?.timeline || "weeks"}.`;
   return {
-    text: `${s.org.name} (${s.org.sector}, ${s.org.country}) seeks ${ask} in ${s.ask?.instrument.toLowerCase()} for: ${(s.ask?.useOfFunds ?? "").replace(/\.+$/, "")}. ${s.traction?.revenueBand ?? ""}; ${(s.traction?.metrics ?? "").replace(/\.+$/, "")}.\n\n${p.org.name} (${p.providerKind}) invests ${p.mandate?.currency} ${p.mandate?.ticketMin.toLocaleString("en")} to ${p.mandate?.ticketMax.toLocaleString("en")} in ${p.mandate?.sectors.join(", ")}, typically deciding in ${p.mandate?.timeline || "weeks"}.\n\nWhy this pair: ${(m.note || `meets ${m.met.join(", ")}`).replace(/\.+$/, "")}.\n\nDecision-makers: ${s.decisionMaker.name}, ${s.decisionMaker.title}; ${p.decisionMaker.name}, ${p.decisionMaker.title}.`,
-    agenda: ["Introductions and the ask, 5 minutes", "The investor's mandate and questions, 10 minutes", "Next step and who follows up, 5 minutes"],
+    text: `${s.org.name} (${s.org.sector}, ${s.org.country}) seeks ${ask} in ${s.ask?.instrument.toLowerCase()} for: ${(s.ask?.useOfFunds ?? "").replace(/\.+$/, "")}. ${s.traction?.revenueBand ?? ""}; ${(s.traction?.metrics ?? "").replace(/\.+$/, "")}.\n\n${side}\n\nWhy this pair: ${(m.note || `meets ${m.met.join(", ")}`).replace(/\.+$/, "")}.\n\nDecision-makers: ${s.decisionMaker.name}, ${s.decisionMaker.title}; ${p.decisionMaker.name}, ${p.decisionMaker.title}.`,
+    agenda: ["Introductions and the ask, 5 minutes", ch ? "The challenge and the institution's questions, 10 minutes" : partner ? "The partner's requirements and questions, 10 minutes" : "The investor's mandate and questions, 10 minutes", "Next step and who follows up, 5 minutes"],
   };
 }
 
@@ -271,7 +287,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       if (!mt || (mt.status !== "Proposed" && mt.status !== "Change requested") || lapsed(mt, dr.configs[mt.eventId], at)) return state;
       const confirm = { ...mt.confirm, [action.side]: at };
       const both = !!confirm.seeker && !!confirm.provider;
-      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, confirm, status: both ? "Confirmed" : m.status, change: both ? undefined : m.change, history: [...m.history, { at, by: action.side, what: both ? "Confirmed by both" : `Confirmed by the ${action.side}` }] }));
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, confirm, status: both ? "Confirmed" : m.status, change: both ? undefined : m.change, history: [...m.history, { at, by: action.side, what: both ? "Confirmed by both" : `Confirmed by the ${sideName(action.side)}` }] }));
       if (both) {
         const match = dr.matches.find((x) => x.id === mt.matchId)!;
         for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Deal Room meeting confirmed: ${fmtStamp(mt.start)}, ${where(state, mt)}; calendar invite attached`, `/dr/${id}`);
@@ -279,11 +295,58 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       return withDr(state, dr);
     }
 
+    /* ----- moving a meeting: the asker proposes a time, the other side agrees, then the team books it ----- */
     case "dr/requestChange": {
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      if (!mt || !["Proposed", "Confirmed"].includes(mt.status) || !action.reason.trim()) return state;
-      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: "Change requested", change: { by: action.side, reason: action.reason, at }, history: [...m.history, { at, by: action.side, what: `Asked to move: ${action.reason}` }] }));
-      dr = send(ctx, dr, mt.eventId, opsOf(dr, mt.eventId), "A participant asked to move a Deal Room meeting", "/dealroom/meetings", "Email");
+      if (!mt || !["Proposed", "Confirmed"].includes(mt.status) || !action.reason.trim() || action.start === mt.start || !moveSpot(state, mt, action.start)) return state;
+      const match = dr.matches.find((x) => x.id === mt.matchId)!;
+      const asker = dr.apps.find((a) => a.id === (action.side === "seeker" ? match.seekerId : match.providerId))!;
+      const otherId = action.side === "seeker" ? match.providerId : match.seekerId;
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: "Change requested", change: { by: action.side, reason: action.reason.trim(), at, start: action.start, was: m.status }, history: [...m.history, { at, by: action.side, what: `The ${sideName(action.side)} asked to move it to ${fmtStamp(action.start)}: ${action.reason.trim()}` }] }));
+      dr = send(ctx, dr, mt.eventId, otherId, `${asker.org.name} asks to move your Deal Room meeting of ${fmtStamp(mt.start)} to ${fmtStamp(action.start)}; agree or decline`, `/dr/${otherId}`);
+      return withDr(state, dr);
+    }
+
+    case "dr/answerChange": {
+      const mt = dr.meetings.find((m) => m.id === action.meetingId);
+      const ch = mt?.change;
+      if (!mt || mt.status !== "Change requested" || !ch?.start || ch.agreed || ch.by === action.side) return state;
+      const match = dr.matches.find((x) => x.id === mt.matchId)!;
+      const askerId = ch.by === "seeker" ? match.seekerId : match.providerId;
+      const answerer = dr.apps.find((a) => a.id === (action.side === "seeker" ? match.seekerId : match.providerId))!;
+      if (!action.agree) {
+        dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: ch.was ?? "Confirmed", change: undefined, history: [...m.history, { at, by: action.side, what: `The ${sideName(action.side)} declined the move${action.reason?.trim() ? `: ${action.reason.trim().replace(/[.;\s]+$/, "")}` : ""}; the meeting stays at ${fmtStamp(m.start)}` }] }));
+        dr = send(ctx, dr, mt.eventId, askerId, `${answerer.org.name} declined moving your Deal Room meeting; it stays at ${fmtStamp(mt.start)}`, `/dr/${askerId}`);
+        return withDr(state, dr);
+      }
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, change: { ...ch, agreed: at }, history: [...m.history, { at, by: action.side, what: `The ${sideName(action.side)} agreed to ${fmtStamp(ch.start!)}; with the Deal Room team to accept` }] }));
+      dr = send(ctx, dr, mt.eventId, askerId, `${answerer.org.name} agreed to move your Deal Room meeting to ${fmtStamp(ch.start)}; the Deal Room team will confirm it`, `/dr/${askerId}`);
+      dr = send(ctx, dr, mt.eventId, opsOf(dr, mt.eventId), `Both parties agreed to move a Deal Room meeting to ${fmtStamp(ch.start)}; accept it`, "/dealroom/meetings?tab=Changes", "Email");
+      return withDr(state, dr);
+    }
+
+    case "dr/acceptChange": {
+      const mt = dr.meetings.find((m) => m.id === action.meetingId);
+      const ch = mt?.change;
+      if (!mt || !drCan(me, "schedule") || mt.status !== "Change requested" || !ch?.start || !ch.agreed) return state;
+      const spot = moveSpot(state, mt, ch.start);
+      if (!spot) return state;
+      const { end } = slotProblems(state, { matchId: mt.matchId, start: ch.start, flagged: mt.flagged, ignore: mt.id, ...spot });
+      const moved = { ...mt, ...spot, start: ch.start, end };
+      // both sides agreed to this time, so their agreement stands as their confirmation
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...moved, status: "Confirmed", confirm: { seeker: at, provider: at }, proposedAt: at, change: undefined, history: [...m.history, { at, by: me!.id, what: `Moved to ${fmtStamp(ch.start!)}, ${where(state, moved)}, as both parties agreed` }] }));
+      const match = dr.matches.find((x) => x.id === mt.matchId)!;
+      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Your Deal Room meeting moved to ${fmtStamp(ch.start)}, ${where(state, moved)}; calendar invite attached`, `/dr/${id}`);
+      return withDr(state, dr);
+    }
+
+    case "dr/declineChange": {
+      const mt = dr.meetings.find((m) => m.id === action.meetingId);
+      if (!mt || !drCan(me, "schedule") || mt.status !== "Change requested" || !mt.change || !action.reason.trim()) return state;
+      const was = mt.change.was ?? "Confirmed";
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: was, change: undefined, history: [...m.history, { at, by: me!.id, what: `The move was declined: ${action.reason.trim().replace(/[.;\s]+$/, "")}; the meeting stays at ${fmtStamp(m.start)}` }] }));
+      const match = dr.matches.find((x) => x.id === mt.matchId)!;
+      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `The Deal Room team could not move your meeting (${action.reason.trim().replace(/[.;\s]+$/, "")}); it stays at ${fmtStamp(mt.start)}`, `/dr/${id}`);
       return withDr(state, dr);
     }
 

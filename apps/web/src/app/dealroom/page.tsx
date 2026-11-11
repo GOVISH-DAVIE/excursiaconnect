@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Meter, PageHeader, Section, Stat } from "@/components/ui";
-import { FLAGS, bothAccepted, compact, conversionValues, funnel, matchStage, medianDays, missionName, occupies, oppOpen, oppOverdue, qualified, readyToSchedule, reviewedThisMonth, sessionOpenOutcomes, type FlagKey } from "@excursia/domain/dealroom/logic";
+import { FLAGS, bothAccepted, compact, conversionValues, funnel, matchStage, medianDays, missionName, occupies, oppOpen, oppOverdue, qualified, readyToSchedule, reviewedThisMonth, roleOf, sessionOpenOutcomes, type FlagKey } from "@excursia/domain/dealroom/logic";
 import { fmtStamp } from "@excursia/domain/time";
 import { canOpen, useDr } from "./bits";
 
@@ -19,7 +19,7 @@ export default function DealRoomDashboard() {
   const opens = (href: string) => canOpen(dr, me, href);
 
   const targets = [
-    { label: "Qualified counterparties", value: f.qualified, target: 150, due: "2027-01-03", href: q("qualified"), sub: `${f.qualifiedSeekers} seekers approved, ${f.verified} providers verified` },
+    { label: "Qualified counterparties", value: f.qualified, target: 150, due: "2027-01-03", href: q("qualified"), sub: `${f.qualifiedSeekers} seekers approved, ${f.verifiedCapital} investors and ${f.verifiedPartners} partners verified` },
     { label: "Deal Room Ready, both sides", value: dr.matches.filter(bothAccepted).length, target: 60, due: "2027-01-23", href: "/dealroom/matching?tab=By%20mission&mission=All&stage=Accepted", sub: `${f.ready} seekers ready; pairs counted once both accept` },
     { label: "Booked meetings", value: dr.meetings.filter((m) => occupies(m, cfg, now) || m.status === "Held").length, target: 200, due: "2027-02-18", href: "/dealroom/meetings", sub: `${dr.meetings.filter((m) => m.status === "Held").length} held so far, summit week 15 to 18 February` },
   ];
@@ -167,7 +167,9 @@ export default function DealRoomDashboard() {
             <tr>
               <th className="th">Mission</th>
               <th className="th-r">Seekers</th>
-              <th className="th-r">Providers</th>
+              <th className="th-r">Investors</th>
+              <th className="th-r">Partners</th>
+              <th className="th-r">Challenges</th>
               <th className="th-r">In review</th>
               <th className="th-r">Qualified</th>
               <th className="th-r">Ready</th>
@@ -184,7 +186,9 @@ export default function DealRoomDashboard() {
                     </Go>
                   </td>
                   <Num open={seesApps} n={mine.filter((a) => a.type === "seeker").length} href={`/dealroom/applications?mission=${m.id}&type=seeker`} />
-                  <Num open={seesApps} n={mine.filter((a) => a.type === "provider").length} href={`/dealroom/applications?mission=${m.id}&type=provider`} />
+                  {(["capital", "partner", "challenge"] as const).map((r) => (
+                    <Num key={r} open={seesApps} n={mine.filter((a) => roleOf(a) === r).length} href={`/dealroom/applications?mission=${m.id}&type=${r}`} />
+                  ))}
                   <Num open={seesApps} n={mine.filter((a) => ["Submitted", "In review", "Information requested"].includes(a.status)).length} href={`/dealroom/applications?mission=${m.id}&status=${encodeURIComponent("Submitted,In review,Information requested")}`} />
                   <Num open={seesApps} n={mine.filter(qualified).length} href={`/dealroom/applications?mission=${m.id}&flag=qualified`} />
                   <Num open={seesApps} n={mine.filter((a) => a.type === "seeker" && qualified(a) && a.readiness === "Deal Room Ready").length} href={`/dealroom/applications?mission=${m.id}&flag=ready`} />

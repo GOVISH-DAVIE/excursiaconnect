@@ -1,6 +1,6 @@
 # Deal Room coverage
 
-What the prototype covers of the 63 use cases in [02-Deal-Room-Stakeholders-and-Use-Cases.md](02-Deal-Room-Stakeholders-and-Use-Cases.md) and of the PRD's acceptance criteria, as of 6 November 2026 on branch `deal-room`. The flow-by-flow test is in [deal-room-use-case-test.md](deal-room-use-case-test.md).
+What the prototype covers of the 69 use cases in [02-Deal-Room-Stakeholders-and-Use-Cases.md](02-Deal-Room-Stakeholders-and-Use-Cases.md) and of the PRD's acceptance criteria, as of 6 November 2026 on branch `deal-room`. The flow-by-flow test is in [deal-room-use-case-test.md](deal-room-use-case-test.md).
 
 **Built** means the use case works end to end on mock data, with its rules enforced in the reducer. **Partial** means the screen exists but a step is simulated or missing. **Not built** means nothing on screen.
 
@@ -20,6 +20,8 @@ Branch `deal-room-vis-a-vis` brings the module into the paper's terms and scope.
 | Roles | Excursia's coordinator matches, introduces, schedules and runs the programme; Momentum's oversight reads the dashboard, pipeline, programme and every report, with values, and changes nothing | Staff switcher, `/admin/deal-room` |
 | Meeting outcomes and tiers | The paper's seven outcomes; commitments as expression of interest, indicative, signed, approved not disbursed, deployed | Live board, opportunities, reports |
 | Sessions | The paper's 11 formats beyond one-to-ones, planned by day in the presentation area and the roundtable room; each day's emphasis and close-out checks; invitations to qualified or verified participants, accepted or declined from the portal; attendance and an outcome per attendee. An accepted session holds the participant's time against meetings, and a meeting holds it against sessions | `/dealroom/programme`, portal Programme tab |
+| Registration pathways and the partner role (11 November) | The public page in the organiser's words: who should participate, the eight activities, and four registration pathways, each with its own apply tab. Commercial or strategic partners (corporate buyer, distributor or channel partner, technology partner, regional operator, ecosystem partner) are a role of their own, worked out from the organisation type: own apply tab and kind list, "what you are looking for" with a contract range, partner wording in briefs, own queue filter, dashboard and report counts, host of supplier discovery and market-entry sessions, commercial deal evidence. Verified like investors | `/e/connected-africa-3/deal-room`, apply `?type=partner`, queue, reports |
+| Moving a meeting, the application form and phones (11 November) | Asking to move a meeting means proposing a day and time from the slots when both parties and a table are free, with a reason. The other party agrees or declines; only an agreed move reaches the team, who accept it (booked as confirmed by both, in the same room when free) or decline it with a reason; a declined move leaves the meeting where it was. The application is a stepper per pathway with a review step that lists what is missing; on phones a long list (sectors, countries, pathways) is one field that opens a searchable sheet of checkboxes | Portal Meetings, `/dealroom/meetings?tab=Changes`, apply |
 
 **Phones, for the summit days.** Checked at 375 wide:
 - **Menus:** a menu of more than four pages becomes a drawer behind an icon-only bar, for staff (every persona's rail) and for the participant portal.
@@ -105,7 +107,7 @@ Not done from the paper: post-summit tracking as an add-on that is off unless co
 | CS-7 | Complete the matching profile | Built | Profile: teaser with anonymity, ask, deadline |
 | CS-8 | Set sharing consent | Built | Introductions: consent per document on accepting; withdraw at any time |
 | CS-9 | Accept or decline an introduction | Built | Introductions |
-| CS-10 | Confirm or move a meeting | Built | Meetings: confirm within the window, ask to move, calendar file |
+| CS-10 | Confirm or move a meeting | Built | Meetings: confirm within the window, calendar file; asking to move proposes a day and time when both are free, the other party agrees or declines, then the team accepts |
 | CS-11 | See who opened my file | Built | Access log |
 | CS-12 | Update deal progress | Built | Deals: answer a status request with evidence |
 
@@ -121,17 +123,28 @@ Not done from the paper: post-summit tracking as an add-on that is off unless co
 | FP-6 | Express interest | Built | Directory |
 | FP-7 | Review an introduction | Built | Introductions: brief, profile, watermarked preview, access logged on opening |
 | FP-8 | Accept or decline | Built | Introductions |
-| FP-9 | Confirm or move a meeting | Built | Meetings |
+| FP-9 | Confirm or move a meeting | Built | Meetings: the same move rules as CS-10, either side may ask or answer |
 | FP-10 | Report deal progress | Built | Deals: update with commitment or disbursement evidence |
 
-**Totals.** 59 built, 3 partial (DA-7, DO-9, DO-11), 1 not built (DA-4). Every use case is reachable from the home page personas.
+## Commercial or strategic partner (CP)
+
+| ID | Use case | Status | Where |
+| --- | --- | --- | --- |
+| CP-1 | Apply as a commercial or strategic partner | Built | Public page pathway 3; apply `?type=partner`: partner kinds only, "What you are looking for", contract range |
+| CP-2 | Complete verification and sign the NDA | Built | Verification: the same KYC, sanctions and NDA steps as a finance provider |
+| CP-3 | Browse teasers and express interest | Built | Directory, once verified |
+| CP-4 | Accept an introduction and meet | Built | Introductions and Meetings; the brief describes the partner's requirements |
+| CP-5 | Host supplier discovery or a market-entry session | Built | Programme: those two formats offer verified partners as hosts |
+| CP-6 | Report deal progress | Built | Deals: purchase order or contract, or pilot or partnership agreement, as evidence |
+
+**Totals.** 65 built, 3 partial (DA-7, DO-9, DO-11), 1 not built (DA-4). Every use case is reachable from the home page personas.
 
 ## The PRD's acceptance criteria
 
 | # | Criterion | Status | Notes |
 | --- | --- | --- | --- |
 | 1 | Each application type can be completed on web, Android and iOS | Simulated | Web only, checked at 375 wide for the phone; no native apps |
-| 2 | Applications get reference numbers and applicants can see their status | Built | `CA3-CS-…` and `CA3-FP-…`; status page per applicant |
+| 2 | Applications get reference numbers and applicants can see their status | Built | `CA3-CS-…` and `CA3-FP-…` (partners and challenges share the provider series); status page per applicant |
 | 3 | Reviewers can request information and record authorised decisions | Built | Only staff allowed to decide can; a second decider where the rules ask for one |
 | 4 | Unapproved applicants cannot access private profiles, matches or documents | Built | One visibility rule decides every view; portal tabs follow it |
 | 5 | The team can find and review possible matches before sending introductions | Built | Matching, then the match page with brief |
