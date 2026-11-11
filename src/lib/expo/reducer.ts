@@ -7,7 +7,9 @@ import type { Ctx } from "../ctx";
 import type { AppState, Capability } from "../types";
 import {
   bookingStage,
-  expoCan,
+  actionExhibitor,
+  memberCan,
+  memberOf,
   holdExpiresAt,
   holdProblems,
   invoiceNo,
@@ -70,15 +72,17 @@ const NEEDS: Partial<Record<ExpoAction["type"], Capability[]>> = {
 export function expoReducer(state: AppState, action: ExpoAction, ctx: Ctx): AppState {
   let expo = state.expo;
   const at = ctx.now;
-  const me = state.team.find((m) => m.id === expo.actingMemberId);
-  const by = "as" in action && action.as === "exhibitor" ? "exhibitor" : me?.id ?? "system";
+  const me = memberOf(state, ctx.actor);
+  // an exhibitor acts only for their own company; a team member by the capabilities of their role
+  const asExhibitor = ctx.actor?.kind === "exhibitor" && ctx.actor.exhibitorId === actionExhibitor(state, action as ExpoAction & Record<string, unknown>);
+  const can = (cap: Capability) => memberCan(state, me, cap);
+  const by = asExhibitor ? "exhibitor" : me?.id ?? "system";
 
   // the stand and its logistics have their own reducer, with the same conventions
   if (ONSITE_TYPES.has(action.type)) return onsiteReducer(state, action as OnsiteAction, ctx);
   // a staff action needs one of its capabilities; the portal and the public form act for the exhibitor
   const needs = NEEDS[action.type];
-  const asExhibitor = "as" in action && action.as === "exhibitor";
-  if (needs && !needs.some((c) => expoCan(state, c))) return state;
+  if (needs && !needs.some((c) => can(c))) return state;
 
   switch (action.type) {
     case "expo/clock": {
@@ -184,7 +188,7 @@ export function expoReducer(state: AppState, action: ExpoAction, ctx: Ctx): AppS
 
     case "expo/profile": {
       const e = expo.exhibitors.find((x) => x.id === action.exhibitorId);
-      if (!e || (!asExhibitor && !expoCan(state, "expo.manage"))) return state;
+      if (!e || (!asExhibitor && !can("expo.manage"))) return state;
       const p = action.patch;
       if (p.name !== undefined && !p.name.trim()) return state;
       return withExpo(state, patchEx(expo, e.id, (x) => ({ ...x, ...p, contact: { ...x.contact, ...p.contact }, history: [...x.history, note("Profile updated", by, at)] })));
@@ -194,7 +198,7 @@ export function expoReducer(state: AppState, action: ExpoAction, ctx: Ctx): AppS
       const e = expo.exhibitors.find((x) => x.id === action.exhibitorId);
       if (!e) return state;
       // the portal holds for its own company; anyone else allocating needs to manage the exhibition
-      if (!asExhibitor && !expoCan(state, "expo.manage")) return state;
+      if (!asExhibitor && !can("expo.manage")) return state;
       const cfg = expo.configs[e.eventId];
       if (holdProblems(expo, cfg, e, action.boothIds, at).length || expo.bookings.some((k) => k.id === action.id)) return state;
       const codes = action.boothIds.map((id) => expo.booths.find((b) => b.id === id)!.code).join(", ");
@@ -209,7 +213,7 @@ export function expoReducer(state: AppState, action: ExpoAction, ctx: Ctx): AppS
       const cfg = expo.configs[k.eventId];
       if (bookingStage(expo, k, cfg, at) !== "Held") return state;
       // a paper copy is recorded by the team; otherwise the exhibitor signs in the portal
-      if (!asExhibitor && !(expoCan(state, "money.markPaid") || expoCan(state, "expo.manage"))) return state;
+      if (!asExhibitor && !(can("money.markPaid") || can("expo.manage"))) return state;
       const e = expo.exhibitors.find((x) => x.id === k.exhibitorId)!;
       let n = expo.seq.invoice;
       let i = expo.invoices.length;

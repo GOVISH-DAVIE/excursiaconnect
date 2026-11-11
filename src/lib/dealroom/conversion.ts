@@ -4,7 +4,7 @@
  */
 import type { Ctx } from "../ctx";
 import type { AppState } from "../types";
-import { CLOSE_REASONS, OPEN_STAGES, acting, drCan, oppOpen, oppOverdue, oppParties, staffName } from "./logic";
+import { CLOSE_REASONS, OPEN_STAGES, staffOf, drCan, oppOpen, oppOverdue, oppParties, staffName } from "./logic";
 import type { CloseReason, DealRoomState, DrDocument, DrOpportunity, DrOppOutcome, DrScriptStep, OppStage, OutcomeKind } from "./types";
 import { portal, send, withDr } from "./util";
 
@@ -99,7 +99,7 @@ export function applyStep(ctx: Ctx, dr: DealRoomState, o: DrOpportunity, step: D
 export function drConvReducer(state: AppState, action: DrConvAction, ctx: Ctx): AppState {
   const dr = state.dealRoom;
   const at = ctx.now;
-  const me = acting(dr);
+  const me = staffOf(dr, ctx.actor);
 
   if (action.type === "dr/retention") {
     const c = dr.configs[action.eventId];

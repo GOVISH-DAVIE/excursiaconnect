@@ -11,7 +11,7 @@ import type { AppState, Capability, Delegate, EventState, FormField, Order, Paym
 import { addMinutes, overlaps } from "../time";
 import type { Ctx } from "../ctx";
 import { makeOrder, payoutsFor } from "./orders";
-import { entryBar, overrider, scanOperator, scanRefusal } from "./scan";
+import { entryBar, overrider, scanOperatorOf, scanRefusal } from "./scan";
 
 export type Action =
   | DrAction
@@ -238,7 +238,7 @@ export function reducer(state: AppState, action: Action, ctx: Ctx): AppState {
       return { ...state, events: state.events.map((e) => (e.id === action.eventId ? { ...e, brand: action.brand, tagline: action.tagline ?? e.tagline } : e)) };
     case "accredit": {
       const who = state.delegates.find((d) => d.id === action.delegateId);
-      const op = scanOperator(state);
+      const op = scanOperatorOf(state, ctx.actor);
       // the desk acts for someone signed in on the scanner, so every accreditation names its person (AZ-1)
       if (!who || !op || op.eventId !== who.eventId) return state;
       // an exhibiting company's people wait for its stand to be paid in full; only that may be waived, and only
@@ -270,7 +270,7 @@ export function reducer(state: AppState, action: Action, ctx: Ctx): AppState {
     case "scanSignOut":
       return { ...state, scanSession: undefined };
     case "scan": {
-      const op = scanOperator(state);
+      const op = scanOperatorOf(state, ctx.actor);
       const who = state.delegates.find((d) => d.id === action.delegateId);
       if (!op || !who || op.eventId !== who.eventId) return state;
       // an override needs the PIN of someone allowed to give one, and never waives a bad, unpaid or unaccredited badge
@@ -293,7 +293,7 @@ export function reducer(state: AppState, action: Action, ctx: Ctx): AppState {
       };
     }
     case "roomScan": {
-      const op = scanOperator(state);
+      const op = scanOperatorOf(state, ctx.actor);
       const who = state.delegates.find((d) => d.id === action.delegateId);
       if (!op || !who || op.eventId !== who.eventId) return state;
       const approver = action.verdict === "override" ? overrider(state, action.pin ?? "", who.eventId) : undefined;

@@ -4,7 +4,8 @@
  */
 import { can } from "../roles";
 import { addMinutes, daysBetween } from "../time";
-import type { AppState, Capability, Delegate } from "../types";
+import type { Actor } from "../ctx";
+import type { AppState, Capability, Delegate, TeamMember } from "../types";
 import type { BankLine, Booking, Booth, BoothStatus, BoothType, Exhibitor, ExpoConfig, ExpoState, Hall, HallFeature, Invoice } from "./types";
 
 export const EV_NBS = "ev_nairobi_summit";
@@ -12,11 +13,32 @@ export const EXPO_TIERS = ["t_exhibitor", "t_contractor"];
 
 /* ---------- who is acting ---------- */
 
+/** The prototype's persona switcher, for screens. Rules use `memberOf(state, ctx.actor)` instead. */
 export const actingMember = (state: AppState) => state.team.find((m) => m.id === state.expo.actingMemberId);
+/** The organiser's team member who is acting, from the actor alone; undefined for anyone else. */
+export const memberOf = (state: AppState, actor: Actor | null) => (actor?.kind === "member" ? state.team.find((m) => m.id === actor.id) : undefined);
 /** The organiser's own role matrix decides (src/lib/roles.ts); an invited member cannot act yet. */
-export function expoCan(state: AppState, cap: Capability) {
-  const m = actingMember(state);
+export function memberCan(state: AppState, m: TeamMember | undefined, cap: Capability) {
   return !!m && m.status === "Active" && can(state.grants, m.role, cap);
+}
+/** What the persona the screens show may do; the reducers check the actor with `memberCan`. */
+export function expoCan(state: AppState, cap: Capability) {
+  return memberCan(state, actingMember(state), cap);
+}
+
+/**
+ * The company an exhibition action is about: named on the action, or reached through its booking, invoice,
+ * delivery or person. An exhibitor may act only where this is their own company.
+ */
+export function actionExhibitor(state: AppState, action: { type: string } & Record<string, unknown>): string | undefined {
+  const expo = state.expo;
+  const s = (k: string) => (typeof action[k] === "string" ? (action[k] as string) : undefined);
+  if (s("exhibitorId")) return s("exhibitorId");
+  if (action.type === "expo/sign") return expo.bookings.find((k) => k.id === s("bookingId"))?.exhibitorId;
+  if (action.type === "expo/pay") return expo.invoices.find((i) => i.id === s("invoiceId"))?.exhibitorId;
+  if (action.type === "expo/personRemove") return state.delegates.find((d) => d.id === s("delegateId"))?.exhibitorId;
+  if (action.type === "expo/deliveryState") return expo.deliveries.find((d) => d.id === s("id"))?.exhibitorId;
+  return undefined;
 }
 export const memberName = (state: AppState, id: string) => (id === "exhibitor" ? "The exhibitor" : id === "public" ? "Applicant" : id === "system" ? "System" : state.team.find((m) => m.id === id)?.name ?? id);
 

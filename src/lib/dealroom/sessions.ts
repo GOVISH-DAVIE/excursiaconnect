@@ -8,7 +8,7 @@
 import type { Ctx } from "../ctx";
 import type { AppState } from "../types";
 import { addMinutes, crosses, fmtStamp } from "../time";
-import { acting, drCan, feeSettled, occupies, qualified, sessionClash, sessionHolds, staffName } from "./logic";
+import { staffOf, drCan, feeSettled, occupies, qualified, sessionClash, sessionHolds, staffName } from "./logic";
 import type { DealRoomState, DrApplication, DrSession, MeetingOutcome } from "./types";
 import { send, withDr } from "./util";
 
@@ -86,7 +86,7 @@ const accepted = (s: DrSession) => Object.entries(s.responses).filter(([, r]) =>
 export function drSessionReducer(state: AppState, action: DrSessionAction, ctx: Ctx): AppState {
   let dr = state.dealRoom;
   const at = ctx.now;
-  const me = acting(dr);
+  const me = staffOf(dr, ctx.actor);
   const s = "sessionId" in action ? dr.sessions.find((x) => x.id === action.sessionId) : undefined;
 
   switch (action.type) {

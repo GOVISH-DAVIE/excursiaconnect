@@ -8,10 +8,11 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from "react";
 import { seed } from "./seed";
 import { reducer as coreReducer, type Action as CoreAction } from "./core/reducer";
-import { nairobiNow, type Ctx } from "./ctx";
+import { protoCtx } from "./proto-ctx";
 import type { AppState } from "./types";
 
 export { overlaps } from "./time";
+export { protoCtx } from "./proto-ctx";
 export * from "./core/scan";
 export * from "./core/orders";
 
@@ -19,17 +20,6 @@ export const STORAGE_KEY = "excursiaconnect-proto-v1";
 /** Bumped whenever the seed gains records in arrays that already exist, so a saved browser resets instead of
  *  keeping an older copy that lacks them (hydrate only merges top-level keys). */
 export const SEED_VERSION = 17;
-
-/**
- * The prototype's Ctx, built from what the demo already uses: the Deal Room and Exhibition run on their own demo
- * clocks, the core on Nairobi's wall clock; ids are random. On the server the gateway builds Ctx instead, from the
- * server clock and the session.
- */
-export function protoCtx(state: AppState, action?: { type: string }): Ctx {
-  const t = action?.type ?? "";
-  const now = t.startsWith("dr/") ? state.dealRoom.clock : t.startsWith("expo/") ? state.expo.clock : nairobiNow(new Date());
-  return { now, actor: null, newId: (prefix) => `${prefix}_${now.replace(/\D/g, "").slice(-8)}${Math.random().toString(36).slice(2, 7)}` };
-}
 
 /** The rules with the prototype's Ctx: what screens and the rule tests call. */
 export function reducer(state: AppState, action: CoreAction): AppState {

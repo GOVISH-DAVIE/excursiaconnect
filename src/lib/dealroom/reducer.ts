@@ -13,7 +13,7 @@ import {
   feeOwed,
   feeSettled,
   MATERIAL,
-  acting,
+  staffOf,
   decisionOf,
   drCan,
   formGaps,
@@ -124,6 +124,9 @@ function revokeBadge(ctx: Ctx, state: AppState, app: DrApplication): AppState {
   return { ...state, delegates: state.delegates.map((d) => (d.id === app.delegateId ? { ...d, status: "Cancelled", cancelled: true } : d)) };
 }
 
+/** Algotech only: staff accounts, the live window and reading a file under a support grant (DA-2, DA-3, DA-5, DA-6). */
+export const ADMIN_ACTIONS = new Set(["dr/staffAdd", "dr/staffSet", "dr/staffRevoke", "dr/liveWindow", "dr/supportView"]);
+
 const STAFF_ACTIONS = new Set([
   "dr/config", "dr/import", "dr/invite", "dr/assign", "dr/startReview", "dr/score", "dr/requestInfo", "dr/rfiExpiry", "dr/recommend", "dr/decide",
   "dr/confirmSecond", "dr/meetCondition", "dr/confirmDecisionMaker", "dr/readiness", "dr/approveTeaser", "dr/reReviewDone", "dr/checkKyc", "dr/sanctions",
@@ -135,11 +138,12 @@ const STAFF_ACTIONS = new Set([
 export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState {
   let dr = state.dealRoom;
   const at = ctx.now;
-  const me = acting(dr);
+  const me = staffOf(dr, ctx.actor);
 
   // after the conversion end date the Deal Room is read-only (DA-8); only the clock and the switcher still move
   if (dr.archivedAt && action.type !== "dr/clock" && action.type !== "dr/actAs" && action.type !== "dr/retention") return state;
   if (STAFF_ACTIONS.has(action.type) && !me?.active) return state;
+  if (ADMIN_ACTIONS.has(action.type) && ctx.actor?.kind !== "admin") return state;
 
   const app = "appId" in action ? dr.apps.find((a) => a.id === action.appId) : undefined;
   const cfg = app ? dr.configs[app.eventId] : undefined;
@@ -390,7 +394,9 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/payFee": {
-      // the seeker pays from the link: the badge is issued and, once Deal Room Ready, matching opens
+      // the seeker pays from the link: the badge is issued and, once Deal Room Ready, matching opens. Only the
+      // payment provider's confirmation settles a fee, never the browser (on the server: the verified webhook)
+      if (ctx.actor?.kind !== "system") return state;
       if (!app || !feeOwed(app) || !qualified(app) || !action.reference.trim()) return state;
       const kes = action.method === "M-Pesa" ? feeInKes(app.fee!) : undefined;
       dr = patchApp(dr, app.id, (a) => note({ ...a, fee: { ...a.fee!, paid: { at, method: action.method, reference: action.reference.trim().slice(0, 40), kes } } }, "applicant", `Paid ${feeLabel(app.fee!)} by ${action.method}, ref ${action.reference.trim()}`, at));

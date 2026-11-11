@@ -4,6 +4,7 @@
  * the demo clock on the slice.
  */
 import { addDays, addMinutes, crosses, daysBetween, fromMin, toMin } from "../time";
+import type { Actor } from "../ctx";
 import type {
   DealRoomState,
   DrApplication,
@@ -70,7 +71,10 @@ export function drCan(staff: DrStaff | undefined, cap: DrCap) {
   return CAN[staff.role].includes(cap);
 }
 
+/** The prototype's persona switcher, for screens. Rules use `staffOf(dr, ctx.actor)` instead. */
 export const acting = (dr: DealRoomState) => dr.staff.find((s) => s.id === dr.actingStaffId);
+/** The Deal Room staff member who is acting, from the actor alone; undefined for anyone who is not staff. */
+export const staffOf = (dr: DealRoomState, actor: Actor | null) => (actor?.kind === "staff" ? dr.staff.find((s) => s.id === actor.id) : undefined);
 export const staffName = (dr: DealRoomState, id?: string) =>
   !id ? "–" : id === "applicant" ? "Applicant" : id === "system" ? "System" : id === "admin" ? "Algotech" : dr.staff.find((s) => s.id === id)?.name ?? id;
 

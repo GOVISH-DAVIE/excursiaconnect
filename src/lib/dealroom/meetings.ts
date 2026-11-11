@@ -7,7 +7,7 @@ import type { Ctx } from "../ctx";
 import type { AppState } from "../types";
 import { addMinutes, fmtStamp } from "../time";
 import {
-  acting,
+  staffOf,
   blockedPair,
   bothAccepted,
   canSee,
@@ -101,7 +101,7 @@ function where(state: AppState, m: DrMeeting) {
 function book(ctx: Ctx, state: AppState, req: SlotRequest, by: string, override?: string): AppState {
   const { clashes, caps, end } = slotProblems(state, req);
   if (clashes.length) return state;
-  const me = acting(state.dealRoom);
+  const me = staffOf(state.dealRoom, ctx.actor);
   if (caps.length && !(override?.trim() && drCan(me, "overrideCap"))) return state;
   let dr = state.dealRoom;
   const mt = newMeeting(ctx, dr, req, end, by, caps.length ? override : undefined);
@@ -122,7 +122,7 @@ function book(ctx: Ctx, state: AppState, req: SlotRequest, by: string, override?
 export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): AppState {
   let dr = state.dealRoom;
   const at = ctx.now;
-  const me = acting(dr);
+  const me = staffOf(dr, ctx.actor);
 
   switch (action.type) {
     /* ----- matching (DR-7, DR-10, DL-7) ----- */

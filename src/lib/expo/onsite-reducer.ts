@@ -7,7 +7,7 @@
 import { fmtStamp } from "../time";
 import type { Ctx } from "../ctx";
 import type { AppState, Capability } from "../types";
-import { activeBookingOf, expoCan, invoiceNo } from "./logic";
+import { actionExhibitor, activeBookingOf, invoiceNo, memberCan, memberOf } from "./logic";
 import {
   CONTRACTOR_TIER,
   EXHIBITOR_TIER,
@@ -58,10 +58,12 @@ export const ONSITE_TYPES = new Set<string>(["expo/people", "expo/personRemove",
 export function onsiteReducer(state: AppState, action: OnsiteAction, ctx: Ctx): AppState {
   let expo = state.expo;
   const at = ctx.now;
-  const asExhibitor = "as" in action && action.as === "exhibitor";
-  const by = asExhibitor ? "exhibitor" : (state.team.find((m) => m.id === expo.actingMemberId)?.id ?? "system");
-  // the portal acts for its own company; the team needs one of the capabilities
-  const allowed = (...caps: Capability[]) => asExhibitor || caps.some((c) => expoCan(state, c));
+  const me = memberOf(state, ctx.actor);
+  // an exhibitor acts only for their own company; the team needs one of the capabilities of their role
+  const asExhibitor = ctx.actor?.kind === "exhibitor" && ctx.actor.exhibitorId === actionExhibitor(state, action as OnsiteAction & Record<string, unknown>);
+  const can = (cap: Capability) => memberCan(state, me, cap);
+  const by = asExhibitor ? "exhibitor" : (me?.id ?? "system");
+  const allowed = (...caps: Capability[]) => asExhibitor || caps.some((c) => can(c));
   const cfgOf = (exhibitorId: string) => {
     const e = expo.exhibitors.find((x) => x.id === exhibitorId);
     return e ? { e, cfg: expo.configs[e.eventId] } : undefined;
@@ -120,7 +122,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction, ctx: Ctx): 
 
     case "expo/brandingDecide": {
       const b = expo.branding.find((x) => x.exhibitorId === action.exhibitorId);
-      if (!b || b.decision || !expoCan(state, "expo.manage") || (action.decision === "Returned" && !action.note.trim())) return state;
+      if (!b || b.decision || !can("expo.manage") || (action.decision === "Returned" && !action.note.trim())) return state;
       const decision = { state: action.decision, by, at, note: action.note.trim() || undefined };
       expo = { ...expo, branding: expo.branding.map((x) => (x.exhibitorId === b.exhibitorId ? { ...x, decision, history: [...x.history, note(`${action.decision}${action.note.trim() ? `: ${action.note.trim()}` : ""}`, by, at)] } : x)) };
       expo = send(ctx, expo, b.eventId, b.exhibitorId, action.decision === "Approved" ? "Your stand branding is approved" : "Your stand branding needs a change", `/exhibitor/${b.exhibitorId}`);
@@ -145,7 +147,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction, ctx: Ctx): 
 
     case "expo/orderState": {
       const o = expo.orders.find((x) => x.id === action.orderId);
-      if (!o || !expoCan(state, "expo.floor")) return state;
+      if (!o || !can("expo.floor")) return state;
       if (orderStepProblems(expo.configs[o.eventId], o, action.state, at).length) return state;
       return withExpo(state, { ...expo, orders: expo.orders.map((x) => (x.id === o.id ? { ...x, state: action.state, history: [...x.history, note(action.state, by, at)] } : x)) });
     }
@@ -159,13 +161,13 @@ export function onsiteReducer(state: AppState, action: OnsiteAction, ctx: Ctx): 
 
     case "expo/requirementAck": {
       const r = expo.requirements.find((x) => x.id === action.id);
-      if (!r || r.ack || !expoCan(state, "expo.floor")) return state;
+      if (!r || r.ack || !can("expo.floor")) return state;
       return withExpo(state, { ...expo, requirements: expo.requirements.map((x) => (x.id === r.id ? { ...x, ack: { by, at } } : x)) });
     }
 
     case "expo/moveIn": {
       const c = cfgOf(action.exhibitorId);
-      if (!c || !expoCan(state, "expo.manage") || !signedBooking(expo, c.cfg, c.e.id, at) || moveInProblems(c.cfg, action.at, at).length) return state;
+      if (!c || !can("expo.manage") || !signedBooking(expo, c.cfg, c.e.id, at) || moveInProblems(c.cfg, action.at, at).length) return state;
       const m = { eventId: c.e.eventId, exhibitorId: c.e.id, at: action.at, by };
       expo = { ...expo, moveIns: expo.moveIns.some((x) => x.exhibitorId === c.e.id) ? expo.moveIns.map((x) => (x.exhibitorId === c.e.id ? m : x)) : [...expo.moveIns, m] };
       expo = send(ctx, expo, c.e.eventId, c.e.id, `Your move-in time is ${fmtStamp(action.at)}`, `/exhibitor/${c.e.id}`);
@@ -186,7 +188,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction, ctx: Ctx): 
       if (!d) return state;
       const st = deliveryStatus(expo.configs[d.eventId], d, at);
       // the bay team records arrivals; a booking still ahead can be cancelled by the company or the team
-      if (action.state === "Arrived" && (asExhibitor || !expoCan(state, "expo.floor") || (st !== "Booked" && st !== "Missed") || d.slot > at)) return state;
+      if (action.state === "Arrived" && (asExhibitor || !can("expo.floor") || (st !== "Booked" && st !== "Missed") || d.slot > at)) return state;
       if (action.state === "Cancelled" && (!allowed("expo.floor", "expo.manage") || st !== "Booked" || d.slot <= at)) return state;
       const patch = action.state === "Arrived" ? { arrived: { at, by } } : { cancelled: { at, by } };
       return withExpo(state, { ...expo, deliveries: expo.deliveries.map((x) => (x.id === d.id ? { ...x, ...patch } : x)) });
@@ -203,7 +205,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction, ctx: Ctx): 
 
     case "expo/signOff": {
       const c = cfgOf(action.exhibitorId);
-      if (!c || !expoCan(state, "expo.floor") || signOffProblems(expo, c.cfg, c.e.id, at).length) return state;
+      if (!c || !can("expo.floor") || signOffProblems(expo, c.cfg, c.e.id, at).length) return state;
       expo = { ...expo, dismantles: expo.dismantles.map((x) => (x.exhibitorId === c.e.id ? { ...x, signedOff: { at, by, damage: action.damage.trim() || undefined } } : x)) };
       expo = send(ctx, expo, c.e.eventId, c.e.id, action.damage.trim() ? "Your stand is signed off, with damage noted" : "Your stand is signed off", `/exhibitor/${c.e.id}`);
       return withExpo(state, expo);
@@ -223,13 +225,13 @@ export function onsiteReducer(state: AppState, action: OnsiteAction, ctx: Ctx): 
     case "expo/issueAssign": {
       const i = expo.issues.find((x) => x.id === action.id);
       const m = state.team.find((x) => x.id === action.assignee && x.status === "Active");
-      if (!i || i.resolved || !m || i.assignee === m.id || !expoCan(state, "expo.floor")) return state;
+      if (!i || i.resolved || !m || i.assignee === m.id || !can("expo.floor")) return state;
       return withExpo(state, { ...expo, issues: expo.issues.map((x) => (x.id === i.id ? { ...x, assignee: m.id, history: [...x.history, note(`Assigned to ${m.name}`, by, at)] } : x)) });
     }
 
     case "expo/issueResolve": {
       const i = expo.issues.find((x) => x.id === action.id);
-      if (!i || i.resolved || !action.note.trim() || !expoCan(state, "expo.floor")) return state;
+      if (!i || i.resolved || !action.note.trim() || !can("expo.floor")) return state;
       expo = { ...expo, issues: expo.issues.map((x) => (x.id === i.id ? { ...x, resolved: { at, by, note: action.note.trim() }, history: [...x.history, note(`Resolved: ${action.note.trim()}`, by, at)] } : x)) };
       if (i.exhibitorId) expo = send(ctx, expo, i.eventId, i.exhibitorId, `Your ${i.category.toLowerCase()} issue is resolved`, `/exhibitor/${i.exhibitorId}`, "SMS");
       return withExpo(state, expo);
@@ -238,7 +240,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction, ctx: Ctx): 
     case "expo/occupancy": {
       // the floor walk: set a stand staffed or not for a show day, or hand it back to the check-ins (null)
       const c = cfgOf(action.exhibitorId);
-      if (!c || !expoCan(state, "expo.floor") || action.day < 1 || action.day > c.cfg.showDays.length || !signedBooking(expo, c.cfg, c.e.id, at)) return state;
+      if (!c || !can("expo.floor") || action.day < 1 || action.day > c.cfg.showDays.length || !signedBooking(expo, c.cfg, c.e.id, at)) return state;
       // a day not yet started is not walked
       if (`${c.cfg.showDays[action.day - 1].date} ${c.cfg.exhibitorOpen}` > at) return state;
       const rest = expo.occupancy.filter((o) => !(o.exhibitorId === c.e.id && o.day === action.day));

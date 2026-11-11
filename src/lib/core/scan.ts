@@ -1,6 +1,7 @@
 /** Who may scan, what a badge may enter, and the room doors: pure rules over the app state (AZ-1 to AZ-6). */
 import { doorProblem } from "../expo/ops";
 import { can } from "../roles";
+import type { Actor } from "../ctx";
 import type { AppState, Delegate, Session, TeamMember } from "../types";
 
 // `waivable`: a deny staff may override with a PIN; a bad, unpaid or unaccredited badge never is (AZ-5)
@@ -17,11 +18,17 @@ export function scanRefusal(state: AppState, m: TeamMember, eventId: string): st
   return undefined;
 }
 
-/** The person signed in on the scanner, if they still may scan. */
+/** The person signed in on this scanner, if they still may scan: the actor, signed in for one event. */
+export function scanOperatorOf(state: AppState, actor: Actor | null) {
+  if (actor?.kind !== "member" || !actor.eventId) return undefined;
+  const member = state.team.find((m) => m.id === actor.id);
+  return member && !scanRefusal(state, member, actor.eventId) ? { member, eventId: actor.eventId } : undefined;
+}
+
+/** The prototype's scanner sign-in, for screens. Rules use `scanOperatorOf(state, ctx.actor)`. */
 export function scanOperator(state: AppState) {
   const sess = state.scanSession;
-  const member = sess && state.team.find((m) => m.id === sess.memberId);
-  return member && !scanRefusal(state, member, sess.eventId) ? { member, eventId: sess.eventId } : undefined;
+  return sess ? scanOperatorOf(state, { kind: "member", id: sess.memberId, eventId: sess.eventId }) : undefined;
 }
 
 /** The team member a PIN belongs to, when the role matrix lets them override on this event. */

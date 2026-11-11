@@ -12,7 +12,7 @@
 /** Who is acting. On the server this comes from the session and nothing else. */
 export type Actor =
   | { kind: "staff"; id: string } // Deal Room staff (DrStaff id)
-  | { kind: "member"; id: string } // an organiser's team member (TeamMember id), including a scanner operator
+  | { kind: "member"; id: string; eventId?: string } // an organiser's team member (TeamMember id); a scanner is signed in for one event
   | { kind: "admin"; id: string } // Algotech
   | { kind: "applicant"; appId: string } // a Deal Room participant, acting on their own application
   | { kind: "exhibitor"; exhibitorId: string } // an exhibitor's contact, acting for their own company
