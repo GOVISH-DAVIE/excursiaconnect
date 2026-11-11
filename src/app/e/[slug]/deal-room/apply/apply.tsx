@@ -196,6 +196,8 @@ export function Apply({ slug }: { slug: string }) {
     router.push(`/dr/${app.id}`);
   };
   const up = (patch: Partial<DrApplication>) => setApp((a) => (a ? { ...a, ...patch } : a));
+  // the form itself takes the page's full width; choosing a pathway and signing in stay a narrow column
+  const wide = hydrated && !closed && !submitted && !!app;
   // one person may register on more than one pathway; each is its own application, and they should know of the others
   const others = app
     ? dr.apps.filter((a) => a.id !== app.id && a.eventId === event.id && !!a.ref && ((!!app.contact.email && a.contact.email.toLowerCase() === app.contact.email.toLowerCase()) || (!!app.contact.phone && a.contact.phone === app.contact.phone)))
@@ -223,7 +225,7 @@ export function Apply({ slug }: { slug: string }) {
         </div>
       </header>
 
-      <main className="wrap wrap--narrow py-10 space-y-5">
+      <main className={wide ? "wrap py-10 space-y-8" : "wrap wrap--narrow py-10 space-y-5"}>
         <div>
           <h1 className="h1">{choosing ? `Register for the ${event.name} Deal Room` : TITLE[mode]}</h1>
           <p className="mt-2 text-[15px] max-w-[60ch]">{choosing ? "Select the registration pathway that best reflects your role and the purpose of your participation in the Deal Room." : WHO_FOR[mode]}</p>
@@ -303,329 +305,382 @@ export function Apply({ slug }: { slug: string }) {
             </form>
           </Card>
         ) : (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-slate">
-              <span>{saved?.draftSavedAt ? `Draft saved ${fmtStamp(saved.draftSavedAt)}` : "Not saved yet"}</span>
-              <span>
-                Continue on another device:{" "}
-                <Link className="link" href={`/e/${slug}/deal-room/apply?resume=${app.id}`}>
-                  /deal-room/apply?resume={app.id}
-                </Link>
-              </span>
-            </div>
-
-            {others.length > 0 && (
-              <p className="rounded-md bg-paper-200 px-4 py-3 text-[14px]">
-                {others.map((o, i) => (
-                  <span key={o.id}>
-                    {i === 0 ? "This email or phone also has " : " and "}a {ROLE_LABEL[roleOf(o)].toLowerCase()} application, {o.ref} (
-                    <Link className="link" href={`/dr/${o.id}`}>
-                      its status
-                    </Link>
-                    )
-                  </span>
-                ))}
-                . This one is separate.
-              </p>
-            )}
-
-            <nav aria-label="Application steps">
-              <ol className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[14px]">
-                {steps.map((k, i) => {
-                  const done = k !== "review" && i <= reached && i !== at && missingIn(k).length === 0;
-                  return (
-                    <li key={k} className="flex items-center gap-1.5 sm:gap-2">
-                      <button type="button" onClick={() => go(i)} aria-current={i === at ? "step" : undefined} aria-label={`Step ${i + 1}: ${stepLabel(k, mode)}${done ? ", complete" : ""}`} className={`flex items-center gap-2 ${i === at ? "text-ink font-medium" : "text-slate hover:text-ink"}`}>
-                        <span className={`h-6 w-6 shrink-0 rounded-full grid place-items-center text-[13px] ${i === at ? "bg-ink text-white" : done ? "bg-ok text-white" : "bg-line-strong text-ink"}`}>{done ? "✓" : i + 1}</span>
-                        <span className={i === at ? "hidden sm:inline" : "sr-only lg:not-sr-only"}>{stepLabel(k, mode)}</span>
-                      </button>
-                      {i < steps.length - 1 && <span className="w-3 sm:w-5 h-px bg-line-strong" aria-hidden="true" />}
-                    </li>
-                  );
-                })}
-              </ol>
-              <p className="mt-2 text-[14px] sm:hidden">
-                <span className="text-slate">
-                  Step {at + 1} of {steps.length}:
-                </span>{" "}
-                <span className="font-medium">{stepLabel(cur, mode)}</span>
-              </p>
-            </nav>
-
-            {cur === "org" && (
-              <>
-                <Card title="Your organisation">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <F label="Legal name">
-                      <input className="input" value={app.org.name} onChange={(e) => up({ org: { ...app.org, name: e.target.value } })} />
-                    </F>
-                    {type === "seeker" ? (
-                      <>
-                        <F label="Registration number">
-                          <input className="input" value={app.org.regNo} onChange={(e) => up({ org: { ...app.org, regNo: e.target.value } })} />
-                        </F>
-                        <F label="Kind of organisation">
-                          <select className="input" value={app.ownerKind ?? ""} onChange={(e) => up({ ownerKind: (e.target.value || undefined) as OwnerKind | undefined })}>
-                            <option value="">Choose</option>
-                            {OWNER_KINDS.map((k) => (
-                              <option key={k}>{k}</option>
-                            ))}
-                          </select>
-                        </F>
-                      </>
-                    ) : (
-                      <F label={mode === "capital" ? "Type of investor" : "Type of organisation"}>
-                        <select className="input" value={app.providerKind ?? ""} onChange={(e) => up({ providerKind: (e.target.value || undefined) as ProviderKind | undefined })}>
-                          <option value="">Choose</option>
-                          {kindOptions.map((k) => (
-                            <option key={k}>{k}</option>
-                          ))}
-                        </select>
-                      </F>
-                    )}
-                    <F label={type === "seeker" ? "Country" : "Headquarters"}>
-                      <select className="input" value={app.org.country} onChange={(e) => up({ org: { ...app.org, country: e.target.value } })}>
-                        <option value="">Choose</option>
-                        {cfg.countries.map((c) => (
-                          <option key={c}>{c}</option>
-                        ))}
-                      </select>
-                    </F>
-                    {type === "seeker" && (
-                      <F label="Sector">
-                        <select className="input" value={app.org.sector} onChange={(e) => up({ org: { ...app.org, sector: e.target.value } })}>
-                          <option value="">Choose</option>
-                          {cfg.sectors.map((c) => (
-                            <option key={c}>{c}</option>
-                          ))}
-                        </select>
-                      </F>
-                    )}
-                    <F label="Website" help={cfg.fields["org.website"] === "advisory" ? "Optional" : undefined}>
-                      <input className="input" type="url" placeholder="https://" value={app.org.website ?? ""} onChange={(e) => up({ org: { ...app.org, website: e.target.value } })} />
-                    </F>
-                    <F label="Your name">
-                      <input className="input" value={app.contact.name} onChange={(e) => up({ contact: { ...app.contact, name: e.target.value } })} />
-                    </F>
-                    <F label={app.contact.email ? "Your phone" : "Your email"}>
-                      {app.contact.email ? (
-                        <input className="input" type="tel" value={app.contact.phone} onChange={(e) => up({ contact: { ...app.contact, phone: e.target.value } })} />
-                      ) : (
-                        <input className="input" type="email" value={app.contact.email} onChange={(e) => up({ contact: { ...app.contact, email: e.target.value } })} />
-                      )}
-                    </F>
-                  </div>
-                </Card>
-              </>
-            )}
-
-            {cur === "ask" && (
-              <>
-                {type === "seeker" && app.ask && app.traction && (
-                  <Card title="What you are raising">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <F label="Amount">
-                        <div className="flex gap-2">
-                          <select className="input w-24" aria-label="Currency" value={app.ask.currency} onChange={(e) => up({ ask: { ...app.ask!, currency: e.target.value as Currency } })}>
-                            <option>USD</option>
-                            <option>KES</option>
-                          </select>
-                          <input className="input" type="number" min={0} value={app.ask.amount || ""} onChange={(e) => up({ ask: { ...app.ask!, amount: Number(e.target.value) } })} />
-                        </div>
-                      </F>
-                      <F label="Transaction pathway">
-                        <select className="input" value={app.ask.instrument} onChange={(e) => up({ ask: { ...app.ask!, instrument: e.target.value as Instrument } })}>
-                          {INSTRUMENTS.map((x) => (
-                            <option key={x}>{x}</option>
-                          ))}
-                        </select>
-                      </F>
-                      <F label="Stage">
-                        <select className="input" value={app.ask.stage} onChange={(e) => up({ ask: { ...app.ask!, stage: e.target.value as Stage } })}>
-                          {STAGES.map((x) => (
-                            <option key={x}>{x}</option>
-                          ))}
-                        </select>
-                      </F>
-                      <F label="Revenue last year">
-                        <select className="input" value={app.traction.revenueBand} onChange={(e) => up({ traction: { ...app.traction!, revenueBand: e.target.value } })}>
-                          <option value="">Choose</option>
-                          {REVENUE.map((x) => (
-                            <option key={x}>{x}</option>
-                          ))}
-                        </select>
-                      </F>
-                      <F label="Use of funds" span>
-                        <textarea className="input min-h-20" value={app.ask.useOfFunds} onChange={(e) => up({ ask: { ...app.ask!, useOfFunds: e.target.value } })} />
-                      </F>
-                      <F label="Customers" help="Optional, for example 1,200 retail customers">
-                        <input className="input" value={app.traction.customers} onChange={(e) => up({ traction: { ...app.traction!, customers: e.target.value } })} />
-                      </F>
-                      <F label="Key metrics" help="Optional">
-                        <input className="input" value={app.traction.metrics} onChange={(e) => up({ traction: { ...app.traction!, metrics: e.target.value } })} />
-                      </F>
-                    </div>
-                  </Card>
-                )}
-              </>
-            )}
-
-            {cur === "challenge" && app.challenge && <ChallengeFields c={app.challenge} onChange={(challenge) => up({ challenge })} />}
-
-            {cur === "mandate" && app.mandate && <MandateFields app={app} partner={mode === "partner"} sectors={cfg.sectors} countries={cfg.countries} onChange={(mandate) => up({ mandate })} />}
-
-            {cur === "people" && (
-              <>
-                <Card title="The decision-maker">
-                  <p className="-mt-1 mb-3 text-[13px] text-slate">The person who can commit {type === "seeker" ? "the company" : "your organisation"} and who will attend the meetings.</p>
-                  <label className="flex items-center gap-2 text-[14px] mb-3">
-                    <input type="checkbox" checked={!!app.contact.name && app.decisionMaker.name === app.contact.name} onChange={(e) => up({ decisionMaker: e.target.checked ? { ...app.contact, title: app.decisionMaker.title } : { name: "", title: "", email: "", phone: "" } })} />
-                    That is me
-                  </label>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <F label="Name">
-                      <input className="input" value={app.decisionMaker.name} onChange={(e) => up({ decisionMaker: { ...app.decisionMaker, name: e.target.value } })} />
-                    </F>
-                    <F label="Title">
-                      <input className="input" value={app.decisionMaker.title} onChange={(e) => up({ decisionMaker: { ...app.decisionMaker, title: e.target.value } })} />
-                    </F>
-                    <F label="Email">
-                      <input className="input" type="email" value={app.decisionMaker.email} onChange={(e) => up({ decisionMaker: { ...app.decisionMaker, email: e.target.value } })} />
-                    </F>
-                    <F label="Phone">
-                      <input className="input" type="tel" value={app.decisionMaker.phone} onChange={(e) => up({ decisionMaker: { ...app.decisionMaker, phone: e.target.value } })} />
-                    </F>
-                  </div>
-                </Card>
-
-                <Card title="Mission and how you heard of us">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <F label="Mission">
-                      <select className="input" value={app.mission} onChange={(e) => up({ mission: e.target.value, track: undefined })}>
-                        <option value="">Choose</option>
-                        {cfg.missions.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.code} {m.name}
-                          </option>
-                        ))}
-                      </select>
-                    </F>
-                    {type === "seeker" && (
-                      <F label="Strategic track">
-                        <select className="input" value={app.track ?? ""} disabled={!app.mission} onChange={(e) => up({ track: e.target.value || undefined })}>
-                          <option value="">{app.mission ? "Choose" : "Choose a mission first"}</option>
-                          {cfg.tracks
-                            .filter((t) => t.missionId === app.mission)
-                            .map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.code} {t.name}
-                              </option>
-                            ))}
-                        </select>
-                      </F>
-                    )}
-                    <F label="How you heard of the Deal Room">
-                      <select className="input" value={app.source} onChange={(e) => up({ source: e.target.value })}>
-                        <option value="">Choose</option>
-                        {cfg.sources.map((s) => (
-                          <option key={s}>{s}</option>
-                        ))}
-                      </select>
-                    </F>
-                  </div>
-                </Card>
-              </>
-            )}
-
-            {cur === "docs" && (
-              <>
-                {type === "seeker" && (
-                  <Card title="Documents">
-                    <p className="-mt-1 mb-2 text-[13px] text-slate">Up to 25 MB each. Nothing is shared with an investor or partner until you consent, per document and per counterparty.</p>
-                    {SEEKER_DOCS.map((d) => {
-                      const have = app.documents.filter((x) => x.kind === d.kind);
+          <div className="lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-12 xl:gap-16">
+            {/* the steps: a list down the side on a wide screen, with where each stands; a row of numbers on a small one */}
+            <aside className="hidden lg:block">
+              <div className="sticky top-8 space-y-6">
+                <nav aria-label="Application steps">
+                  <ol className="space-y-1">
+                    {steps.map((k, i) => {
+                      const miss = k === "review" ? gaps.missing.length : missingIn(k).length;
+                      const done = k !== "review" && i <= reached && i !== at && miss === 0;
+                      const status = k === "review" ? (miss ? `${miss} item${miss > 1 ? "s" : ""} still to fill in` : "Ready to submit") : miss ? `${miss} to fill in` : "Complete";
                       return (
-                        <div key={d.kind} className="py-2 border-b border-line last:border-0">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-[14px] font-medium">
-                              {d.kind}
-                              {cfg.fields[d.key] !== "required" && <span className="ml-1 font-normal text-slate">optional</span>}
+                        <li key={k} className="relative">
+                          {i < steps.length - 1 && <span aria-hidden="true" className="absolute left-[23.5px] top-[40px] h-[calc(100%-26px)] w-px bg-line-strong" />}
+                          <button type="button" onClick={() => go(i)} aria-current={i === at ? "step" : undefined} aria-label={`Step ${i + 1}: ${stepLabel(k, mode)}, ${status.toLowerCase()}`} className="group relative flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left">
+                            <span className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full text-[13px] ${i === at ? "bg-ink text-white" : done ? "bg-ok text-white" : "bg-line-strong text-ink"}`}>{done ? "✓" : i + 1}</span>
+                            <span className="min-w-0">
+                              <span className={`block text-[15px] leading-snug ${i === at ? "font-medium text-ink" : "text-ink group-hover:underline underline-offset-4 decoration-line-strong"}`}>{stepLabel(k, mode)}</span>
+                              <span className={`mt-0.5 block text-[13px] ${miss && i < at ? "text-bad" : "text-slate"}`}>{status}</span>
                             </span>
-                            <UploadDoc kind={d.kind} at={dr.clock} label={have.length ? "Add another" : "Upload"} onDone={(doc) => up({ documents: [...app.documents, doc] })} />
-                          </div>
-                          {have.map((h) => (
-                            <DocLine key={h.id} doc={h}>
-                              <button className="btn-quiet text-bad" onClick={() => up({ documents: app.documents.filter((x) => x.id !== h.id) })}>
-                                Remove
-                              </button>
-                            </DocLine>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </Card>
-                )}
-              </>
-            )}
-
-            {cur === "review" ? (
-              <Card title="Review and submit">
-                <ul className="divide-y divide-line">
-                  {steps
-                    .filter((k) => k !== "review")
-                    .map((k) => {
-                      const miss = missingIn(k);
-                      return (
-                        <li key={k} className="flex items-start justify-between gap-3 py-3">
-                          <div className="min-w-0">
-                            <div className="text-[15px] font-medium">{stepLabel(k, mode)}</div>
-                            <div className={`text-[13px] ${miss.length ? "text-bad" : "text-slate"}`}>{miss.length ? `Missing: ${miss.join(", ")}` : "Complete"}</div>
-                          </div>
-                          <button type="button" className="link shrink-0 text-[14px]" onClick={() => go(steps.indexOf(k))}>
-                            {miss.length ? "Complete it" : "Edit"}
                           </button>
                         </li>
                       );
                     })}
-                </ul>
-                {missingIn("review").length > 0 && <p className="mt-2 text-[13px] text-bad">Also missing: {missingIn("review").join(", ")}.</p>}
-                {tried && gaps.missing.length > 0 && (
-                  <div role="alert" className="mt-3 rounded-md bg-bad-50 px-3 py-2 text-[14px] text-bad">
-                    Still needed before you can submit: {gaps.missing.join(", ")}.
-                  </div>
-                )}
-                {gaps.advisory.length > 0 && <p className="mt-3 text-[13px] text-slate">Worth adding, not required: {gaps.advisory.join(", ")}.</p>}
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-[13px] text-slate">
-                    {mode === "challenge" ? "After you submit, you upload registration documents and sign the NDA from your status page. Once verified, the team matches your challenge with businesses that can solve it." : type === "provider" ? "After you submit, you upload KYC documents and sign the NDA from your status page." : "You get a reference number and a status page at once."}
-                  </span>
-                  <button className="btn btn-primary btn-cta" onClick={submit}>
-                    {mode === "challenge" ? "Submit the challenge" : "Submit the application"}
-                  </button>
+                  </ol>
+                </nav>
+                <div className="space-y-2 border-t border-line pt-4 text-[13px] text-slate">
+                  <p>{saved?.draftSavedAt ? `Draft saved ${fmtStamp(saved.draftSavedAt)}` : "Not saved yet"}</p>
+                  <p>To continue on another device, open this draft&apos;s link there.</p>
+                  <CopyLink path={`/e/${slug}/deal-room/apply?resume=${app.id}`} />
                 </div>
-              </Card>
-            ) : (
-              missingIn(cur).length > 0 && reached > at && <p className="text-[13px] text-slate">Still to fill in on this step: {missingIn(cur).join(", ")}.</p>
-            )}
+              </div>
+            </aside>
 
-            <div className="flex items-center justify-between gap-3">
-              {at > 0 ? (
-                <button type="button" className="btn btn-secondary" onClick={() => go(at - 1)}>
-                  Back
-                </button>
+            <div className="min-w-0 space-y-5">
+              <div className="space-y-4 lg:hidden">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-slate">
+                  <span>{saved?.draftSavedAt ? `Draft saved ${fmtStamp(saved.draftSavedAt)}` : "Not saved yet"}</span>
+                  <span className="flex items-center gap-2">
+                    Continue on another device: <CopyLink path={`/e/${slug}/deal-room/apply?resume=${app.id}`} />
+                  </span>
+                </div>
+                <nav aria-label="Application steps">
+                  <ol className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[14px]">
+                    {steps.map((k, i) => {
+                      const done = k !== "review" && i <= reached && i !== at && missingIn(k).length === 0;
+                      return (
+                        <li key={k} className="flex items-center gap-1.5 sm:gap-2">
+                          <button type="button" onClick={() => go(i)} aria-current={i === at ? "step" : undefined} aria-label={`Step ${i + 1}: ${stepLabel(k, mode)}${done ? ", complete" : ""}`} className={`flex items-center gap-2 ${i === at ? "text-ink font-medium" : "text-slate hover:text-ink"}`}>
+                            <span className={`h-6 w-6 shrink-0 rounded-full grid place-items-center text-[13px] ${i === at ? "bg-ink text-white" : done ? "bg-ok text-white" : "bg-line-strong text-ink"}`}>{done ? "✓" : i + 1}</span>
+                            <span className={i === at ? "hidden sm:inline" : "sr-only"}>{stepLabel(k, mode)}</span>
+                          </button>
+                          {i < steps.length - 1 && <span className="w-3 sm:w-5 h-px bg-line-strong" aria-hidden="true" />}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  <p className="mt-2 text-[14px] sm:hidden">
+                    <span className="text-slate">
+                      Step {at + 1} of {steps.length}:
+                    </span>{" "}
+                    <span className="font-medium">{stepLabel(cur, mode)}</span>
+                  </p>
+                </nav>
+              </div>
+
+              {others.length > 0 && (
+                <p className="rounded-md bg-paper-200 px-4 py-3 text-[14px]">
+                  {others.map((o, i) => (
+                    <span key={o.id}>
+                      {i === 0 ? "This email or phone also has " : " and "}a {ROLE_LABEL[roleOf(o)].toLowerCase()} application, {o.ref} (
+                      <Link className="link" href={`/dr/${o.id}`}>
+                        its status
+                      </Link>
+                      )
+                    </span>
+                  ))}
+                  . This one is separate.
+                </p>
+              )}
+
+              {cur === "org" && (
+                <>
+                  <Card title="Your organisation">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <F label="Legal name">
+                        <input className="input" value={app.org.name} onChange={(e) => up({ org: { ...app.org, name: e.target.value } })} />
+                      </F>
+                      {type === "seeker" ? (
+                        <>
+                          <F label="Registration number">
+                            <input className="input" value={app.org.regNo} onChange={(e) => up({ org: { ...app.org, regNo: e.target.value } })} />
+                          </F>
+                          <F label="Kind of organisation">
+                            <select className="input" value={app.ownerKind ?? ""} onChange={(e) => up({ ownerKind: (e.target.value || undefined) as OwnerKind | undefined })}>
+                              <option value="">Choose</option>
+                              {OWNER_KINDS.map((k) => (
+                                <option key={k}>{k}</option>
+                              ))}
+                            </select>
+                          </F>
+                        </>
+                      ) : (
+                        <F label={mode === "capital" ? "Type of investor" : "Type of organisation"}>
+                          <select className="input" value={app.providerKind ?? ""} onChange={(e) => up({ providerKind: (e.target.value || undefined) as ProviderKind | undefined })}>
+                            <option value="">Choose</option>
+                            {kindOptions.map((k) => (
+                              <option key={k}>{k}</option>
+                            ))}
+                          </select>
+                        </F>
+                      )}
+                      <F label={type === "seeker" ? "Country" : "Headquarters"}>
+                        <select className="input" value={app.org.country} onChange={(e) => up({ org: { ...app.org, country: e.target.value } })}>
+                          <option value="">Choose</option>
+                          {cfg.countries.map((c) => (
+                            <option key={c}>{c}</option>
+                          ))}
+                        </select>
+                      </F>
+                      {type === "seeker" && (
+                        <F label="Sector">
+                          <select className="input" value={app.org.sector} onChange={(e) => up({ org: { ...app.org, sector: e.target.value } })}>
+                            <option value="">Choose</option>
+                            {cfg.sectors.map((c) => (
+                              <option key={c}>{c}</option>
+                            ))}
+                          </select>
+                        </F>
+                      )}
+                      <F label="Website" help={cfg.fields["org.website"] === "advisory" ? "Optional" : undefined}>
+                        <input className="input" type="url" placeholder="https://" value={app.org.website ?? ""} onChange={(e) => up({ org: { ...app.org, website: e.target.value } })} />
+                      </F>
+                      <F label="Your name">
+                        <input className="input" value={app.contact.name} onChange={(e) => up({ contact: { ...app.contact, name: e.target.value } })} />
+                      </F>
+                      <F label={app.contact.email ? "Your phone" : "Your email"}>
+                        {app.contact.email ? (
+                          <input className="input" type="tel" value={app.contact.phone} onChange={(e) => up({ contact: { ...app.contact, phone: e.target.value } })} />
+                        ) : (
+                          <input className="input" type="email" value={app.contact.email} onChange={(e) => up({ contact: { ...app.contact, email: e.target.value } })} />
+                        )}
+                      </F>
+                    </div>
+                  </Card>
+                </>
+              )}
+
+              {cur === "ask" && (
+                <>
+                  {type === "seeker" && app.ask && app.traction && (
+                    <Card title="What you are raising">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <F label="Amount">
+                          <div className="flex gap-2">
+                            <select className="input w-24" aria-label="Currency" value={app.ask.currency} onChange={(e) => up({ ask: { ...app.ask!, currency: e.target.value as Currency } })}>
+                              <option>USD</option>
+                              <option>KES</option>
+                            </select>
+                            <input className="input" type="number" min={0} value={app.ask.amount || ""} onChange={(e) => up({ ask: { ...app.ask!, amount: Number(e.target.value) } })} />
+                          </div>
+                        </F>
+                        <F label="Transaction pathway">
+                          <select className="input" value={app.ask.instrument} onChange={(e) => up({ ask: { ...app.ask!, instrument: e.target.value as Instrument } })}>
+                            {INSTRUMENTS.map((x) => (
+                              <option key={x}>{x}</option>
+                            ))}
+                          </select>
+                        </F>
+                        <F label="Stage">
+                          <select className="input" value={app.ask.stage} onChange={(e) => up({ ask: { ...app.ask!, stage: e.target.value as Stage } })}>
+                            {STAGES.map((x) => (
+                              <option key={x}>{x}</option>
+                            ))}
+                          </select>
+                        </F>
+                        <F label="Revenue last year">
+                          <select className="input" value={app.traction.revenueBand} onChange={(e) => up({ traction: { ...app.traction!, revenueBand: e.target.value } })}>
+                            <option value="">Choose</option>
+                            {REVENUE.map((x) => (
+                              <option key={x}>{x}</option>
+                            ))}
+                          </select>
+                        </F>
+                        <F label="Use of funds" span>
+                          <textarea className="input min-h-20" value={app.ask.useOfFunds} onChange={(e) => up({ ask: { ...app.ask!, useOfFunds: e.target.value } })} />
+                        </F>
+                        <F label="Customers" help="Optional, for example 1,200 retail customers">
+                          <input className="input" value={app.traction.customers} onChange={(e) => up({ traction: { ...app.traction!, customers: e.target.value } })} />
+                        </F>
+                        <F label="Key metrics" help="Optional">
+                          <input className="input" value={app.traction.metrics} onChange={(e) => up({ traction: { ...app.traction!, metrics: e.target.value } })} />
+                        </F>
+                      </div>
+                    </Card>
+                  )}
+                </>
+              )}
+
+              {cur === "challenge" && app.challenge && <ChallengeFields c={app.challenge} onChange={(challenge) => up({ challenge })} />}
+
+              {cur === "mandate" && app.mandate && <MandateFields app={app} partner={mode === "partner"} sectors={cfg.sectors} countries={cfg.countries} onChange={(mandate) => up({ mandate })} />}
+
+              {cur === "people" && (
+                <>
+                  <Card title="The decision-maker">
+                    <p className="-mt-1 mb-3 text-[13px] text-slate">The person who can commit {type === "seeker" ? "the company" : "your organisation"} and who will attend the meetings.</p>
+                    <label className="flex items-center gap-2 text-[14px] mb-3">
+                      <input type="checkbox" checked={!!app.contact.name && app.decisionMaker.name === app.contact.name} onChange={(e) => up({ decisionMaker: e.target.checked ? { ...app.contact, title: app.decisionMaker.title } : { name: "", title: "", email: "", phone: "" } })} />
+                      That is me
+                    </label>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <F label="Name">
+                        <input className="input" value={app.decisionMaker.name} onChange={(e) => up({ decisionMaker: { ...app.decisionMaker, name: e.target.value } })} />
+                      </F>
+                      <F label="Title">
+                        <input className="input" value={app.decisionMaker.title} onChange={(e) => up({ decisionMaker: { ...app.decisionMaker, title: e.target.value } })} />
+                      </F>
+                      <F label="Email">
+                        <input className="input" type="email" value={app.decisionMaker.email} onChange={(e) => up({ decisionMaker: { ...app.decisionMaker, email: e.target.value } })} />
+                      </F>
+                      <F label="Phone">
+                        <input className="input" type="tel" value={app.decisionMaker.phone} onChange={(e) => up({ decisionMaker: { ...app.decisionMaker, phone: e.target.value } })} />
+                      </F>
+                    </div>
+                  </Card>
+
+                  <Card title="Mission and how you heard of us">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <F label="Mission">
+                        <select className="input" value={app.mission} onChange={(e) => up({ mission: e.target.value, track: undefined })}>
+                          <option value="">Choose</option>
+                          {cfg.missions.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.code} {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      </F>
+                      {type === "seeker" && (
+                        <F label="Strategic track">
+                          <select className="input" value={app.track ?? ""} disabled={!app.mission} onChange={(e) => up({ track: e.target.value || undefined })}>
+                            <option value="">{app.mission ? "Choose" : "Choose a mission first"}</option>
+                            {cfg.tracks
+                              .filter((t) => t.missionId === app.mission)
+                              .map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.code} {t.name}
+                                </option>
+                              ))}
+                          </select>
+                        </F>
+                      )}
+                      <F label="How you heard of the Deal Room">
+                        <select className="input" value={app.source} onChange={(e) => up({ source: e.target.value })}>
+                          <option value="">Choose</option>
+                          {cfg.sources.map((s) => (
+                            <option key={s}>{s}</option>
+                          ))}
+                        </select>
+                      </F>
+                    </div>
+                  </Card>
+                </>
+              )}
+
+              {cur === "docs" && (
+                <>
+                  {type === "seeker" && (
+                    <Card title="Documents">
+                      <p className="-mt-1 mb-2 text-[13px] text-slate">Up to 25 MB each. Nothing is shared with an investor or partner until you consent, per document and per counterparty.</p>
+                      {SEEKER_DOCS.map((d) => {
+                        const have = app.documents.filter((x) => x.kind === d.kind);
+                        return (
+                          <div key={d.kind} className="py-2 border-b border-line last:border-0">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-[14px] font-medium">
+                                {d.kind}
+                                {cfg.fields[d.key] !== "required" && <span className="ml-1 font-normal text-slate">optional</span>}
+                              </span>
+                              <UploadDoc kind={d.kind} at={dr.clock} label={have.length ? "Add another" : "Upload"} onDone={(doc) => up({ documents: [...app.documents, doc] })} />
+                            </div>
+                            {have.map((h) => (
+                              <DocLine key={h.id} doc={h}>
+                                <button className="btn-quiet text-bad" onClick={() => up({ documents: app.documents.filter((x) => x.id !== h.id) })}>
+                                  Remove
+                                </button>
+                              </DocLine>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </Card>
+                  )}
+                </>
+              )}
+
+              {cur === "review" ? (
+                <Card title="Review and submit">
+                  <ul className="divide-y divide-line">
+                    {steps
+                      .filter((k) => k !== "review")
+                      .map((k) => {
+                        const miss = missingIn(k);
+                        return (
+                          <li key={k} className="flex items-start justify-between gap-3 py-3">
+                            <div className="min-w-0">
+                              <div className="text-[15px] font-medium">{stepLabel(k, mode)}</div>
+                              <div className={`text-[13px] ${miss.length ? "text-bad" : "text-slate"}`}>{miss.length ? `Missing: ${miss.join(", ")}` : "Complete"}</div>
+                            </div>
+                            <button type="button" className="link shrink-0 text-[14px]" onClick={() => go(steps.indexOf(k))}>
+                              {miss.length ? "Complete it" : "Edit"}
+                            </button>
+                          </li>
+                        );
+                      })}
+                  </ul>
+                  {missingIn("review").length > 0 && <p className="mt-2 text-[13px] text-bad">Also missing: {missingIn("review").join(", ")}.</p>}
+                  {tried && gaps.missing.length > 0 && (
+                    <div role="alert" className="mt-3 rounded-md bg-bad-50 px-3 py-2 text-[14px] text-bad">
+                      Still needed before you can submit: {gaps.missing.join(", ")}.
+                    </div>
+                  )}
+                  {gaps.advisory.length > 0 && <p className="mt-3 text-[13px] text-slate">Worth adding, not required: {gaps.advisory.join(", ")}.</p>}
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-[13px] text-slate">
+                      {mode === "challenge" ? "After you submit, you upload registration documents and sign the NDA from your status page. Once verified, the team matches your challenge with businesses that can solve it." : type === "provider" ? "After you submit, you upload KYC documents and sign the NDA from your status page." : "You get a reference number and a status page at once."}
+                    </span>
+                    <button className="btn btn-primary btn-cta" onClick={submit}>
+                      {mode === "challenge" ? "Submit the challenge" : "Submit the application"}
+                    </button>
+                  </div>
+                </Card>
               ) : (
-                <span />
+                missingIn(cur).length > 0 && reached > at && <p className="text-[13px] text-slate">Still to fill in on this step: {missingIn(cur).join(", ")}.</p>
               )}
-              {cur !== "review" && (
-                <button type="button" className="btn btn-primary" onClick={() => go(at + 1)}>
-                  {steps[at + 1] === "review" ? "Review" : "Next"}
-                </button>
-              )}
+
+              <div className="flex items-center justify-between gap-3">
+                {at > 0 ? (
+                  <button type="button" className="btn btn-secondary" onClick={() => go(at - 1)}>
+                    Back
+                  </button>
+                ) : (
+                  <span />
+                )}
+                {cur !== "review" && (
+                  <button type="button" className="btn btn-primary" onClick={() => go(at + 1)}>
+                    {steps[at + 1] === "review" ? "Review" : "Next"}
+                  </button>
+                )}
+              </div>
             </div>
-          </>
+          </div>
         )}
       </main>
     </div>
+  );
+}
+
+/** The draft's own link, copied to the clipboard so it can be opened on another device; shown as text where copying is blocked. */
+function CopyLink({ path }: { path: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "show">("idle");
+  const url = typeof window === "undefined" ? path : `${window.location.origin}${path}`;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setState("copied");
+      setTimeout(() => setState("idle"), 2400);
+    } catch {
+      setState("show");
+    }
+  };
+  if (state === "show") return <span className="block select-all break-all text-ink">{url}</span>;
+  return (
+    <button type="button" className="link text-[13px]" onClick={copy} aria-live="polite">
+      {state === "copied" ? "Link copied" : "Copy the link"}
+    </button>
   );
 }
 
