@@ -393,7 +393,7 @@ export interface DrStaff {
   id: string;
   eventId: string;
   name: string;
-  org?: "Bouer" | "Excursia Connect" | "Momentum"; // who they work for, per the paper's governance
+  org?: string; // who they work for: the organiser, Excursia Connect or the project owner (the paper's governance)
   email: string;
   role: DrRole;
   canDecide: boolean;

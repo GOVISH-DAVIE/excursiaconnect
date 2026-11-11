@@ -20,6 +20,8 @@ import { loadSession } from "./http/session";
 import { logMailer, type Mailer } from "./mail/mailer";
 import { applyModule } from "./modules/apply";
 import { authModule } from "./modules/auth";
+import { organisersModule } from "./modules/organisers";
+import { platformModule } from "./modules/platform";
 import { dealRoomModule } from "./modules/dealroom";
 import { healthModule } from "./modules/health";
 import { uploadsModule } from "./modules/uploads";
@@ -86,6 +88,9 @@ export function createApp({ config, db, mailer, now, storage, logError = default
   const allowUnscanned = config.APP_ENV ? config.APP_ENV !== "production" : config.NODE_ENV !== "production";
   app.use("/v1/dealroom", dealRoomModule({ db, now: rulesNow, storage: files, allowUnscanned }));
   app.use("/v1/apply", applyModule({ db, now: rulesNow, storage: files, uploadMaxBytes }));
+  const organisers = organisersModule({ db, config, auth: auth.service, storage: files, now: rulesNow, uploadMaxBytes, allowUnscanned });
+  app.use("/v1", organisers.routes);
+  app.use("/v1/admin", platformModule({ db, repo: organisers.repo, organisers: organisers.service, now: rulesNow }));
   const transfers = uploadsModule({ storage: files, maxBytes: uploadMaxBytes });
   app.use("/v1/uploads", transfers.uploads);
   app.use("/v1/files", transfers.files);

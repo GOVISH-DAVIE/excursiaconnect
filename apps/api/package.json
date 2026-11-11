@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "seed:demo": "tsx src/cli/seed-demo.ts",
     "check-demo": "tsx src/cli/check-demo.ts",
-    "import": "tsx src/cli/import-reference.ts"
+    "import": "tsx src/cli/import-reference.ts",
+    "admin": "tsx src/cli/create-admin.ts"
   },
   "dependencies": {
     "@excursia/contracts": "*",

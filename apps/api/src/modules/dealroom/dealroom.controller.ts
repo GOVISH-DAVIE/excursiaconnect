@@ -4,6 +4,7 @@
 import type { RequestHandler } from "express";
 import { ApplicationsQuery, AssignReviewerInput, EventParams, type ApplicationSummary, type TeamView } from "@excursia/contracts/dealroom";
 import { AppIdParams, DocParams, RequestInfoInput, RfiExpiryInput, ScoreInput } from "@excursia/contracts/review";
+import { DealRoomSettingsInput } from "@excursia/contracts/onboarding";
 import { sessionOf } from "../../http/session";
 import type { DealRoomService } from "./dealroom.service";
 
@@ -38,6 +39,16 @@ export function createDealRoomController(service: DealRoomService) {
     documentLink: (async (req, res) => {
       const { eventId, appId, docId } = DocParams.parse(req.params);
       res.set("Cache-Control", "private, no-store").json(await service.documentLink(sessionOf(res), eventId, appId, docId, ip(req)));
+    }) satisfies RequestHandler,
+
+    settings: (async (req, res) => {
+      const { eventId } = EventParams.parse(req.params);
+      res.set("Cache-Control", "private, no-store").json(await service.settings(sessionOf(res), eventId));
+    }) satisfies RequestHandler,
+
+    saveSettings: (async (req, res) => {
+      const { eventId } = EventParams.parse(req.params);
+      res.json(await service.saveSettings(sessionOf(res), eventId, DealRoomSettingsInput.parse(req.body), ip(req)));
     }) satisfies RequestHandler,
 
     team: (async (req, res) => {

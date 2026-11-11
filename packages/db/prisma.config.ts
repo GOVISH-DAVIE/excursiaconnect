@@ -14,6 +14,16 @@ try {
   // no .env.local: the variables are already in the environment (CI, a server)
 }
 
+// local only: LOCAL_DATABASE=excursia_fresh migrates that database instead (scripts/db/add-local-db.sh; the API's
+// own copy of this rule is apps/api/src/env.ts)
+const local = process.env.LOCAL_DATABASE;
+if (local && process.env.MIGRATE_DATABASE_URL) {
+  if (process.env.APP_ENV !== "local" || !/^excursia_[a-z0-9_]+$/.test(local)) throw new Error("LOCAL_DATABASE is for APP_ENV=local, as excursia_<name>");
+  const url = new URL(process.env.MIGRATE_DATABASE_URL);
+  url.pathname = `/${local}`;
+  process.env.MIGRATE_DATABASE_URL = url.toString();
+}
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: { path: "prisma/migrations" },

@@ -8,6 +8,7 @@
  */
 import type { Db, Prisma } from "@excursia/db";
 import type { CoreRows } from "../events/events.mapper";
+import type { DrStaff } from "@excursia/domain/dealroom/types";
 import type { BusyRow, DealRoomRows, DealRoomStored } from "./dealroom.mapper";
 
 type Client = Db | Prisma.TransactionClient;
@@ -56,6 +57,32 @@ async function loadWith(c: Client, eventId: string): Promise<EventStored | null>
 }
 
 /** Upserts by id; an application's version goes up with every save, for optimistic checks outside the lock. */
+/** A Deal Room staff member's sign-in: the user behind their email, and the membership giving their role. */
+export type StaffLink = { staffId: string; eventId: string; email: string; name: string; role: DrStaff["role"]; canDecide: boolean };
+
+const MEMBERSHIP_ROLE = { Lead: "dr_lead", Reviewer: "dr_reviewer", Operations: "dr_operations", Coordinator: "dr_coordinator", Oversight: "dr_oversight" } as const;
+
+/**
+ * Gives each new staff member a sign-in: the staff account behind their email (made if there is none; it has no
+ * password until they set one), linked to the staff record, with a membership for the role. Returns the emails it
+ * refused: an applicant's account can't also be staff.
+ */
+async function linkStaffWith(tx: Prisma.TransactionClient, links: StaffLink[]): Promise<string[]> {
+  const refused: string[] = [];
+  for (const l of links) {
+    const existing = await tx.user.findUnique({ where: { email: l.email }, select: { id: true, kind: true } });
+    if (existing?.kind === "participant") {
+      refused.push(l.email);
+      continue;
+    }
+    const user = existing ?? (await tx.user.create({ data: { kind: "staff", email: l.email, name: l.name }, select: { id: true, kind: true } }));
+    await tx.drStaff.update({ where: { id: l.staffId }, data: { userId: user.id } });
+    const membership = { userId: user.id, role: MEMBERSHIP_ROLE[l.role], eventId: l.eventId, canDecide: l.canDecide, revokedAt: null };
+    await tx.membership.upsert({ where: { id: `mem_${l.staffId}` }, create: { id: `mem_${l.staffId}`, ...membership }, update: membership });
+  }
+  return refused;
+}
+
 async function saveWith(tx: Prisma.TransactionClient, eventId: string, ch: Changes) {
   const d = ch.dealRoom;
   if (d.config) await tx.drConfig.update({ where: { eventId }, data: { record: d.config.record } });
@@ -104,7 +131,10 @@ export function createDealRoomRepo(db: Db) {
      * Runs `work` in one transaction holding the event's lock. `work` gets the aggregate's rows as they are now,
      * and a way to save what changed and to audit it; it all commits together, or not at all.
      */
-    inEventLock<T>(eventId: string, work: (unit: { stored: EventStored | null; save: (ch: Changes) => Promise<void>; audit: (rows: AuditRow[]) => Promise<void> }) => Promise<T>): Promise<T> {
+    inEventLock<T>(
+      eventId: string,
+      work: (unit: { stored: EventStored | null; save: (ch: Changes) => Promise<void>; audit: (rows: AuditRow[]) => Promise<void>; linkStaff: (links: StaffLink[]) => Promise<string[]> }) => Promise<T>,
+    ): Promise<T> {
       return db.$transaction(
         async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`dr:${eventId}`}, 0))`;
@@ -115,6 +145,7 @@ export function createDealRoomRepo(db: Db) {
             audit: async (rows) => {
               if (rows.length) await tx.auditEntry.createMany({ data: rows });
             },
+            linkStaff: (links) => linkStaffWith(tx, links),
           });
         },
         { timeout: 15_000, maxWait: 5_000 },
@@ -137,6 +168,10 @@ export function createDealRoomRepo(db: Db) {
         take: 500,
         select: { id: true, ref: true, type: true, status: true, assigneeId: true, mission: true, decision: true, readiness: true, version: true, updatedAt: true, record: true },
       }),
+
+    /** The Deal Room's settings and its event, for the lead's settings screen. */
+    settings: (eventId: string) =>
+      db.drConfig.findUnique({ where: { eventId }, select: { record: true, event: { select: { id: true, name: true, slug: true, startDate: true, state: true } } } }),
 
     eventName: async (eventId: string) => (await db.event.findUnique({ where: { id: eventId }, select: { name: true } }))?.name ?? eventId,
 

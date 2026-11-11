@@ -9,7 +9,7 @@ import { build } from "esbuild";
 const workspace = /^@excursia\//;
 
 await build({
-  entryPoints: { server: "src/server.ts", "cli/seed-demo": "src/cli/seed-demo.ts", "cli/check-demo": "src/cli/check-demo.ts", "cli/import-reference": "src/cli/import-reference.ts" },
+  entryPoints: { server: "src/server.ts", "cli/seed-demo": "src/cli/seed-demo.ts", "cli/check-demo": "src/cli/check-demo.ts", "cli/import-reference": "src/cli/import-reference.ts", "cli/create-admin": "src/cli/create-admin.ts" },
   outdir: "dist",
   bundle: true,
   platform: "node",

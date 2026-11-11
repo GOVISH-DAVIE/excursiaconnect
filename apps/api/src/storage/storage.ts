@@ -31,3 +31,10 @@ export function looksLike(contentType: string, head: Uint8Array): boolean {
   const t = UPLOAD_TYPES[contentType];
   return !!t && t.magic.some((m) => m.every((b, i) => head[i] === b));
 }
+
+/** A file's name as given, without any folder part or control characters, kept short. */
+export const cleanFileName = (name: string) =>
+  (name.split(/[\\/]/).pop() ?? "file")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim()
+    .slice(0, 200) || "file";

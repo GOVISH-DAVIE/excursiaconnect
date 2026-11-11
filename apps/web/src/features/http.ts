@@ -50,6 +50,8 @@ export const http = {
   get: <T>(path: string, opts?: Options<T>) => request<T>("GET", path, opts),
   post: <T>(path: string, opts?: Options<T>) => request<T>("POST", path, opts),
   patch: <T>(path: string, opts?: Options<T>) => request<T>("PATCH", path, opts),
+  put: <T>(path: string, opts?: Options<T>) => request<T>("PUT", path, opts),
+  del: <T>(path: string, opts?: Options<T>) => request<T>("DELETE", path, opts),
   /** A file's bytes to an upload target: a path on the API (local storage) or a bucket's signed URL. */
   async upload(url: string, headers: Record<string, string>, file: Blob): Promise<void> {
     const target = url.startsWith("http") ? url : `${PUBLIC_API}${url}`;

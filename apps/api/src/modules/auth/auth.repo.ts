@@ -29,6 +29,9 @@ export type NewSession = {
   userAgent: string | null;
 };
 
+/** What a one-time code is for: signing in, confirming a new organiser's email, or setting a staff password. */
+export type OtpPurpose = "sign_in" | "verify_contact" | "set_password";
+
 const userSelect = { id: true, kind: true, email: true, name: true, passwordHash: true, disabledAt: true, mfaGraceUntil: true } as const;
 
 export function createAuthRepo(db: Db) {
@@ -43,14 +46,14 @@ export function createAuthRepo(db: Db) {
     },
 
     /** A new code; any earlier unused code for the same address and purpose stops working. */
-    issueOtp(destination: string, purpose: "sign_in" | "set_password", codeHash: string, now: Date, expiresAt: Date) {
+    issueOtp(destination: string, purpose: OtpPurpose, codeHash: string, now: Date, expiresAt: Date) {
       return db.$transaction([
         db.otpCode.updateMany({ where: { destination, purpose, consumedAt: null }, data: { consumedAt: now } }),
         db.otpCode.create({ data: { destination, purpose, codeHash, expiresAt } }),
       ]);
     },
 
-    liveOtp: (destination: string, purpose: "sign_in" | "set_password", now: Date): Promise<OtpRow | null> =>
+    liveOtp: (destination: string, purpose: OtpPurpose, now: Date): Promise<OtpRow | null> =>
       db.otpCode.findFirst({
         where: { destination, purpose, consumedAt: null, expiresAt: { gt: now } },
         orderBy: { createdAt: "desc" },

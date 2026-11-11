@@ -7,6 +7,8 @@ import type { DocumentLink, RequestInfoInput, ReviewView, RfiExpiryInput, ScoreI
 import type { Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor } from "@excursia/domain/ctx";
 import { drCan } from "@excursia/domain/dealroom/logic";
+import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
+import type { DealRoomSettings, DealRoomSettingsInput } from "@excursia/contracts/onboarding";
 import type { DrApplication, DrStaff } from "@excursia/domain/dealroom/types";
 import type { AppState } from "@excursia/domain/types";
 import type { Storage } from "../../storage/storage";
@@ -140,6 +142,54 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
       const link = storage.downloadUrl(file.storageKey, { name: file.name, contentType: file.contentType });
       await repo.audit({ actorKind: actor.kind, actorId: session.user.id, eventId, entity: "file", entityId: file.id, action: "file/open", detail: { appId, kind: file.kind, scanned: file.state === "clean" }, ip });
       return { url: link.url, expiresAt: link.expiresAt.toISOString() };
+    },
+
+    /** The Deal Room's settings: everyone on the team reads them; the lead changes them. */
+    async settings(session: Resolved, eventId: string): Promise<DealRoomSettings> {
+      const { staff } = await staffActor(session, eventId);
+      const row = await repo.settings(eventId);
+      if (!row) throw new HttpError("not_found", "This event has no Deal Room.");
+      const cfg = (row.record as unknown as DrConfigRecord).config;
+      return {
+        event: { id: row.event.id, name: row.event.name, slug: row.event.slug, startDate: row.event.startDate.toISOString().slice(0, 10), state: row.event.state },
+        missions: cfg.missions,
+        tracks: cfg.tracks,
+        appOpen: cfg.rules.appOpen,
+        appClose: cfg.rules.appClose,
+        rfiDays: cfg.rules.rfiDays,
+        rubric: cfg.rubric,
+        gaps: dealRoomGaps(cfg),
+        canEdit: drCan(staff, "configure"),
+        log: [...cfg.log].reverse(),
+      };
+    },
+
+    /** The lead sets the missions, tracks and dates, through the rules' own dr/config (lead only, logged). */
+    async saveSettings(session: Resolved, eventId: string, input: DealRoomSettingsInput, ip: string | null): Promise<DealRoomSettings> {
+      const { actor } = await staffActor(session, eventId);
+      await commands.run({
+        eventId,
+        actor,
+        userId: session.user.id,
+        ip,
+        actions: (s) => {
+          const cfg = s.dealRoom.configs[eventId];
+          const what = [`${input.missions.length} mission${input.missions.length === 1 ? "" : "s"}`, `${input.tracks.length} track${input.tracks.length === 1 ? "" : "s"}`, `applications ${input.appOpen} to ${input.appClose}`, `${input.rfiDays} days to answer a request`];
+          return [
+            {
+              type: "dr/config",
+              eventId,
+              patch: {
+                missions: input.missions.map((m) => ({ ...m, description: m.description ?? "" })),
+                tracks: input.tracks.map((t) => ({ ...t, description: t.description ?? "" })),
+                rules: { ...cfg.rules, appOpen: input.appOpen, appClose: input.appClose, rfiDays: input.rfiDays },
+              },
+              note: `Settings: ${what.join(", ")}`,
+            },
+          ];
+        },
+      });
+      return this.settings(session, eventId);
     },
 
     async team(session: Resolved, eventId: string): Promise<TeamView> {

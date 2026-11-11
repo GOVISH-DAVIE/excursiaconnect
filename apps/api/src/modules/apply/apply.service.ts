@@ -14,8 +14,10 @@ import { blankApplication, modeOf, patchDraft } from "@excursia/domain/dealroom/
 import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, formGaps, openRfi, rfiDue } from "@excursia/domain/dealroom/logic";
 import type { DrApplication, DrConfig } from "@excursia/domain/dealroom/types";
 import type { AppState } from "@excursia/domain/types";
+import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
+import type { EventRecord } from "@excursia/domain/types";
 import { HttpError } from "../../http/errors";
-import { UPLOAD_TYPES, type Storage } from "../../storage/storage";
+import { UPLOAD_TYPES, cleanFileName, type Storage } from "../../storage/storage";
 import type { Resolved } from "../auth/auth.service";
 import type { Commands } from "../dealroom/dealroom.commands";
 import type { DrConfigRecord } from "../dealroom/dealroom.mapper";
@@ -63,17 +65,17 @@ function view(app: DrApplication, cfg: DrConfig, version: number): MyApplication
 }
 
 /** A file name as it may be stored and shown: no folders, no control characters, not too long. */
-const cleanName = (name: string) =>
-  (name.split(/[\\/]/).pop() ?? "file")
-    .replace(/[\u0000-\u001f\u007f]/g, "")
-    .trim()
-    .slice(0, 200) || "file";
+const cleanName = cleanFileName;
 
 export function createApplyService({ repo, commands, storage, uploadMaxBytes }: ApplyDeps) {
   async function event(slug: string) {
     const e = await repo.eventBySlug(slug);
     if (!e) throw new HttpError("not_found", "This event doesn't take Deal Room applications.");
-    return { ...e, cfg: (e.config as unknown as DrConfigRecord).config };
+    const cfg = (e.config as unknown as DrConfigRecord).config;
+    // a Deal Room takes applications once its event is live and its lead has set it up (missions, dates, rubric)
+    if ((e.event as unknown as EventRecord).state !== "Live" || dealRoomGaps(cfg).length)
+      throw new HttpError("not_found", "This event's Deal Room isn't taking applications yet.");
+    return { ...e, cfg };
   }
 
   /** Applicants only, and only with the verified email their account was made with. */

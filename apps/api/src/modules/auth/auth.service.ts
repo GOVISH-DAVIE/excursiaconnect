@@ -17,7 +17,7 @@ import type { Mailer } from "../../mail/mailer";
 import { checkPassword, hashPassword } from "../../security/passwords";
 import { decrypt, encrypt, hashCode, hashRecoveryCode, hashToken, newCode, newRecoveryCodes, newToken, sameDigest, type Keys } from "../../security/secrets";
 import { matchTotp, newTotpSecret, otpauthUri } from "../../security/totp";
-import type { AuthRepo, SessionRow, UserRow } from "./auth.repo";
+import type { AuthRepo, OtpPurpose, SessionRow, UserRow } from "./auth.repo";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -31,7 +31,12 @@ export const POLICY = {
   pending: { idleMs: 10 * MIN, absoluteMs: 10 * MIN },
 } as const;
 
-const CODE_TTL = { sign_in: 10 * MIN, set_password: 30 * MIN } as const;
+const CODE_TTL = { sign_in: 10 * MIN, verify_contact: 10 * MIN, set_password: 30 * MIN } as const;
+const SUBJECT = {
+  sign_in: "Your ExcursiaConnect sign-in code",
+  verify_contact: "Confirm your email for ExcursiaConnect",
+  set_password: "Set your ExcursiaConnect password",
+} as const;
 
 /** D14: staff may put off setting up the authenticator for this long after their first sign-in. */
 export const MFA_GRACE_MS = 7 * DAY;
@@ -78,21 +83,20 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
     if (!mailer.available) throw new HttpError("unavailable", "Sign-in codes can't be sent from this server yet. Try again later.");
   }
 
-  async function sendCode(email: string, purpose: "sign_in" | "set_password") {
+  async function sendCode(email: string, purpose: OtpPurpose) {
     const code = newCode();
     const at = now();
     await repo.issueOtp(email, purpose, hashCode(keys.otp, email, purpose, code), at, new Date(at.getTime() + CODE_TTL[purpose]));
     const minutes = CODE_TTL[purpose] / MIN;
-    const subject = purpose === "sign_in" ? "Your ExcursiaConnect sign-in code" : "Set your ExcursiaConnect password";
     await mailer.send({
       to: email,
-      subject,
+      subject: SUBJECT[purpose],
       text: `Your code is ${code}. It works once, for ${minutes} minutes.\n\nIf you didn't ask for it, you can ignore this email: nothing changes until the code is used.`,
     });
   }
 
   /** Checks a code and spends it. Every failure reads the same apart from how many tries are left. */
-  async function spendCode(email: string, purpose: "sign_in" | "set_password", code: string) {
+  async function spendCode(email: string, purpose: OtpPurpose, code: string) {
     const otp = await repo.liveOtp(email, purpose, now());
     const expired = new HttpError("unauthenticated", "That code has expired or was already used. Ask for a new one.");
     if (!otp || otp.attempts >= CODE_ATTEMPTS) throw expired;
@@ -121,6 +125,16 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
     const created = replacing ? await repo.rotateSession(replacing, next, at) : await repo.createSession(next);
     if (!created) throw new HttpError("unauthenticated", "This sign-in has ended. Start again.");
     return { token, expiresAt: created.expiresAt, staff: isStaff(user) };
+  }
+
+  /** A right password (or a new account's first one) gives a pending session; the authenticator finishes it. */
+  async function afterPassword(user: UserRow, meta: ClientMeta): Promise<Issued & SignInNext> {
+    const totp = await repo.totpOf(user.id);
+    const issued = await issue(user, meta, "pending", false);
+    if (totp?.confirmedAt) return { ...issued, next: "totp" };
+    // no authenticator yet: the first such sign-in starts the 7 days in which it may be put off
+    const graceUntil = await repo.startGrace(user.id, new Date(now().getTime() + MFA_GRACE_MS));
+    return { ...issued, next: "totp_enrol", ...(now() < graceUntil ? { skipUntil: graceUntil.toISOString() } : {}) };
   }
 
   /** The step-up that finishes a staff sign-in: a fresh token, the full 12 hours from now. */
@@ -163,12 +177,27 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
       const candidate = user && isStaff(user) && !user.disabledAt ? user : null;
       const ok = await checkPassword(candidate?.passwordHash, password);
       if (!ok || !candidate) throw new HttpError("unauthenticated", "That email or password is not right.");
-      const totp = await repo.totpOf(candidate.id);
-      const issued = await issue(candidate, meta, "pending", false);
-      if (totp?.confirmedAt) return { ...issued, next: "totp" };
-      // no authenticator yet: the first such sign-in starts the 7 days in which it may be put off
-      const graceUntil = await repo.startGrace(candidate.id, new Date(now().getTime() + MFA_GRACE_MS));
-      return { ...issued, next: "totp_enrol", ...(now() < graceUntil ? { skipUntil: graceUntil.toISOString() } : {}) };
+      return afterPassword(candidate, meta);
+    },
+
+    afterPassword,
+
+    /**
+     * A new organiser's email, confirmed before the account exists (organisers.service.ts). Always the same answer,
+     * whether or not the address has an account: the sign-up itself says so once the code proves the email is theirs.
+     */
+    async requestSignupCode(email: string, meta: ClientMeta) {
+      mailOrRefuse();
+      await limit("code-request:email", email, LIMITS.codeRequestPerEmail);
+      if (meta.ip) await limit("code-request:ip", meta.ip, LIMITS.codeRequestPerIp);
+      await sendCode(email, "verify_contact");
+    },
+
+    /** Spends a sign-up code: from here on, the person has shown the email is theirs. */
+    async spendSignupCode(email: string, code: string, meta: ClientMeta) {
+      await limit("code-verify:email", email, LIMITS.codeVerifyPerEmail);
+      if (meta.ip) await limit("code-verify:ip", meta.ip, LIMITS.codeVerifyPerIp);
+      await spendCode(email, "verify_contact", code);
     },
 
     /** Always the same answer; a code goes out only to an existing staff account. */

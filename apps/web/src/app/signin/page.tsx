@@ -18,6 +18,12 @@ export default function SignInPage() {
         </Suspense>
       </div>
       <p className="mt-6 max-w-md text-center text-[13px] text-slate">Signing in keeps your Deal Room application and meetings in one place. We never share your email.</p>
+      <p className="mt-2 max-w-md text-center text-[13px] text-slate">
+        Organising an event?{" "}
+        <Link href="/organisers/signup" className="underline underline-offset-4">
+          Sign up as an organiser
+        </Link>
+      </p>
     </main>
   );
 }

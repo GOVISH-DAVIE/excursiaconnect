@@ -37,13 +37,22 @@ export type PaymentMethod = "mpesa" | "card" | "bank";
 export interface Organiser {
   id: string;
   name: string;
-  kycStatus: "Pending" | "Verified" | "Returned";
+  /** "Not submitted" until the owner sends KYC; "Pending" while Algotech checks it (core/onboarding.ts) */
+  kycStatus: "Not submitted" | "Pending" | "Verified" | "Returned";
   kraPin: string;
   registrationNo: string;
   payoutAccount: string;
   licenceFee: number;
   commissionPct: number;
   dpaSigned?: { by: string; at: string }; // the data processing agreement, e-signed once (OR-1)
+  /** an organiser that signed itself up (core/onboarding.ts); the demo's organisers have none of these */
+  country?: string;
+  address?: string;
+  signatory?: { name: string; title: string };
+  kycDocs?: { id: string; kind: string; name: string; size: number; at: string }[];
+  kycNote?: string; // Algotech's reason when it returned the KYC
+  history?: { at: string; what: string }[];
+  createdAt?: string;
 }
 
 export interface Tier {
@@ -186,6 +195,8 @@ export interface EventRecord {
   closedAt?: string; // OR-17
   history?: { at: string; what: string }[]; // approval history
   dealRoom?: { enabled: boolean; addOnPrice: number; deskStaff: number }; // DA-1: the add-on, fixed on the approval record
+  /** the organiser asks for the Deal Room add-on, and names who will lead it; Algotech decides on approval */
+  dealRoomRequest?: { lead: { name: string; email: string } };
 }
 
 /** A reconciliation exception the nightly job raised (PA-6). */

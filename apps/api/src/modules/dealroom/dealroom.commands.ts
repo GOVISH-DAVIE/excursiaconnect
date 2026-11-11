@@ -17,7 +17,7 @@ import type { AppState } from "@excursia/domain/types";
 import { HttpError } from "../../http/errors";
 import { coreFromRows, coreToRows } from "../events/events.mapper";
 import { dealRoomFromRows, dealRoomToRows, type DealRoomRows } from "./dealroom.mapper";
-import type { AuditRow, Changes, DealRoomRepo, EventStored } from "./dealroom.repo";
+import type { AuditRow, Changes, DealRoomRepo, EventStored, StaffLink } from "./dealroom.repo";
 
 /** What the Deal Room's rules read beyond the Deal Room: the event's own core records. Rooms, zones and the
  *  programme join when the rules that read them move onto the server (M3.2, Phase 2). */
@@ -96,6 +96,8 @@ export type Command = {
   owned?: (state: AppState) => void;
   /** The rule actions to run, in order, built from the state as it is under the lock. */
   actions: (state: AppState, ctx: Ctx) => Action[];
+  /** Staff the command added, to give sign-ins to in the same transaction (Algotech provisioning, DA-2). */
+  accounts?: (after: AppState) => StaffLink[];
 };
 
 export type CommandDeps = { repo: DealRoomRepo; now: () => Date; newId?: (prefix: string) => string };
@@ -105,7 +107,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
     newId,
     /** Runs a command; returns the state after it, as committed. */
     run(cmd: Command): Promise<AppState> {
-      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit }) => {
+      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff }) => {
         if (!stored) throw new HttpError("not_found", "This event has no Deal Room.");
         const at = nairobiNow(now());
         const ctx: Ctx = { now: at, newId, actor: cmd.actor };
@@ -120,6 +122,10 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
         }
         const changes = changesBetween(cmd.eventId, before, state, at);
         await save(changes);
+        if (cmd.accounts) {
+          const refused = await linkStaff(cmd.accounts(state));
+          if (refused.length) throw new HttpError("conflict", `${refused.join(", ")} is used to apply to a Deal Room, so it can't be a staff account too. Use a work email.`);
+        }
         const rows: AuditRow[] = Object.entries(ENTITY).flatMap(([k, entity]) =>
           (changes.dealRoom[k as keyof typeof ENTITY] as { upsert: { id: string }[] }).upsert.map((r) => ({
             actorKind: cmd.actor.kind,
