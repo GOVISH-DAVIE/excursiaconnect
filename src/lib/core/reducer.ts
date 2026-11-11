@@ -74,6 +74,19 @@ export type Action =
   | { type: "removeRoom"; roomId: string }
   | { type: "setBrand"; eventId: string; brand: AppState["events"][number]["brand"]; tagline?: string };
 
+/** The reason given when a rule refuses without naming one: no refusal is ever silent. */
+export const UNEXPLAINED = "This action was refused";
+
+/**
+ * Run an action and say what happened: the new state, or the reason it was refused. This is what the server's
+ * gateway calls; the prototype's store keeps calling `reducer`. A refusal is an unchanged state.
+ */
+export function apply(state: AppState, action: Action, ctx: Ctx): { state: AppState; refusal?: string } {
+  let reason: string | undefined;
+  const next = reducer(state, action, { ...ctx, refuse: (r) => (reason ??= r) });
+  return next === state ? { state, refusal: reason ?? UNEXPLAINED } : { state: next };
+}
+
 export function reducer(state: AppState, action: Action, ctx: Ctx): AppState {
   if (action.type.startsWith("dr/")) return drReducer(state, action as DrAction, ctx);
   if (action.type.startsWith("expo/")) return expoReducer(state, action as ExpoAction, ctx);

@@ -26,6 +26,17 @@ export interface Ctx {
   newId: (prefix: string) => string;
   /** Who is acting; null only where nobody is (a public page). */
   actor: Actor | null;
+  /** Set by `apply`: a refusing rule reports its reason here, so the server and the screens say the same. */
+  refuse?: (reason: string) => void;
+}
+
+/**
+ * Refuse an action: report the reason through ctx and leave the state as it was. Reducers write
+ * `return no(ctx, state, "reason")` where they used to write a silent `return state`.
+ */
+export function no<S>(ctx: Ctx, state: S, reason: string): S {
+  ctx.refuse?.(reason);
+  return state;
 }
 
 /** A wall-clock "now" in Nairobi, as the rules expect it. For the prototype and for the server's Ctx. */

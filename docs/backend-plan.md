@@ -269,13 +269,21 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 
 | # | Milestone | Done when |
 | --- | --- | --- |
-| M0.0 | **Server-safe rules**: split `store.tsx` into `src/lib/core/*` and the client provider; `Ctx { now, newId, actor }` through every reducer and time-dependent rule; refusals with reasons; Vitest with seed-based tests | The prototype runs unchanged; `src/lib` has no `Date.now`, `Math.random` or React import; the Phase 1 actions have tests that pass |
+| M0.0 | **Server-safe rules**: split `store.tsx` into `src/lib/core/*` and the client provider; `Ctx { now, newId, actor }` through every reducer and time-dependent rule; refusals with reasons; Vitest with seed-based tests | The prototype runs unchanged; `src/lib` has no `Date.now`, `Math.random` or React import; the Phase 1 actions have tests that pass. **Done 11 Nov 2026** on `backend`. Notes below |
 | M0.1 | **Decisions and applications to third parties**: D3 to D11 answered; the Daraja production application and the SMS sender ID filed (each takes one to two weeks); the ODPC registration started | Each decision has an answer in this file; both applications have reference numbers |
 | M0.2 | **Database and Prisma**: PostgreSQL with database roles, the first schema (identity, minimal event, tier and delegate, the Deal Room aggregate and its tables), migrations, connection limits and timeouts | `prisma migrate deploy` runs clean on an empty database, as the `migrator` role |
 | M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record |
 | M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL |
 | M0.5 | **The gateway**: registry, Zod schemas, ownership checks, per-event lock, aggregate load and save, audit, the module flag (server or local data), filtered results | Assigning a reviewer runs end to end from the existing screen; a test proves another organiser's and another applicant's records are refused |
 | M0.6 | **CI and staging**: type-check, lint, tests and build on every push; staging deployed behind nginx as in `deploy.md` | CI is green; staging is reachable over HTTPS with the security headers |
+
+**Notes on M0.0, done 11 Nov 2026:**
+- **The rules are importable on the server:** `src/lib/core/{reducer,scan,orders}.ts` plus `src/lib/ctx.ts`. The client store is a thin provider.
+- **The only clock and random reads left in `src/lib`** are in `proto-ctx.ts` (the prototype's Ctx), `use-today.ts` (a React hook) and the seeds.
+- **The actor decides:** `staffOf`, `memberOf`/`memberCan`, `actionExhibitor` and `scanOperatorOf`. Algotech-only actions and fee settlement (system only) are enforced in the rules.
+- **Refusals:** `apply()` returns `{ state, refusal }`. Every refusal in the Deal Room's onboarding and review reducer has its reason. Meetings, sessions, conversion, Exhibition and core refusals still return a generic reason; theirs come with their milestones (M3.x, M5.0, Phase 2).
+- **Tests:** 174 Vitest tests in `tests/` (`npm test`): the seven earlier rule suites, the actor checks and the refusal reasons.
+- **Still trusted from the client, to fix in the module's milestone:** registration's price and status, a scan's verdict and time (M2.2, M2.4), and the applicant's ownership of an application (the gateway, M0.5).
 
 ### Phase 1: Deal Room onboarding (23 November 2026 to 8 January 2027)
 

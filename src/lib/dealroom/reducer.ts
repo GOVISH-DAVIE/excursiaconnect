@@ -3,7 +3,7 @@
  * issues a platform badge and meetings share rooms with the programme. Every rule is enforced here;
  * a refused action returns the state unchanged and the screen explains why beforehand.
  */
-import type { Ctx } from "../ctx";
+import { no, type Ctx } from "../ctx";
 import type { AppState, Delegate } from "../types";
 import { addMinutes } from "../time";
 import {
@@ -141,9 +141,9 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
   const me = staffOf(dr, ctx.actor);
 
   // after the conversion end date the Deal Room is read-only (DA-8); only the clock and the switcher still move
-  if (dr.archivedAt && action.type !== "dr/clock" && action.type !== "dr/actAs" && action.type !== "dr/retention") return state;
-  if (STAFF_ACTIONS.has(action.type) && !me?.active) return state;
-  if (ADMIN_ACTIONS.has(action.type) && ctx.actor?.kind !== "admin") return state;
+  if (dr.archivedAt && action.type !== "dr/clock" && action.type !== "dr/actAs" && action.type !== "dr/retention") return no(ctx, state, "The Deal Room is archived and read-only");
+  if (STAFF_ACTIONS.has(action.type) && !me?.active) return no(ctx, state, "Only active Deal Room staff can do this");
+  if (ADMIN_ACTIONS.has(action.type) && ctx.actor?.kind !== "admin") return no(ctx, state, "Only Algotech can do this");
 
   const app = "appId" in action ? dr.apps.find((a) => a.id === action.appId) : undefined;
   const cfg = app ? dr.configs[app.eventId] : undefined;
@@ -151,7 +151,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
   switch (action.type) {
     case "dr/clock": {
       // the clock only moves forward, so nothing recorded can predate it
-      if (action.clock <= dr.clock) return state;
+      if (action.clock <= dr.clock) return no(ctx, state, "The clock only moves forward");
       let next = { ...dr, clock: action.clock };
       // the daily summit report goes to the lead at 19:00 each evening of summit week (DL-9)
       for (const c of Object.values(dr.configs)) {
@@ -190,7 +190,8 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
 
     case "dr/config": {
       const c = dr.configs[action.eventId];
-      if (!c || !drCan(me, "configure")) return state;
+      if (!c) return no(ctx, state, "No Deal Room for this event");
+      if (!drCan(me, "configure")) return no(ctx, state, "Only the lead can change the settings");
       const structural = ["rubric", "matching", "missions"].some((k) => k in action.patch);
       const afterFreeze = at.slice(0, 10) > c.freezeDate;
       dr = { ...dr, configs: { ...dr.configs, [action.eventId]: { ...c, ...action.patch, log: [...c.log, { at, by: me!.id, what: action.note }] } } };
@@ -202,15 +203,16 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
 
     case "dr/saveDraft": {
       const exists = dr.apps.find((a) => a.id === action.app.id);
-      if (exists && !["Lead", "Invited", "Draft"].includes(exists.status)) return state;
+      if (exists && !["Lead", "Invited", "Draft"].includes(exists.status)) return no(ctx, state, "This application is already submitted");
       const next: DrApplication = { ...action.app, status: "Draft", statusAt: exists?.status === "Draft" ? exists.statusAt : at, draftSavedAt: at };
       return withDr(state, { ...dr, apps: exists ? dr.apps.map((a) => (a.id === next.id ? next : a)) : [next, ...dr.apps] });
     }
 
     case "dr/submit": {
-      if (!app || !cfg || !["Lead", "Invited", "Draft"].includes(app.status)) return state;
-      if (formGaps(app, cfg).missing.length) return state;
-      if (at.slice(0, 10) > cfg.rules.appClose) return state;
+      if (!app || !cfg) return no(ctx, state, "No such application");
+      if (!["Lead", "Invited", "Draft"].includes(app.status)) return no(ctx, state, "This application is already submitted");
+      if (formGaps(app, cfg).missing.length) return no(ctx, state, `Still needed: ${formGaps(app, cfg).missing.join(", ")}`);
+      if (at.slice(0, 10) > cfg.rules.appClose) return no(ctx, state, "Applications are closed");
       const seq = { ...dr.seq, [app.type === "seeker" ? "cs" : "fp"]: dr.seq[app.type === "seeker" ? "cs" : "fp"] + 1 };
       const ref = refNo(app.type, app.type === "seeker" ? seq.cs : seq.fp);
       dr = { ...dr, seq };
@@ -234,12 +236,12 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/import": {
-      if (!drCan(me, "import")) return state;
+      if (!drCan(me, "import")) return no(ctx, state, "Your role cannot import leads");
       return withDr(state, { ...dr, apps: [...action.apps.map((a) => ({ ...a, history: [{ at, by: me!.id, what: "Imported from the mobilisation pipeline" }] })), ...dr.apps] });
     }
 
     case "dr/invite": {
-      if (!drCan(me, "import")) return state;
+      if (!drCan(me, "import")) return no(ctx, state, "Your role cannot send invitations");
       for (const id of action.appIds) {
         const a = dr.apps.find((x) => x.id === id);
         if (!a || (a.status !== "Lead" && a.status !== "Invited")) continue;
@@ -250,24 +252,27 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/assign": {
-      if (!drCan(me, "assign")) return state;
+      if (!drCan(me, "assign")) return no(ctx, state, "Your role cannot assign reviewers");
       const to = dr.staff.find((s) => s.id === action.staffId && s.active && s.role !== "Operations");
-      if (!to) return state;
+      if (!to) return no(ctx, state, "That person cannot review applications");
       for (const id of action.appIds) dr = patchApp(dr, id, (a) => note({ ...a, assignee: to.id }, me!.id, `Assigned to ${to.name}`, at));
       return withDr(state, dr);
     }
 
     case "dr/startReview": {
-      if (!app || !drCan(me, "review") || app.status !== "Submitted") return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot review applications");
+      if (app.status !== "Submitted") return no(ctx, state, "Only a submitted application can be started");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, status: "In review", statusAt: at, firstReviewAt: a.firstReviewAt ?? at, assignee: a.assignee ?? me!.id }, me!.id, "Review started", at)));
     }
 
     case "dr/score": {
-      if (!app || !drCan(me, "review")) return state;
-      if (!["In review", "Information requested", "Decided", "Submitted"].includes(app.status)) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot score applications");
+      if (!["In review", "Information requested", "Decided", "Submitted"].includes(app.status)) return no(ctx, state, "This application cannot be scored yet");
       // a score rests on a document; without one it needs a written note (PRD Qualification req. 2)
-      if (action.layer !== "eligibility" && !action.docId && !action.note?.trim()) return state;
-      if (action.score !== undefined && (action.score < 0 || action.score > 100)) return state;
+      if (action.layer !== "eligibility" && !action.docId && !action.note?.trim()) return no(ctx, state, "A score needs a document or a note as evidence");
+      if (action.score !== undefined && (action.score < 0 || action.score > 100)) return no(ctx, state, "A score is from 0 to 100");
       const entry = { id: ctx.newId("as"), layer: action.layer, criterion: action.criterion, pass: action.pass, score: action.score, docId: action.docId, note: action.note, by: me!.id, at };
       return withDr(
         state,
@@ -281,7 +286,10 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/requestInfo": {
-      if (!app || !cfg || !drCan(me, "review") || app.status !== "In review" || !action.questions.filter(Boolean).length) return state;
+      if (!app || !cfg) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot request information");
+      if (app.status !== "In review") return no(ctx, state, "Information can be requested only while the application is in review");
+      if (!action.questions.filter(Boolean).length) return no(ctx, state, "Ask at least one question");
       dr = patchApp(dr, app.id, (a) =>
         note({ ...a, status: "Information requested", statusAt: at, rfis: [...a.rfis, { id: ctx.newId("rfi"), questions: action.questions.filter(Boolean), docs: action.docs, by: me!.id, at }] }, me!.id, `Information requested: ${action.questions.filter(Boolean).length} question${action.questions.length > 1 ? "s" : ""}`, at),
       );
@@ -292,9 +300,11 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/respondRfi": {
-      if (!app || app.status !== "Information requested") return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (app.status !== "Information requested") return no(ctx, state, "No information was requested");
       const rfi = openRfi(app);
-      if (!rfi || !action.text.trim()) return state;
+      if (!rfi) return no(ctx, state, "The request has already been answered or has expired");
+      if (!action.text.trim()) return no(ctx, state, "Write a response");
       dr = patchApp(dr, app.id, (a) =>
         note(
           {
@@ -315,9 +325,11 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
 
     case "dr/rfiExpiry": {
       // the lead decides what happens to an unanswered request after its expiry (PRD Qualification req. 3)
-      if (!app || !cfg || me?.role !== "Lead" || app.status !== "Information requested") return state;
+      if (!app || !cfg) return no(ctx, state, "No such application");
+      if (me?.role !== "Lead") return no(ctx, state, "Only the lead decides an expired request");
+      if (app.status !== "Information requested") return no(ctx, state, "No information was requested");
       const rfi = openRfi(app);
-      if (!rfi) return state;
+      if (!rfi) return no(ctx, state, "The request has not expired");
       dr = patchApp(dr, app.id, (a) =>
         note(
           {
@@ -338,15 +350,21 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/recommend": {
-      if (!app || !drCan(me, "review") || app.status !== "In review" || !action.reason.trim()) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot recommend");
+      if (app.status !== "In review") return no(ctx, state, "Only an application in review can be recommended");
+      if (!action.reason.trim()) return no(ctx, state, "A recommendation needs a reason");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, recommendations: [...a.recommendations, { id: ctx.newId("rec"), decision: action.decision, reason: action.reason, by: me!.id, at }] }, me!.id, `Recommended: ${action.decision}`, at)));
     }
 
     case "dr/decide": {
       // only an authorised decider or the lead, always with a reason (PRD Qualification req. 4)
-      if (!app || !cfg || !drCan(me, "decide") || app.type !== "seeker" || !action.reason.trim()) return state;
-      if (!["In review", "Decided", "Information requested"].includes(app.status)) return state;
-      if (action.decision === "Conditional" && !action.conditions.filter((c) => c.text.trim()).length) return state;
+      if (!app || !cfg) return no(ctx, state, "No such application");
+      if (!drCan(me, "decide")) return no(ctx, state, "Your role cannot decide");
+      if (app.type !== "seeker") return no(ctx, state, "A provider is verified, not decided");
+      if (!action.reason.trim()) return no(ctx, state, "A decision needs a reason");
+      if (!["In review", "Decided", "Information requested"].includes(app.status)) return no(ctx, state, "This application is not ready for a decision");
+      if (action.decision === "Conditional" && !action.conditions.filter((c) => c.text.trim()).length) return no(ctx, state, "A conditional decision needs at least one condition");
       const usd = app.ask ? (app.ask.currency === "USD" ? app.ask.amount : app.ask.amount / 130) : 0;
       const needsSecond = (action.decision === "Declined" && cfg.secondReview.decline) || usd > cfg.secondReview.askAbove;
       const entry = {
@@ -366,28 +384,34 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/confirmSecond": {
-      if (!app || !drCan(me, "decide")) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "decide")) return no(ctx, state, "Your role cannot decide");
       const p = pendingSecond(app);
-      if (!p || p.by === me!.id) return state; // the second decider is a different person
+      if (!p) return no(ctx, state, "No decision is waiting for a second decider");
+      if (p.by === me!.id) return no(ctx, state, "The second decider must be a different person"); // the second decider is a different person
       dr = patchApp(dr, app.id, (a) => note({ ...a, status: "Decided", statusAt: at, reReview: undefined, decisions: a.decisions.map((d) => (d.id === p.id ? { ...d, second: { by: me!.id, at } } : d)) }, me!.id, `Second decider confirmed: ${p.decision}`, at));
       return settleDecision(ctx, withDr(state, dr), app.id);
     }
 
     case "dr/meetCondition": {
-      if (!app || !drCan(me, "review")) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot mark conditions met");
       const d = decisionOf(app);
-      if (!d) return state;
+      if (!d) return no(ctx, state, "No such condition");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, decisions: a.decisions.map((x) => (x.id === d.id ? { ...x, conditions: x.conditions.map((c) => (c.id === action.conditionId ? { ...c, met: { by: me!.id, at } } : c)) } : x)) }, me!.id, "Condition met", at)));
     }
 
     case "dr/confirmDecisionMaker": {
-      if (!app || !drCan(me, "review")) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot confirm the decision-maker");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, decisionMaker: { ...a.decisionMaker, confirmed: { by: me!.id, at } } }, me!.id, `Decision-maker confirmed: ${a.decisionMaker.name}`, at)));
     }
 
     case "dr/readiness": {
-      if (!app || !cfg || !drCan(me, "readiness") || app.type !== "seeker" || !qualified(app)) return state;
-      if (action.readiness === "Deal Room Ready" && readinessBlockers(app, cfg).length) return state;
+      if (!app || !cfg) return no(ctx, state, "No such application");
+      if (!drCan(me, "readiness")) return no(ctx, state, "Your role cannot set readiness");
+      if (app.type !== "seeker" || !qualified(app)) return no(ctx, state, "Only a qualified business has a readiness");
+      if (action.readiness === "Deal Room Ready" && readinessBlockers(app, cfg).length) return no(ctx, state, `Not ready yet: ${readinessBlockers(app, cfg).join("; ")}`);
       dr = patchApp(dr, app.id, (a) => note({ ...a, readiness: action.readiness, readinessAt: at }, me!.id, `Readiness: ${action.readiness}`, at));
       if (action.readiness === "Deal Room Ready") dr = send(ctx, dr, app.eventId, app.id, "You are Deal Room Ready", portal(app));
       return withDr(state, dr);
@@ -396,8 +420,10 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     case "dr/payFee": {
       // the seeker pays from the link: the badge is issued and, once Deal Room Ready, matching opens. Only the
       // payment provider's confirmation settles a fee, never the browser (on the server: the verified webhook)
-      if (ctx.actor?.kind !== "system") return state;
-      if (!app || !feeOwed(app) || !qualified(app) || !action.reference.trim()) return state;
+      if (ctx.actor?.kind !== "system") return no(ctx, state, "A fee is settled only by the payment provider's confirmation");
+      if (!app) return no(ctx, state, "No such application");
+      if (!qualified(app) || !feeOwed(app)) return no(ctx, state, "No fee is owed");
+      if (!action.reference.trim()) return no(ctx, state, "A payment needs its reference");
       const kes = action.method === "M-Pesa" ? feeInKes(app.fee!) : undefined;
       dr = patchApp(dr, app.id, (a) => note({ ...a, fee: { ...a.fee!, paid: { at, method: action.method, reference: action.reference.trim().slice(0, 40), kes } } }, "applicant", `Paid ${feeLabel(app.fee!)} by ${action.method}, ref ${action.reference.trim()}`, at));
       dr = send(ctx, dr, app.eventId, app.id, `Payment received, ${feeLabel(app.fee!)}: your Deal Room badge is ready`, `/dr/${app.id}`, "Email and SMS");
@@ -406,7 +432,10 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
 
     case "dr/waiveFee": {
       // the lead may waive it, for a sponsored place say, always with a reason
-      if (!app || me?.role !== "Lead" || !feeOwed(app) || !action.reason.trim()) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (me?.role !== "Lead") return no(ctx, state, "Only the lead can waive a fee");
+      if (!feeOwed(app)) return no(ctx, state, "No fee is owed");
+      if (!action.reason.trim()) return no(ctx, state, "A waiver needs a reason");
       dr = patchApp(dr, app.id, (a) => note({ ...a, fee: { ...a.fee!, waived: { by: me!.id, at, reason: action.reason.trim() } } }, me!.id, `Fee waived: ${action.reason.trim()}`, at));
       dr = send(ctx, dr, app.eventId, app.id, "Your Deal Room fee is waived: your badge is ready", `/dr/${app.id}`, "Email and SMS");
       const next = withDr(state, dr);
@@ -415,7 +444,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/updateProfile": {
-      if (!app) return state;
+      if (!app) return no(ctx, state, "No such application");
       const decided = app.status === "Decided" || qualified(app);
       // a change to the ask or the mandate after a decision goes back for review; the status stays (PRD Qualification req. 7)
       const changed: string[] = [];
@@ -435,29 +464,36 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/completeProfile": {
-      if (!app || !qualified(app) || !app.teaser?.title || !app.teaser.summary) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!qualified(app)) return no(ctx, state, "The profile opens once the application is approved");
+      if (!app.teaser?.title || !app.teaser.summary) return no(ctx, state, "The teaser needs a title and a summary");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, profileCompletedAt: a.profileCompletedAt ?? at }, "applicant", "Matching profile completed", at)));
     }
 
     case "dr/approveTeaser": {
-      if (!app || !drCan(me, "review") || !app.teaser) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot approve teasers");
+      if (!app.teaser) return no(ctx, state, "There is no teaser to approve");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, teaser: { ...a.teaser!, approved: { by: me!.id, at } } }, me!.id, "Teaser approved for the directory", at)));
     }
 
     case "dr/reReviewDone": {
-      if (!app || !drCan(me, "review") || !app.reReview) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot close a re-review");
+      if (!app.reReview) return no(ctx, state, "Nothing is waiting for re-review");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, reReview: undefined }, me!.id, `Re-review: decision stands. ${action.note}`, at)));
     }
 
     case "dr/addDoc": {
-      if (!app) return state;
+      if (!app) return no(ctx, state, "No such application");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, documents: [...a.documents, action.doc] }, "applicant", `Uploaded ${action.doc.kind}`, at)));
     }
 
     /* ----- finance provider verification (Flow 2) ----- */
 
     case "dr/kyc": {
-      if (!app || app.type !== "provider") return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (app.type !== "provider") return no(ctx, state, "KYC documents are for providers");
       return withDr(
         state,
         patchApp(dr, app.id, (a) =>
@@ -476,17 +512,23 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/checkKyc": {
-      if (!app || !drCan(me, "review") || !app.verification?.kyc[action.item]) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot check KYC");
+      if (!app.verification?.kyc[action.item]) return no(ctx, state, "That document has not been uploaded");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, verification: { ...a.verification!, kyc: { ...a.verification!.kyc, [action.item]: { ...a.verification!.kyc[action.item]!, checked: { by: me!.id, at } } } } }, me!.id, `KYC checked: ${action.item}`, at)));
     }
 
     case "dr/sanctions": {
-      if (!app || !drCan(me, "review") || app.type !== "provider") return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "review")) return no(ctx, state, "Your role cannot enter sanctions results");
+      if (app.type !== "provider") return no(ctx, state, "Sanctions screening is for providers");
       return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, verification: { ...(a.verification ?? { state: "Verification pending", kyc: {} }), sanctions: { result: action.result, note: action.note, by: me!.id, at } } }, me!.id, `Sanctions screening: ${action.result}`, at)));
     }
 
     case "dr/signNda": {
-      if (!app || app.type !== "provider" || !action.name.trim() || !action.title.trim()) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (app.type !== "provider") return no(ctx, state, "The NDA is for providers");
+      if (!action.name.trim() || !action.title.trim()) return no(ctx, state, "The NDA needs the signer's name and title");
       const docs = action.uploaded ? [...app.documents, action.uploaded] : app.documents;
       return withDr(
         state,
@@ -497,8 +539,11 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/verify": {
-      if (!app || app.type !== "provider" || !drCan(me, "decide") || !action.reason.trim()) return state;
-      if (action.outcome === "Verified" && verificationBlockers(app).length) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (app.type !== "provider") return no(ctx, state, "Only a provider is verified");
+      if (!drCan(me, "decide")) return no(ctx, state, "Your role cannot verify");
+      if (!action.reason.trim()) return no(ctx, state, "Verification needs a reason");
+      if (action.outcome === "Verified" && verificationBlockers(app).length) return no(ctx, state, `Not ready to verify: ${verificationBlockers(app).join("; ")}`);
       dr = patchApp(dr, app.id, (a) =>
         note({ ...a, status: "Decided", statusAt: at, reReview: undefined, verification: { ...a.verification!, state: action.outcome, decided: { by: me!.id, at, reason: action.reason } } }, me!.id, `Verification: ${action.outcome}`, at),
       );
@@ -510,10 +555,10 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/merge": {
-      if (me?.role !== "Lead") return state;
+      if (me?.role !== "Lead") return no(ctx, state, "Only the lead can merge applications");
       const keep = dr.apps.find((a) => a.id === action.keepId);
       const drop = dr.apps.find((a) => a.id === action.dropId);
-      if (!keep || !drop || keep.id === drop.id) return state;
+      if (!keep || !drop || keep.id === drop.id) return no(ctx, state, "Choose two different applications to merge");
       dr = {
         ...dr,
         apps: dr.apps
@@ -530,7 +575,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
 
     case "dr/staffSet": {
       const s = dr.staff.find((x) => x.id === action.staffId);
-      if (!s) return state;
+      if (!s) return no(ctx, state, "No such staff member");
       return withDr(state, {
         ...dr,
         staff: dr.staff.map((x) => (x.id === s.id ? { ...x, role: action.role, canDecide: action.canDecide, mfa: action.mfa } : x)),
@@ -540,7 +585,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
 
     case "dr/staffRevoke": {
       const s = dr.staff.find((x) => x.id === action.staffId);
-      if (!s || !s.active) return state;
+      if (!s || !s.active) return no(ctx, state, "No such active staff member");
       // access stops at once (DA-3); the workspace falls back to the lead if the revoked person was signed in
       const lead = dr.staff.find((x) => x.role === "Lead" && x.active && x.id !== s.id);
       return withDr(state, {
@@ -552,7 +597,9 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
     }
 
     case "dr/grantSupport": {
-      if (!app || !drCan(me, "grantSupport") || !action.reason.trim()) return state;
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "grantSupport")) return no(ctx, state, "Your role cannot grant support access");
+      if (!action.reason.trim()) return no(ctx, state, "Support access needs a reason");
       const expires = new Date(at.replace(" ", "T") + ":00Z");
       expires.setUTCHours(expires.getUTCHours() + action.hours);
       const g = { id: ctx.newId("gr"), appId: app.id, to: action.to, reason: action.reason, by: me!.id, at, expires: expires.toISOString().slice(0, 16).replace("T", " ") };
@@ -561,12 +608,12 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
 
     case "dr/supportView": {
       const ok = dr.grants.some((g) => g.appId === action.appId && g.to === action.viewer && g.expires > at);
-      if (!ok || !app) return state;
+      if (!ok || !app) return no(ctx, state, "No current support grant for this file");
       return withDr(state, { ...dr, access: [{ id: ctx.newId("acc"), seekerId: app.id, item: "profile", viewer: "admin", action: "view", at }, ...dr.access], adminLog: [{ at, by: "admin", what: `${action.viewer} opened ${app.ref ?? app.org.name} under a support grant` }, ...dr.adminLog] });
     }
 
     case "dr/exception": {
-      if (!me) return state;
+      if (!me) return no(ctx, state, "Only Deal Room staff can log an exception");
       return withDr(state, exception(ctx, dr, Object.keys(dr.configs)[0], me.id, action.kind, action.reason, action.ref));
     }
 
