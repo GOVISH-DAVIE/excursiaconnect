@@ -123,6 +123,29 @@ export type DrRole = "seeker" | "capital" | "partner" | "challenge";
 export const ROLES: DrRole[] = ["seeker", "capital", "partner", "challenge"];
 export const ROLE_LABEL: Record<DrRole, string> = { seeker: "Capital seeker", capital: "Capital provider", partner: "Commercial or strategic partner", challenge: "Institutional challenge" };
 export const ROLE_SHORT: Record<DrRole, string> = { seeker: "Seeker", capital: "Investor", partner: "Partner", challenge: "Challenge" };
+/** The organiser's words for each registration pathway: the public page and the apply page both read them from here. */
+export const PATHWAY_COPY: Record<DrRole, { title: string; text: string; cta: string }> = {
+  seeker: {
+    title: "Register as a capital seeker",
+    text: "For startups, scale-ups, established enterprises and project sponsors seeking investment or financing to establish, expand or scale their businesses and projects. This includes equity investment, venture capital, growth capital, debt financing, project finance and blended finance opportunities.",
+    cta: "Register an opportunity",
+  },
+  capital: {
+    title: "Register as a capital provider",
+    text: "For angel investors, venture capital and private equity firms, banks, development finance institutions, institutional investors and funds seeking to identify and engage with qualified businesses, investment propositions and projects aligned with their investment mandates.",
+    cta: "Register as an investor or capital provider",
+  },
+  partner: {
+    title: "Register as a commercial or strategic partner",
+    text: "For corporates, enterprises, procurement teams, distributors, technology providers and regional operators seeking commercial relationships, qualified suppliers, innovative solutions, distribution networks, market-entry opportunities and strategic partnerships.",
+    cta: "Register as a commercial or strategic partner",
+  },
+  challenge: {
+    title: "Submit an institutional challenge",
+    text: "For government ministries, public agencies, county governments, regulators and corporate institutions seeking innovative solutions, technical capabilities, investment or implementation partners to address defined institutional, operational, infrastructure and service-delivery priorities.",
+    cta: "Submit an institutional challenge",
+  },
+};
 /** A partner kind; a public institution without a challenge counts as one too, as it brings partnership interests rather than capital. */
 export const isPartnerKind = (k?: ProviderKind) => !!k && (PARTNER_KINDS.includes(k) || k === "Public institution");
 export function roleOf(a: DrApplication): DrRole {

@@ -6,7 +6,7 @@ import { Wordmark, fmtDate } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { initials, numberWord, readableOn } from "@/lib/brand";
 import type { Instrument, ProviderKind, Stage } from "@/lib/dealroom/types";
-import { CAPITAL_KINDS, PATHWAYS, PARTNER_KINDS, feeLabel, isChallenge, isPartnerKind } from "@/lib/dealroom/logic";
+import { CAPITAL_KINDS, PATHWAYS, PATHWAY_COPY, PARTNER_KINDS, ROLES, feeLabel, isChallenge, isPartnerKind } from "@/lib/dealroom/logic";
 
 /*
   The public Deal Room page (PRD Module req. 9, CS-1). Built on the event site's contract: the
@@ -51,32 +51,7 @@ const ACTIVITIES = [
   "Market-entry and cross-border partnership engagements",
 ];
 
-const PATHWAY_CARDS: { type: Pathway; title: string; text: string; cta: string }[] = [
-  {
-    type: "seeker",
-    title: "Register as a capital seeker",
-    text: "For startups, scale-ups, established enterprises and project sponsors seeking investment or financing to establish, expand or scale their businesses and projects. This includes equity investment, venture capital, growth capital, debt financing, project finance and blended finance opportunities.",
-    cta: "Register an opportunity",
-  },
-  {
-    type: "capital",
-    title: "Register as a capital provider",
-    text: "For angel investors, venture capital and private equity firms, banks, development finance institutions, institutional investors and funds seeking to identify and engage with qualified businesses, investment propositions and projects aligned with their investment mandates.",
-    cta: "Register as an investor or capital provider",
-  },
-  {
-    type: "partner",
-    title: "Register as a commercial or strategic partner",
-    text: "For corporates, enterprises, procurement teams, distributors, technology providers and regional operators seeking commercial relationships, qualified suppliers, innovative solutions, distribution networks, market-entry opportunities and strategic partnerships.",
-    cta: "Register as a commercial or strategic partner",
-  },
-  {
-    type: "challenge",
-    title: "Submit an institutional challenge",
-    text: "For government ministries, public agencies, county governments, regulators and corporate institutions seeking innovative solutions, technical capabilities, investment or implementation partners to address defined institutional, operational, infrastructure and service-delivery priorities.",
-    cta: "Submit an institutional challenge",
-  },
-];
+const PATHWAY_CARDS = ROLES.map((type) => ({ type, ...PATHWAY_COPY[type] }));
 
 /** "15–18 February 2027", or "28 February – 3 March 2027" when the event spans two months. */
 function dateRange(start: string, end: string) {
