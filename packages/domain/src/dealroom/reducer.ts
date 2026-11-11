@@ -212,6 +212,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       if (!app || !cfg) return no(ctx, state, "No such application");
       if (!["Lead", "Invited", "Draft"].includes(app.status)) return no(ctx, state, "This application is already submitted");
       if (formGaps(app, cfg).missing.length) return no(ctx, state, `Still needed: ${formGaps(app, cfg).missing.join(", ")}`);
+      if (at.slice(0, 10) < cfg.rules.appOpen) return no(ctx, state, `Applications open on ${cfg.rules.appOpen}`);
       if (at.slice(0, 10) > cfg.rules.appClose) return no(ctx, state, "Applications are closed");
       const seq = { ...dr.seq, [app.type === "seeker" ? "cs" : "fp"]: dr.seq[app.type === "seeker" ? "cs" : "fp"] + 1 };
       const ref = refNo(app.type, app.type === "seeker" ? seq.cs : seq.fp);

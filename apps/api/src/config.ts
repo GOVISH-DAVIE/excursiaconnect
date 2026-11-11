@@ -14,6 +14,8 @@ const list = z
 const Env = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    /** Which kind of environment this is; staging runs production builds, so NODE_ENV can't tell them apart. */
+    APP_ENV: z.enum(["local", "staging", "production"]).optional(),
     /** Loopback only: nginx is the one way in (deploy.md). */
     API_HOST: z.string().default("127.0.0.1"),
     API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
@@ -32,12 +34,27 @@ const Env = z
       .refine((s) => Buffer.from(s, "base64").length >= 32, "must be at least 32 random bytes, base64 (openssl rand -base64 32)"),
     /** How email leaves: "log" writes it to the console, for local work and tests only. */
     MAIL_TRANSPORT: z.enum(["log"]).default("log"),
+    /**
+     * Local and staging only: the time the rules take as now, "YYYY-MM-DD HH:MM" in Nairobi, running on from there
+     * (so a demo can apply before applications open). Sessions and codes keep the real clock. Refused in production.
+     */
+    RULES_CLOCK: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/, "must be YYYY-MM-DD HH:MM")
+      .optional(),
+    /** Where uploaded files are kept, until an object store is chosen (D6). Backed up with the database. */
+    STORAGE_DIR: z.string().optional(),
+    /** The largest upload accepted, in megabytes. */
+    UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(50).default(15),
   })
   .superRefine((env, ctx) => {
+    if (env.RULES_CLOCK && (env.APP_ENV === "production" || (env.NODE_ENV === "production" && env.APP_ENV !== "staging")))
+      ctx.addIssue({ code: "custom", path: ["RULES_CLOCK"], message: "is for local and staging only" });
     if (env.NODE_ENV !== "production") return;
     if (env.WEB_ORIGINS.some((o) => !o.startsWith("https://")))
       ctx.addIssue({ code: "custom", path: ["WEB_ORIGINS"], message: "every web origin must be https in production" });
     if (!env.COOKIE_DOMAIN) ctx.addIssue({ code: "custom", path: ["COOKIE_DOMAIN"], message: "required in production" });
+    if (!env.APP_ENV) ctx.addIssue({ code: "custom", path: ["APP_ENV"], message: "required in production (staging or production)" });
   });
 
 export type Config = z.infer<typeof Env>;

@@ -576,6 +576,7 @@ model File {
   eventId        String?   @map("event_id")
   ownerKind      String    @map("owner_kind") // "dr_application", "event", "exhibitor"…
   ownerId        String    @map("owner_id")
+  kind           String? // what the file is to its owner, for example "Pitch deck"
   storageKey     String    @unique @map("storage_key")
   name           String
   contentType    String    @map("content_type")

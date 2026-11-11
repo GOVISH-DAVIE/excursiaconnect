@@ -11,6 +11,7 @@ import cors from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
 import type { Db } from "@excursia/db";
+import { rulesClock } from "./clock";
 import type { Config } from "./config";
 import { errorHandler, notFound } from "./http/errors";
 import { originCheck } from "./http/origin";
@@ -68,7 +69,9 @@ export function createApp({ config, db, mailer, now, logError = defaultLogError 
   const auth = authModule({ db, config, mailer: mailer ?? logMailer({ production: config.NODE_ENV === "production" }), now });
   app.use("/v1", originCheck(config), loadSession(config, auth.service));
   app.use("/v1", auth.routes);
-  app.use("/v1/dealroom", dealRoomModule({ db, now }));
+  // the rules' clock: the test's clock, else RULES_CLOCK on local and staging, else the real one
+  const rulesNow = now ?? rulesClock(config);
+  app.use("/v1/dealroom", dealRoomModule({ db, now: rulesNow }));
 
   app.use(notFound);
   app.use(errorHandler(logError));

@@ -60,6 +60,7 @@ export function TeamShell({ children }: { children: ReactNode }) {
       nav={NAV}
       context={context}
       footer={<span className="text-ok">Live data</span>}
+      drawer
     >
       {/* always rendered, so the server can prerender each screen's shell; each screen waits for the session itself */}
       {children}

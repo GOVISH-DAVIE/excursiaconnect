@@ -8,13 +8,13 @@
  */
 import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 
-export type Keys = { otp: Buffer; totp: Buffer };
+export type Keys = { otp: Buffer; totp: Buffer; upload: Buffer };
 
 /** Separate keys for separate jobs, from the one AUTH_SECRET. */
 export function deriveKeys(authSecret: string): Keys {
   const ikm = Buffer.from(authSecret, "base64");
   const derive = (info: string) => Buffer.from(hkdfSync("sha256", ikm, Buffer.alloc(0), `excursia:${info}`, 32));
-  return { otp: derive("otp-code"), totp: derive("totp-secret") };
+  return { otp: derive("otp-code"), totp: derive("totp-secret"), upload: derive("upload-url") };
 }
 
 /** A new session token for the cookie: 32 random bytes, base64url. */

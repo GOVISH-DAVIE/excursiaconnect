@@ -149,6 +149,7 @@ export function Rail({
   context,
   children,
   footer = "Prototype, mock data",
+  drawer: forceDrawer = false,
 }: {
   persona: string;
   who: string;
@@ -158,9 +159,11 @@ export function Rail({
   accent?: "ink" | "coral";
   /** the line at the foot of the rail; the prototype's screens say they run on mock data */
   footer?: ReactNode;
+  /** on a phone, the slim bar and drawer even with four pages or fewer (a rail with its own controls) */
+  drawer?: boolean;
 }) {
   // on a phone, more than four pages go in a drawer behind a Menu button; four or fewer stay as a row of tabs
-  const drawer = nav.length > 4;
+  const drawer = forceDrawer || nav.length > 4;
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr]">
       {drawer && <RailDrawer persona={persona} who={who} nav={nav} context={context} />}

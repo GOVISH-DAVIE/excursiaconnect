@@ -34,13 +34,13 @@ export function Queue({ eventId }: { eventId: string }) {
       <PageHeader title="Review queue" kicker="Submitted applications and who reviews them. Changes here are saved for everyone." />
 
       <div className="mb-4 flex flex-wrap gap-3">
-        <select className="input h-10 w-auto min-w-40 text-[14px]" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select className="input h-10 w-full text-[14px] sm:w-auto sm:min-w-40" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">All submitted work</option>
           {STATUSES.map((s) => (
             <option key={s}>{s}</option>
           ))}
         </select>
-        <select className="input h-10 w-auto min-w-40 text-[14px]" aria-label="Reviewer" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+        <select className="input h-10 w-full text-[14px] sm:w-auto sm:min-w-40" aria-label="Reviewer" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
           <option value="">Any reviewer</option>
           <option value="me">Assigned to me</option>
           <option value="none">Not assigned</option>
@@ -70,9 +70,9 @@ export function Queue({ eventId }: { eventId: string }) {
               )}
               <th className="th">Reference</th>
               <th className="th">Organisation</th>
-              <th className="th">Status</th>
-              <th className="th">Reviewer</th>
-              <th className="th">Decision</th>
+              <th className="th hidden sm:table-cell">Status</th>
+              <th className="th hidden sm:table-cell">Reviewer</th>
+              <th className="th hidden md:table-cell">Decision</th>
             </tr>
           </thead>
           <tbody className={queue.isPlaceholderData ? "opacity-60" : ""}>
@@ -94,17 +94,21 @@ function Row({ a, reviewer, pickable, picked, onPick }: { a: ApplicationSummary;
           <input type="checkbox" aria-label={`Choose ${a.org}`} checked={picked} onChange={onPick} />
         </td>
       )}
-      <td className="td whitespace-nowrap font-mono text-[13px]">{a.ref ?? a.id}</td>
+      <td className="td whitespace-nowrap font-mono text-[12px] sm:text-[13px]">{a.ref ?? a.id}</td>
       <td className="td">
         {a.org}
         <span className="block text-[13px] text-slate">
           {a.type === "seeker" ? "Raising capital" : "Investor or provider"}
           {a.country ? `, ${a.country}` : ""}
         </span>
+        {/* on a phone the status and reviewer columns fold in here */}
+        <span className="mt-1 block text-[13px] sm:hidden">
+          {a.status} · <span className={a.assigneeId ? "" : "text-slate"}>{reviewer}</span>
+        </span>
       </td>
-      <td className="td whitespace-nowrap">{a.status}</td>
-      <td className={`td whitespace-nowrap ${a.assigneeId ? "" : "text-slate"}`}>{reviewer}</td>
-      <td className="td whitespace-nowrap">{a.decision ?? "–"}</td>
+      <td className="td hidden whitespace-nowrap sm:table-cell">{a.status}</td>
+      <td className={`td hidden whitespace-nowrap sm:table-cell ${a.assigneeId ? "" : "text-slate"}`}>{reviewer}</td>
+      <td className="td hidden whitespace-nowrap md:table-cell">{a.decision ?? "–"}</td>
     </tr>
   );
 }
@@ -113,7 +117,7 @@ function AssignBar(p: { count: number; staff: StaffMember[]; reviewer: string; s
   return (
     <div className="surface mb-4 flex flex-wrap items-center gap-3 p-3">
       <span className="text-[14px]">{p.count ? `${p.count} chosen` : "Choose applications to assign"}</span>
-      <select className="input h-10 w-auto min-w-48 text-[14px]" aria-label="Assign to" value={p.reviewer} onChange={(e) => p.setReviewer(e.target.value)}>
+      <select className="input h-10 w-full text-[14px] sm:w-auto sm:min-w-48" aria-label="Assign to" value={p.reviewer} onChange={(e) => p.setReviewer(e.target.value)}>
         <option value="">Assign to…</option>
         {p.staff.filter((s) => s.canReview).map((s) => (
           <option key={s.id} value={s.id}>
