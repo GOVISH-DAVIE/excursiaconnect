@@ -526,13 +526,40 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - telling the lead when a request expires: the rules already know once the due date has passed, but nothing prompts the lead yet (Phase 2's jobs)
   - recommendations and decisions (M1.6)
 
+**Notes on a new summit from nothing (M2.3's core, brought forward), 11 Nov 2026.** Built so a summit can be set up on real screens instead of the demo seed, then walked end to end on an empty database (`excursia_fresh`) to find the gaps.
+- **The flow, and who does what:**
+  1. The first Algotech admin is made from the command line (`db:admin`); no request can make one.
+  2. An organiser signs itself up at `/organisers/signup`: an emailed code proves the address, then the owner's account (password, then authenticator or D14's grace), the organiser and the owner's membership are made together.
+  3. KYC: business details, three documents (registration certificate, tax PIN certificate, signatory ID) and the data processing agreement, signed by typing the signatory's name. Sent once complete; read-only while Algotech checks it.
+  4. Algotech opens each document through a short link (audited) and verifies, or returns with a reason; a return opens KYC again.
+  5. The organiser drafts an event (it may ask for the Deal Room add-on and name its lead). A draft is the organiser's alone (OR-2); it can be submitted only once KYC is verified.
+  6. Algotech approves with terms (commission, fees, the add-on's price and desk staff), asks for changes, or rejects with a note. Approval with the add-on creates the Deal Room on the platform's standard settings (`dealroom/defaults.ts`), closed until the lead sets it up.
+  7. Algotech gives the Deal Room its staff accounts (DA-2): the staff record through the rules (`dr/staffAdd`) and the sign-in behind it, in one transaction. An applicant's email can't also be staff.
+  8. The organiser publishes the approved event.
+  9. The lead sets the missions, tracks, application window and days to answer a request (through `dr/config`). Applications open once the event is live and nothing is missing.
+- **Where it lives:** the rules in `@excursia/domain/core/onboarding` and `dealroom/defaults`; the API's `organisers` module (owner) and `platform` module (Algotech, decisions only with the authenticator confirmed); the screens under `/team` (the menu follows the person's roles: Algotech, the owner, the Deal Room team, its lead).
+- **Found by the walk-through and fixed:**
+  - Application references were hard-coded to the demo's `CA3-`. Each Deal Room now has its own prefix, from the event's short mark (`EAGC-CS-00001`). The first application on the walk-through database kept `CA3-CS-00001`.
+  - Algotech saw organisers' drafts; now it sees an event once it is sent.
+  - The lead landed on an empty review queue with nothing saying the Deal Room wasn't set up; the queue now says what is missing and links to the settings.
+  - The KYC form kept the PIN as typed rather than as saved; pages inside a Suspense boundary under `/team` rendered differently on the server and in the browser (a hydration error).
+- **Gaps still open:**
+  - **The public event pages** (`/e/[slug]`, and the Deal Room's About page) still read the prototype's local data: a real, live event shows "Event not found". Only the apply page is on the API. This is the biggest gap.
+  - **No email** tells anyone about these steps: a staff member added to a Deal Room, KYC returned or verified, an event approved. They wait for the outbox and its worker (M1.4); until then people learn by looking.
+  - **Algotech's terms** are prefilled with the prototype's figures (5%, KES 120,000 licence, KES 450,000 add-on). The real price list is a decision to record.
+  - The owner can't invite their own team yet (finance, accreditation, organiser staff); Algotech can't change a Deal Room staff member's role or revoke them from the screen (the rules have `dr/staffSet` and `dr/staffRevoke`).
+  - The lead can't change the rubric, sectors, countries or the seeker fee from the screen (the standard ones apply; the fee is 0).
+  - An event has no tickets or registration yet (M2.4), and nothing stops two organisers signing up with the same registered name (Algotech sees it at KYC).
+  - Local only: `RULES_CLOCK` starts again from its set time whenever the API restarts, so times in a walk-through can run backwards.
+- **Tested:** 10 API tests (sign-up, refusals, KYC with return and verification, privacy between organisers and of drafts, approval with the add-on, staff accounts, the lead's settings, applications opening only then, the summit's own references) and 9 rule tests; then the walk-through above in two browsers, through to a request for information answered with its document.
+
 ### Phase 2: Core platform and scanning (4 to 29 January 2027)
 
 | # | Milestone | Done when |
 | --- | --- | --- |
 | M2.1 | **Badges and delegates**: badge page and email, random badge codes, delegate edits | A paid participant gets a working badge by email and SMS |
 | M2.2 | **Accreditation and scanning**: scanner devices and PIN sign-in with lockout, desk accreditation, zone and room doors, anti-passback through `Presence`, atomic capacity, PIN overrides, the offline queue with idempotent sync | 50 scans a minute on two devices with one offline: no duplicates and no over-capacity after sync; the prototype's demo PINs and the applications' invite tokens no longer saved in browser storage (found by the security pass, 11 Nov 2026) |
-| M2.3 | **Organisers and events**: KYC and DPA, the event builder, media uploaded straight to storage, approval by Algotech | An organiser builds and publishes an event on staging |
+| M2.3 | **Organisers and events**: KYC and DPA, the event builder, media uploaded straight to storage, approval by Algotech | An organiser builds and publishes an event on staging **Core brought forward and done 11 Nov 2026** (self sign-up, KYC, Algotech's checks, events from draft to live, the Deal Room's set-up); the event builder's tiers, sessions and media remain. Notes under Phase 1 |
 | M2.4 | **Registration and orders**: pricing, promo and status worked out on the server; M-Pesa and card checkout; refunds | A delegate registers and pays; a crafted request can't change the price |
 | M2.5 | **Money and comms**: commission, payouts, reconciliation; memberships, shifts, campaigns | A payout run matches the payments to the shilling |
 | M2.6 | **Visitor log**: moved from SQLite to PostgreSQL; IP taken only from `X-Real-IP`; `/adminwatch` behind staff sign-in with TOTP and an IP allow-list | Visits record and replay from PostgreSQL; `/adminwatch` refuses anyone without staff sign-in |

@@ -401,7 +401,8 @@ export function askBand(amount: number) {
   return "USD 10m and over";
 }
 
-export const refNo = (type: "seeker" | "provider", n: number) => `CA3-${type === "seeker" ? "CS" : "FP"}-${n.toString().padStart(5, "0")}`;
+/** An application's reference: the Deal Room's prefix (its event's short mark), the kind, and its number. */
+export const refNo = (type: "seeker" | "provider", n: number, prefix = "CA3") => `${prefix}-${type === "seeker" ? "CS" : "FP"}-${n.toString().padStart(5, "0")}`;
 
 export const missionName = (cfg: DrConfig, id: string) => cfg.missions.find((m) => m.id === id)?.name ?? id;
 

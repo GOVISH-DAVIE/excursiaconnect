@@ -105,6 +105,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     const users = await db.user.findMany({ where: { email: { contains: `@${run}.onboarding.example` } }, select: { id: true } });
     const orgIds = (await db.organiser.findMany({ where: { name: { contains: run } }, select: { id: true } })).map((o) => o.id);
     const events = (await db.event.findMany({ where: { organiserId: { in: orgIds } }, select: { id: true } })).map((e) => e.id);
+    await db.drApplication.deleteMany({ where: { eventId: { in: events } } });
+    await db.drCounter.deleteMany({ where: { eventId: { in: events } } });
+    await db.file.deleteMany({ where: { eventId: { in: events } } });
     await db.drStaff.deleteMany({ where: { eventId: { in: events } } });
     await db.drConfig.deleteMany({ where: { eventId: { in: events } } });
     await db.membership.deleteMany({ where: { OR: [{ eventId: { in: events } }, { organiserId: { in: orgIds } }] } });
@@ -288,6 +291,30 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     const form = await call("GET", `/v1/apply/${slug}/form`);
     expect(form.status).toBe(200);
     expect(form.json.eventName).toBe(`Savanna Capital Summit ${run}`);
+  });
+
+  test("an application gets this summit's own reference, not the demo's", async () => {
+    const applicant = await db.user.create({ data: { kind: "participant", email: at("applicant"), name: "Neema" } });
+    jar.applicant = await sessionFor(applicant.id);
+    const mine = (path = "") => `/v1/apply/${slug}/mine${path}`;
+    const appId = (await call("POST", mine(), "applicant", { mode: "seeker" })).json.id as string;
+    await call("PATCH", mine(`/${appId}`), "applicant", {
+      changes: {
+        "org.name": "Kilimo Fresh Ltd", "org.regNo": "PVT-2020-1", "org.country": "Kenya", "org.sector": "Agritech & Food Technology",
+        "ask.amount": 2_500_000, "ask.instrument": "Debt and credit", "ask.useOfFunds": "Cold-chain hubs", "ask.stage": "Growth",
+        "traction.revenueBand": "USD 1m to 5m",
+        "decisionMaker.name": "Neema Achieng", "decisionMaker.title": "CEO", "decisionMaker.email": at("applicant"), "decisionMaker.phone": "+254700000000",
+        mission: "m1", source: "Partner",
+      },
+    });
+    for (const kind of ["Pitch deck", "Financial statements", "Registration certificate"]) {
+      const t = UploadTarget.parse((await call("POST", mine(`/${appId}/documents`), "applicant", { kind, name: `${kind}.pdf`, contentType: "application/pdf", size: pdf(kind).length })).json);
+      await call("PUT", t.url, undefined, pdf(kind), t.headers);
+      await call("POST", mine(`/${appId}/documents/${t.fileId}/complete`), "applicant");
+    }
+    const submitted = await call("POST", mine(`/${appId}/submit`), "applicant", {});
+    expect(submitted.status).toBe(200);
+    expect(submitted.json.ref).toBe("SCS-CS-00001");
   });
 
   test("a reviewer reads the settings but can't change them", async () => {

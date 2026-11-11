@@ -21,7 +21,17 @@ npm run db:migrate   # apply migrations to the dev database and generate the Pri
 npm run db:seed:demo # load the prototype's seed into the dev database (APP_ENV local or staging only)
 npm run db:check-demo  # exits 1 if any demo record is present (the production deploy runs it)
 npm run db:import -- apps/api/reference/connected-africa-3.example.json   # a real event's reference data
+npm run db:admin -- --email you@algotech.example --name "Your Name"   # an Algotech admin (no request can make one)
 npm run dev:api      # the API: http://localhost:4000/health/ready; sign-in codes print in its console
+```
+
+To walk the product from nothing, on real screens and without the demo seed, use a second, empty database. The demo database is left alone:
+
+```bash
+scripts/db/add-local-db.sh excursia_fresh                 # set up like excursia_dev, with the same roles
+LOCAL_DATABASE=excursia_fresh npm run db:deploy            # the schema
+LOCAL_DATABASE=excursia_fresh npm run db:admin -- --email you@algotech.example --name "Your Name"
+LOCAL_DATABASE=excursia_fresh npm run dev:api              # then sign up an organiser at /organisers/signup
 npm test             # every suite: the rules, the database's guarantees, the API
 npm run typecheck    # each workspace
 npm run lint         # including the workspace boundaries

@@ -17,7 +17,7 @@ import {
   type EventDetails,
   type Result,
 } from "@excursia/domain/core/onboarding";
-import { dealRoomGaps, starterConfig } from "@excursia/domain/dealroom/defaults";
+import { dealRoomGaps, refPrefixFor, starterConfig } from "@excursia/domain/dealroom/defaults";
 import type { Organiser } from "@excursia/domain/types";
 
 const NOW = "2026-12-16 09:00";
@@ -111,7 +111,9 @@ describe("an event", () => {
 
 describe("the Deal Room's starter settings", () => {
   test("standard rubric and rules, dates from the event, closed until the lead names a mission", () => {
-    const cfg = starterConfig({ id: "ev_x", startDate: "2027-03-10", endDate: "2027-03-11" }, TODAY, NOW, "admin");
+    const cfg = starterConfig({ id: "ev_x", name: "Savanna Capital Summit", startDate: "2027-03-10", endDate: "2027-03-11", brand: { primary: "#000000", logoText: "scs" } }, TODAY, NOW, "admin");
+    expect(cfg.refPrefix).toBe("SCS");
+    expect(refPrefixFor({ name: "East Africa Growth Capital Summit 2027", brand: { primary: "#000000", logoText: "" } })).toBe("EAGCS2");
     expect(cfg.rules).toMatchObject({ appOpen: TODAY, appClose: "2027-02-24", rfiDays: 7 });
     expect(cfg.freezeDate).toBe("2027-03-03");
     expect(dealRoomGaps(cfg)).toEqual(["Name at least one mission"]);

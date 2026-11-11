@@ -12,6 +12,9 @@ import { PageHeader, Section } from "@/components/ui";
 import { useApplications } from "@/features/dealroom/hooks/use-applications";
 import { useAssignReviewer } from "@/features/dealroom/hooks/use-assign-reviewer";
 import { useTeam } from "@/features/dealroom/hooks/use-team";
+import { useSession } from "@/features/auth/hooks/use-session";
+import { rolesOf } from "@/features/auth/roles";
+import { useDealRoomSettings } from "@/features/onboarding/hooks/use-onboarding";
 
 const STATUSES = ["Submitted", "In review", "Information requested", "Decided"] as const;
 
@@ -33,6 +36,7 @@ export function Queue({ eventId }: { eventId: string }) {
   return (
     <div>
       <PageHeader title="Review queue" kicker="Submitted applications and who reviews them. Changes here are saved for everyone." />
+      <SetUpFirst eventId={eventId} />
 
       <div className="mb-4 flex flex-wrap gap-3">
         <select className="input h-10 w-full text-[14px] sm:w-auto sm:min-w-40" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -133,6 +137,22 @@ function AssignBar(p: { count: number; staff: StaffMember[]; reviewer: string; s
       </button>
       {p.error && <span role="alert" className="text-[14px] text-bad">{p.error.message}</span>}
       {!p.error && p.done && <span role="status" className="text-[14px] text-ok">{p.done}</span>}
+    </div>
+  );
+}
+
+/** For the lead: what still stops applications coming in, until the Deal Room is set up. */
+function SetUpFirst({ eventId }: { eventId: string }) {
+  const lead = rolesOf(useSession().data).lead;
+  const settings = useDealRoomSettings(eventId, lead);
+  const gaps = settings.data?.gaps ?? [];
+  if (!lead || !gaps.length) return null;
+  return (
+    <div className="mb-4 rounded-lg border border-warn bg-warn-50 px-4 py-3 text-[14px]">
+      <p className="font-medium">Applications open once the Deal Room is set up: {gaps.join("; ").toLowerCase()}.</p>
+      <Link href="/team/dealroom/settings" className="mt-1 inline-block underline underline-offset-4">
+        Open the Deal Room settings
+      </Link>
     </div>
   );
 }

@@ -215,7 +215,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       if (at.slice(0, 10) < cfg.rules.appOpen) return no(ctx, state, `Applications open on ${cfg.rules.appOpen}`);
       if (at.slice(0, 10) > cfg.rules.appClose) return no(ctx, state, "Applications are closed");
       const seq = { ...dr.seq, [app.type === "seeker" ? "cs" : "fp"]: dr.seq[app.type === "seeker" ? "cs" : "fp"] + 1 };
-      const ref = refNo(app.type, app.type === "seeker" ? seq.cs : seq.fp);
+      const ref = refNo(app.type, app.type === "seeker" ? seq.cs : seq.fp, cfg.refPrefix);
       dr = { ...dr, seq };
       dr = patchApp(dr, app.id, (a) =>
         note(

@@ -71,10 +71,11 @@ const addDays = (day: string, n: number) => {
  * A new event's Deal Room, as approved: the standard settings, dates drawn from the event's own, and no missions.
  * Applications stay closed until the lead names at least one mission (`dealRoomReady`).
  */
-export function starterConfig(event: Pick<EventRecord, "id" | "startDate" | "endDate">, today: string, at: string, by: string): DrConfig {
+export function starterConfig(event: Pick<EventRecord, "id" | "name" | "startDate" | "endDate" | "brand">, today: string, at: string, by: string): DrConfig {
   const close = addDays(event.startDate, -14);
   return {
     eventId: event.id,
+    refPrefix: refPrefixFor(event),
     missions: [],
     tracks: [],
     sources: STANDARD_SOURCES,
@@ -111,6 +112,14 @@ export function starterConfig(event: Pick<EventRecord, "id" | "startDate" | "end
     sessionRooms: [],
     log: [{ at, by, what: "Deal Room enabled with the standard settings" }],
   };
+}
+
+/** References start with the event's short mark (EAGC), else its initials: letters and digits, 2 to 6 of them. */
+export function refPrefixFor(event: Pick<EventRecord, "name" | "brand">): string {
+  const mark = (event.brand.logoText || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (mark.length >= 2) return mark.slice(0, 6);
+  const initials = event.name.toUpperCase().replace(/[^A-Z0-9 ]/g, "").split(/\s+/).map((w) => w[0] ?? "").join("");
+  return (initials.length >= 2 ? initials : "EV").slice(0, 6);
 }
 
 /** What still stops applications opening, in the lead's words; empty when the Deal Room can take them. */

@@ -11,7 +11,7 @@ export const useMyOrganisers = (enabled = true) => useQuery({ ...mineQuery(), en
 export const useOrganiser = (id: string) => useQuery(organiserQuery(id));
 export const useEvent = (id: string) => useQuery(eventQuery(id));
 export const useAdminQueue = (enabled = true) => useQuery({ ...queueQuery(), enabled });
-export const useDealRoomSettings = (eventId: string) => useQuery(settingsQuery(eventId));
+export const useDealRoomSettings = (eventId: string, enabled = true) => useQuery({ ...settingsQuery(eventId), enabled });
 
 /** A change to an organiser: the answer is its new view. */
 export function useOrganiserChange<A>(organiserId: string, fn: (arg: A) => Promise<OrganiserView>) {

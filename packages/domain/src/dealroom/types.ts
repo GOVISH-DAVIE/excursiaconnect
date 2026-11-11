@@ -430,6 +430,8 @@ export interface DrRules {
 
 export interface DrConfig {
   eventId: string;
+  /** what application references start with, like EAGC in EAGC-CS-00001; the demo's are CA3 */
+  refPrefix?: string;
   missions: { id: string; code: string; name: string; description: string }[];
   tracks: { id: string; code: string; name: string; missionId: string; description: string }[]; // the paper's six strategic tracks
   sources: string[];

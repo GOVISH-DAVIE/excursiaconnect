@@ -95,6 +95,7 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
    - **Production:** then run `node apps/api/dist/cli/check-demo.js`. If it finds any demo record, the deploy stops.
    - **Staging:** then run `node apps/api/dist/cli/seed-demo.js` to reload the prototype's data. It refuses if staging holds a real event.
    - **The first production deploy, and after any change to an event's setup:** run `node apps/api/dist/cli/import-reference.js /etc/excursia/reference/<event>.json`. The file is `0640 root:excursia`, as it holds staff names and emails.
+   - **The first production deploy:** make the first Algotech admin with `node apps/api/dist/cli/create-admin.js --email <person> --name "<Full Name>"`. No request can make an admin. The person sets a password on the sign-in page (Staff → "Set or reset your password") and must add an authenticator before deciding anything. Organisers then sign themselves up at `/organisers/signup`.
 5. **Switch the API first:**
    - Start the idle API colour.
    - Wait for `GET http://127.0.0.1:400x/health/ready` to return 200.
