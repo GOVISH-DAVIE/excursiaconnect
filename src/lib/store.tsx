@@ -8,10 +8,10 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from "react";
 import { seed } from "./seed";
 import { reducer as coreReducer, type Action as CoreAction } from "./core/reducer";
+import { nairobiNow, type Ctx } from "./ctx";
 import type { AppState } from "./types";
 
 export { overlaps } from "./time";
-export { reducer } from "./core/reducer";
 export * from "./core/scan";
 export * from "./core/orders";
 
@@ -20,6 +20,22 @@ export const STORAGE_KEY = "excursiaconnect-proto-v1";
  *  keeping an older copy that lacks them (hydrate only merges top-level keys). */
 export const SEED_VERSION = 17;
 
+/**
+ * The prototype's Ctx, built from what the demo already uses: the Deal Room and Exhibition run on their own demo
+ * clocks, the core on Nairobi's wall clock; ids are random. On the server the gateway builds Ctx instead, from the
+ * server clock and the session.
+ */
+export function protoCtx(state: AppState, action?: { type: string }): Ctx {
+  const t = action?.type ?? "";
+  const now = t.startsWith("dr/") ? state.dealRoom.clock : t.startsWith("expo/") ? state.expo.clock : nairobiNow(new Date());
+  return { now, actor: null, newId: (prefix) => `${prefix}_${now.replace(/\D/g, "").slice(-8)}${Math.random().toString(36).slice(2, 7)}` };
+}
+
+/** The rules with the prototype's Ctx: what screens and the rule tests call. */
+export function reducer(state: AppState, action: CoreAction): AppState {
+  return coreReducer(state, action, protoCtx(state, action));
+}
+
 /** Prototype-only actions: start again from the seed, or load a saved browser state. */
 type Action = CoreAction | { type: "reset" } | { type: "hydrate"; state: AppState };
 
@@ -27,7 +43,7 @@ function protoReducer(state: AppState, action: Action): AppState {
   if (action.type === "reset") return structuredClone(seed);
   // a state saved before a key existed takes the seed's value for it
   if (action.type === "hydrate") return { ...structuredClone(seed), ...action.state };
-  return coreReducer(state, action);
+  return reducer(state, action);
 }
 
 const Ctx = createContext<{ state: AppState; dispatch: (a: Action) => void; hydrated: boolean; storageFull: boolean } | null>(null);

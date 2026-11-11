@@ -5,6 +5,7 @@
  * expo.floor for fulfilment, deliveries on the day, dismantling and issues.
  */
 import { fmtStamp } from "../time";
+import type { Ctx } from "../ctx";
 import type { AppState, Capability } from "../types";
 import { activeBookingOf, expoCan, invoiceNo } from "./logic";
 import {
@@ -54,9 +55,9 @@ export type OnsiteAction =
 
 export const ONSITE_TYPES = new Set<string>(["expo/people", "expo/personRemove", "expo/branding", "expo/brandingDecide", "expo/order", "expo/orderState", "expo/requirement", "expo/requirementAck", "expo/moveIn", "expo/delivery", "expo/deliveryState", "expo/dismantleTick", "expo/signOff", "expo/issue", "expo/issueAssign", "expo/issueResolve", "expo/occupancy"]);
 
-export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
+export function onsiteReducer(state: AppState, action: OnsiteAction, ctx: Ctx): AppState {
   let expo = state.expo;
-  const at = expo.clock;
+  const at = ctx.now;
   const asExhibitor = "as" in action && action.as === "exhibitor";
   const by = asExhibitor ? "exhibitor" : (state.team.find((m) => m.id === expo.actingMemberId)?.id ?? "system");
   // the portal acts for its own company; the team needs one of the capabilities
@@ -85,12 +86,12 @@ export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
       let invoice: Invoice | undefined;
       if (extra > 0) {
         const n = expo.seq.invoice + 1;
-        invoice = { id: `inv_${expo.invoices.length + 1}`, eventId: c.e.eventId, exhibitorId: c.e.id, bookingId: k.id, number: invoiceNo(n), kind: "Extras", lines: [{ label: "Extra exhibitor pass", qty: extra, unit: c.cfg.extraPass }], vatPct: c.cfg.vatPct, issuedAt: at, due: extrasDue(c.cfg, at), state: "Issued" };
+        invoice = { id: ctx.newId("inv"), eventId: c.e.eventId, exhibitorId: c.e.id, bookingId: k.id, number: invoiceNo(n), kind: "Extras", lines: [{ label: "Extra exhibitor pass", qty: extra, unit: c.cfg.extraPass }], vatPct: c.cfg.vatPct, issuedAt: at, due: extrasDue(c.cfg, at), state: "Issued" };
         expo = { ...expo, invoices: [...expo.invoices, invoice], seq: { ...expo.seq, invoice: n } };
       }
       const what = `${added.length} ${action.kind === "Staff" ? (added.length === 1 ? "staff pass" : "staff passes") : added.length === 1 ? "contractor pass" : "contractor passes"} issued: ${added.map((d) => d.name).join(", ")}${invoice ? `; ${invoice.number} for ${extra} extra ${extra === 1 ? "pass" : "passes"}` : ""}`;
       expo = { ...expo, bookings: expo.bookings.map((x) => (x.id === k.id ? { ...x, history: [...x.history, note(what, by, at)] } : x)) };
-      expo = send(expo, c.e.eventId, c.e.id, `${added.length} ${added.length === 1 ? "pass" : "passes"} issued${invoice ? ", and an invoice for the extra passes" : ""}`, `/exhibitor/${c.e.id}`);
+      expo = send(ctx, expo, c.e.eventId, c.e.id, `${added.length} ${added.length === 1 ? "pass" : "passes"} issued${invoice ? ", and an invoice for the extra passes" : ""}`, `/exhibitor/${c.e.id}`);
       const tier = action.kind === "Staff" ? EXHIBITOR_TIER : CONTRACTOR_TIER;
       return { ...withExpo(state, expo), delegates: [...added, ...state.delegates], tiers: state.tiers.map((t) => (t.id === tier ? { ...t, sold: t.sold + added.length } : t)) };
     }
@@ -122,7 +123,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
       if (!b || b.decision || !expoCan(state, "expo.manage") || (action.decision === "Returned" && !action.note.trim())) return state;
       const decision = { state: action.decision, by, at, note: action.note.trim() || undefined };
       expo = { ...expo, branding: expo.branding.map((x) => (x.exhibitorId === b.exhibitorId ? { ...x, decision, history: [...x.history, note(`${action.decision}${action.note.trim() ? `: ${action.note.trim()}` : ""}`, by, at)] } : x)) };
-      expo = send(expo, b.eventId, b.exhibitorId, action.decision === "Approved" ? "Your stand branding is approved" : "Your stand branding needs a change", `/exhibitor/${b.exhibitorId}`);
+      expo = send(ctx, expo, b.eventId, b.exhibitorId, action.decision === "Approved" ? "Your stand branding is approved" : "Your stand branding needs a change", `/exhibitor/${b.exhibitorId}`);
       return withExpo(state, expo);
     }
 
@@ -134,11 +135,11 @@ export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
       const late = orderLate(c.cfg, at);
       const n = expo.seq.invoice + 1;
       const order: StandOrder = { id: action.id, eventId: c.e.eventId, exhibitorId: c.e.id, lines: action.lines.filter((l) => l.qty > 0), at, by, late, state: "Ordered", history: [] };
-      const inv = orderInvoice(c.cfg, order, k.id, invoiceNo(n), `inv_${expo.invoices.length + 1}`);
+      const inv = orderInvoice(c.cfg, order, k.id, invoiceNo(n), ctx.newId("inv"));
       order.invoiceId = inv.id;
       order.history = [note(`Ordered${late ? `, after the ${fmtStamp(c.cfg.orderDeadline, false)} deadline, with the ${c.cfg.lateSurchargePct}% surcharge` : ""}; ${inv.number} issued`, by, at)];
       expo = { ...expo, orders: [...expo.orders, order], invoices: [...expo.invoices, inv], seq: { ...expo.seq, invoice: n } };
-      expo = send(expo, c.e.eventId, c.e.id, `Order received: ${inv.number} is ready`, `/exhibitor/${c.e.id}`);
+      expo = send(ctx, expo, c.e.eventId, c.e.id, `Order received: ${inv.number} is ready`, `/exhibitor/${c.e.id}`);
       return withExpo(state, expo);
     }
 
@@ -167,7 +168,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
       if (!c || !expoCan(state, "expo.manage") || !signedBooking(expo, c.cfg, c.e.id, at) || moveInProblems(c.cfg, action.at, at).length) return state;
       const m = { eventId: c.e.eventId, exhibitorId: c.e.id, at: action.at, by };
       expo = { ...expo, moveIns: expo.moveIns.some((x) => x.exhibitorId === c.e.id) ? expo.moveIns.map((x) => (x.exhibitorId === c.e.id ? m : x)) : [...expo.moveIns, m] };
-      expo = send(expo, c.e.eventId, c.e.id, `Your move-in time is ${fmtStamp(action.at)}`, `/exhibitor/${c.e.id}`);
+      expo = send(ctx, expo, c.e.eventId, c.e.id, `Your move-in time is ${fmtStamp(action.at)}`, `/exhibitor/${c.e.id}`);
       return withExpo(state, expo);
     }
 
@@ -176,7 +177,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
       if (!c || !allowed("expo.floor", "expo.manage") || expo.deliveries.some((d) => d.id === action.id)) return state;
       if (deliveryProblems(expo, c.cfg, action, at).length) return state;
       expo = { ...expo, deliveries: [...expo.deliveries, { id: action.id, eventId: c.e.eventId, exhibitorId: c.e.id, bayId: action.bayId, slot: action.slot, vehicle: action.vehicle.trim().toUpperCase(), what: action.what.trim(), at, by }] };
-      expo = send(expo, c.e.eventId, c.e.id, `Delivery booked for ${fmtStamp(action.slot)}`, `/exhibitor/${c.e.id}`);
+      expo = send(ctx, expo, c.e.eventId, c.e.id, `Delivery booked for ${fmtStamp(action.slot)}`, `/exhibitor/${c.e.id}`);
       return withExpo(state, expo);
     }
 
@@ -204,7 +205,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
       const c = cfgOf(action.exhibitorId);
       if (!c || !expoCan(state, "expo.floor") || signOffProblems(expo, c.cfg, c.e.id, at).length) return state;
       expo = { ...expo, dismantles: expo.dismantles.map((x) => (x.exhibitorId === c.e.id ? { ...x, signedOff: { at, by, damage: action.damage.trim() || undefined } } : x)) };
-      expo = send(expo, c.e.eventId, c.e.id, action.damage.trim() ? "Your stand is signed off, with damage noted" : "Your stand is signed off", `/exhibitor/${c.e.id}`);
+      expo = send(ctx, expo, c.e.eventId, c.e.id, action.damage.trim() ? "Your stand is signed off, with damage noted" : "Your stand is signed off", `/exhibitor/${c.e.id}`);
       return withExpo(state, expo);
     }
 
@@ -230,7 +231,7 @@ export function onsiteReducer(state: AppState, action: OnsiteAction): AppState {
       const i = expo.issues.find((x) => x.id === action.id);
       if (!i || i.resolved || !action.note.trim() || !expoCan(state, "expo.floor")) return state;
       expo = { ...expo, issues: expo.issues.map((x) => (x.id === i.id ? { ...x, resolved: { at, by, note: action.note.trim() }, history: [...x.history, note(`Resolved: ${action.note.trim()}`, by, at)] } : x)) };
-      if (i.exhibitorId) expo = send(expo, i.eventId, i.exhibitorId, `Your ${i.category.toLowerCase()} issue is resolved`, `/exhibitor/${i.exhibitorId}`, "SMS");
+      if (i.exhibitorId) expo = send(ctx, expo, i.eventId, i.exhibitorId, `Your ${i.category.toLowerCase()} issue is resolved`, `/exhibitor/${i.exhibitorId}`, "SMS");
       return withExpo(state, expo);
     }
 

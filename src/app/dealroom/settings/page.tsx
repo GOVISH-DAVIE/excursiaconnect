@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
 import { PROVIDER_FIELDS, SEEKER_DOCS, SEEKER_FIELDS, MATCH_LABEL, bothAccepted, deletionDate, staffName, validateDealRoom } from "@/lib/dealroom/logic";
-import { drReducer } from "@/lib/dealroom/reducer";
+import { reducer } from "@/lib/store";
 import type { AppState } from "@/lib/types";
 import type { DrConfig, DrException } from "@/lib/dealroom/types";
 import { fmtLong, fmtStamp } from "@/lib/time";
@@ -388,7 +388,7 @@ function Concurrency() {
     const test = (name: string, reqs: { matchId: string; roomId: string; table: number; start: string }[]) => {
       let st = base;
       const before = st.dealRoom.meetings.length;
-      for (const req of reqs) st = drReducer(st, { type: "dr/propose", req });
+      for (const req of reqs) st = reducer(st, { type: "dr/propose", req });
       const booked = st.dealRoom.meetings.length - before;
       return { name, requests: reqs.length, booked, refused: reqs.length - booked, problems: validateDealRoom(st).filter((p) => /share|two meetings/i.test(p)).length };
     };

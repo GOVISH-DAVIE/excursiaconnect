@@ -3,6 +3,7 @@
  * Every rule is checked here, so a burst of requests (the concurrency test) can never double-book
  * a room, a table or a person: each request is checked against the state the last one left.
  */
+import type { Ctx } from "../ctx";
 import type { AppState } from "../types";
 import { addMinutes, fmtStamp } from "../time";
 import {
@@ -24,7 +25,7 @@ import {
   type SlotRequest,
 } from "./logic";
 import type { DealRoomState, DrMatch, DrMeeting, DrOpportunity, DrOutcome } from "./types";
-import { exception, send, uid, withDr } from "./util";
+import { exception, send, withDr } from "./util";
 
 export type DrMeetAction =
   | { type: "dr/matchDecide"; seekerId: string; providerId: string; decision: "Approved" | "Rejected" | "Deferred"; note: string; override?: string }
@@ -70,9 +71,9 @@ export function draftBrief(dr: DealRoomState, m: DrMatch) {
   };
 }
 
-function newMeeting(dr: DealRoomState, req: SlotRequest, end: string, by: string, override?: string): DrMeeting {
+function newMeeting(ctx: Ctx, dr: DealRoomState, req: SlotRequest, end: string, by: string, override?: string): DrMeeting {
   return {
-    id: uid("mt", dr.clock) + dr.meetings.length,
+    id: ctx.newId("mt"),
     eventId: dr.matches.find((m) => m.id === req.matchId)!.eventId,
     matchId: req.matchId,
     roomId: req.link ? undefined : req.roomId,
@@ -97,15 +98,15 @@ function where(state: AppState, m: DrMeeting) {
 }
 
 /** Book one slot if every rule allows it; otherwise the state is returned unchanged. */
-function book(state: AppState, req: SlotRequest, by: string, override?: string): AppState {
+function book(ctx: Ctx, state: AppState, req: SlotRequest, by: string, override?: string): AppState {
   const { clashes, caps, end } = slotProblems(state, req);
   if (clashes.length) return state;
   const me = acting(state.dealRoom);
   if (caps.length && !(override?.trim() && drCan(me, "overrideCap"))) return state;
   let dr = state.dealRoom;
-  const mt = newMeeting(dr, req, end, by, caps.length ? override : undefined);
+  const mt = newMeeting(ctx, dr, req, end, by, caps.length ? override : undefined);
   dr = { ...dr, meetings: [...dr.meetings, mt] };
-  if (caps.length) dr = exception(dr, mt.eventId, by, "Cap override", `${caps.join("; ")}. ${override}`, mt.id);
+  if (caps.length) dr = exception(ctx, dr, mt.eventId, by, "Cap override", `${caps.join("; ")}. ${override}`, mt.id);
   const match = dr.matches.find((m) => m.id === req.matchId)!;
   const cfg = dr.configs[mt.eventId];
   const confirmByAt = (() => {
@@ -114,13 +115,13 @@ function book(state: AppState, req: SlotRequest, by: string, override?: string):
     const b = w > f ? w : f;
     return b < mt.start ? b : mt.start;
   })();
-  for (const id of [match.seekerId, match.providerId]) dr = send(dr, mt.eventId, id, `A Deal Room meeting is proposed for ${fmtStamp(mt.start)}; please confirm by ${fmtStamp(confirmByAt)}`, `/dr/${id}`);
+  for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `A Deal Room meeting is proposed for ${fmtStamp(mt.start)}; please confirm by ${fmtStamp(confirmByAt)}`, `/dr/${id}`);
   return withDr(state, dr);
 }
 
-export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
+export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): AppState {
   let dr = state.dealRoom;
-  const at = dr.clock;
+  const at = ctx.now;
   const me = acting(dr);
 
   switch (action.type) {
@@ -143,10 +144,10 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       if (existing) {
         dr = patchMatch(dr, existing.id, (m) => ({ ...m, ...f, decision: action.decision, note: action.note, by: me!.id, at, intro: blocked ? undefined : m.intro, override: blocked ? { by: me!.id, at, reason: action.override! } : m.override, history: [...m.history, entry] }));
       } else {
-        const m: DrMatch = { id: uid("mx", at) + dr.matches.length, eventId: seeker.eventId, seekerId: seeker.id, providerId: provider.id, origin: "search", ...f, decision: action.decision, note: action.note, by: me!.id, at, history: [entry] };
+        const m: DrMatch = { id: ctx.newId("mx"), eventId: seeker.eventId, seekerId: seeker.id, providerId: provider.id, origin: "search", ...f, decision: action.decision, note: action.note, by: me!.id, at, history: [entry] };
         dr = { ...dr, matches: [...dr.matches, m] };
       }
-      if (blocked) dr = exception(dr, seeker.eventId, me!.id, "Re-proposed pair", `${seeker.org.name} and ${provider.org.name} after ${blocked.toLowerCase()}: ${action.override}`, seeker.ref ?? seeker.id);
+      if (blocked) dr = exception(ctx, dr, seeker.eventId, me!.id, "Re-proposed pair", `${seeker.org.name} and ${provider.org.name} after ${blocked.toLowerCase()}: ${action.override}`, seeker.ref ?? seeker.id);
       if (action.decision === "Approved") {
         const m = dr.matches.find((x) => x.seekerId === seeker.id && x.providerId === provider.id)!;
         if (!m.brief) dr = patchMatch(dr, m.id, (x) => ({ ...x, brief: { ...draftBrief(dr, x), editedAt: at } }));
@@ -160,8 +161,8 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       if (dr.matches.some((m) => m.seekerId === action.seekerId && m.providerId === provider.id)) return state;
       const seeker = dr.apps.find((a) => a.id === action.seekerId)!;
       const f = fit(seeker, provider, dr.configs[seeker.eventId]);
-      dr = { ...dr, matches: [...dr.matches, { id: uid("mx", at) + dr.matches.length, eventId: seeker.eventId, seekerId: seeker.id, providerId: provider.id, origin: "interest", ...f, decision: "Suggested", note: "", by: "applicant", at, history: [{ at, by: "applicant", what: `${provider.org.name} expressed interest` }] }] };
-      dr = send(dr, seeker.eventId, seeker.assignee ?? "st_lead", `Expression of interest in ${seeker.ref}`, "/dealroom/matching", "Email");
+      dr = { ...dr, matches: [...dr.matches, { id: ctx.newId("mx"), eventId: seeker.eventId, seekerId: seeker.id, providerId: provider.id, origin: "interest", ...f, decision: "Suggested", note: "", by: "applicant", at, history: [{ at, by: "applicant", what: `${provider.org.name} expressed interest` }] }] };
+      dr = send(ctx, dr, seeker.eventId, seeker.assignee ?? "st_lead", `Expression of interest in ${seeker.ref}`, "/dealroom/matching", "Email");
       return withDr(state, dr);
     }
 
@@ -178,7 +179,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       if (!matchable(seeker) || !matchable(provider)) return state;
       const items = ["teaser", "profile", ...action.items.filter((i) => seeker.documents.some((d) => d.id === i))];
       dr = patchMatch(dr, m.id, (x) => ({ ...x, intro: { items, sentAt: at, by: me!.id }, history: [...x.history, { at, by: me!.id, what: `Introduction sent with ${items.length - 2} document${items.length === 3 ? "" : "s"} proposed` }] }));
-      for (const id of [m.seekerId, m.providerId]) dr = send(dr, m.eventId, id, "You have a Deal Room introduction to review", `/dr/${id}`);
+      for (const id of [m.seekerId, m.providerId]) dr = send(ctx, dr, m.eventId, id, "You have a Deal Room introduction to review", `/dr/${id}`);
       return withDr(state, dr);
     }
 
@@ -193,13 +194,13 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
         const docs = m.intro.items.filter((i) => i !== "teaser" && i !== "profile");
         for (const d of docs) {
           const prev = dr.consents.filter((c) => c.seekerId === m.seekerId && c.providerId === m.providerId && c.docId === d).length;
-          dr = { ...dr, consents: [...dr.consents, { id: uid("cs", at) + dr.consents.length, seekerId: m.seekerId, providerId: m.providerId, docId: d, granted: (action.consent ?? []).includes(d), at, version: prev + 1 }] };
+          dr = { ...dr, consents: [...dr.consents, { id: ctx.newId("cs"), seekerId: m.seekerId, providerId: m.providerId, docId: d, granted: (action.consent ?? []).includes(d), at, version: prev + 1 }] };
         }
       }
       const other = action.side === "seeker" ? m.providerId : m.seekerId;
-      dr = send(dr, m.eventId, other, `The other party ${action.response.toLowerCase()} your Deal Room introduction`, `/dr/${other}`);
+      dr = send(ctx, dr, m.eventId, other, `The other party ${action.response.toLowerCase()} your Deal Room introduction`, `/dr/${other}`);
       const fresh = dr.matches.find((x) => x.id === m.id)!;
-      if (bothAccepted(fresh)) dr = send(dr, m.eventId, "st_ops1", "A match is ready to schedule", "/dealroom/meetings", "Email");
+      if (bothAccepted(fresh)) dr = send(ctx, dr, m.eventId, "st_ops1", "A match is ready to schedule", "/dealroom/meetings", "Email");
       return withDr(state, dr);
     }
 
@@ -207,10 +208,10 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       const prev = dr.consents.filter((c) => c.seekerId === action.seekerId && c.providerId === action.providerId && c.docId === action.docId);
       const last = prev[prev.length - 1];
       if (last && last.granted === action.granted) return state;
-      dr = { ...dr, consents: [...dr.consents, { id: uid("cs", at) + dr.consents.length, seekerId: action.seekerId, providerId: action.providerId, docId: action.docId, granted: action.granted, at, version: prev.length + 1 }] };
+      dr = { ...dr, consents: [...dr.consents, { id: ctx.newId("cs"), seekerId: action.seekerId, providerId: action.providerId, docId: action.docId, granted: action.granted, at, version: prev.length + 1 }] };
       if (!action.granted) {
         const seeker = dr.apps.find((a) => a.id === action.seekerId)!;
-        dr = send(dr, seeker.eventId, seeker.assignee ?? "st_lead", `${seeker.ref} withdrew consent for a document`, `/dealroom/applications/${seeker.id}`, "Email");
+        dr = send(ctx, dr, seeker.eventId, seeker.assignee ?? "st_lead", `${seeker.ref} withdrew consent for a document`, `/dealroom/applications/${seeker.id}`, "Email");
       }
       return withDr(state, dr);
     }
@@ -222,14 +223,14 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       const r = action.item === "profile" ? { kind: "profile" as const, seekerId: action.seekerId } : action.item === "teaser" ? { kind: "teaser" as const, seekerId: action.seekerId } : { kind: "doc" as const, seekerId: action.seekerId, docId: action.item };
       if (!canSee(dr, viewer, r).ok) return state;
       if (action.action === "download" && r.kind === "doc" && !dr.apps.find((a) => a.id === action.seekerId)?.documents.find((d) => d.id === action.item)?.download) return state;
-      return withDr(state, { ...dr, access: [{ id: uid("ac", at) + dr.access.length, seekerId: action.seekerId, item: action.item, viewer: viewer.id, action: action.action, at }, ...dr.access] });
+      return withDr(state, { ...dr, access: [{ id: ctx.newId("ac"), seekerId: action.seekerId, item: action.item, viewer: viewer.id, action: action.action, at }, ...dr.access] });
     }
 
     /* ----- scheduling (DO-2 to DO-6) ----- */
     case "dr/propose": {
       if (!drCan(me, "schedule")) return state;
       if (dr.meetings.some((m) => m.matchId === action.req.matchId && occupies(m, dr.configs[m.eventId], at))) return state;
-      return book(state, action.req, me!.id, action.override);
+      return book(ctx, state, action.req, me!.id, action.override);
     }
 
     case "dr/autoPropose": {
@@ -252,7 +253,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
             for (const [roomId, rc] of rooms) {
               for (let table = 1; table <= rc.tables && !done; table++) {
                 const before = next;
-                next = book(next, { matchId: m.id, roomId, table, start }, me!.id);
+                next = book(ctx, next, { matchId: m.id, roomId, table, start }, me!.id);
                 if (next !== before) done = true;
               }
               if (done) break;
@@ -273,7 +274,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       dr = patchMeeting(dr, mt.id, (m) => ({ ...m, confirm, status: both ? "Confirmed" : m.status, change: both ? undefined : m.change, history: [...m.history, { at, by: action.side, what: both ? "Confirmed by both" : `Confirmed by the ${action.side}` }] }));
       if (both) {
         const match = dr.matches.find((x) => x.id === mt.matchId)!;
-        for (const id of [match.seekerId, match.providerId]) dr = send(dr, mt.eventId, id, `Deal Room meeting confirmed: ${fmtStamp(mt.start)}, ${where(state, mt)}; calendar invite attached`, `/dr/${id}`);
+        for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Deal Room meeting confirmed: ${fmtStamp(mt.start)}, ${where(state, mt)}; calendar invite attached`, `/dr/${id}`);
       }
       return withDr(state, dr);
     }
@@ -282,7 +283,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
       if (!mt || !["Proposed", "Confirmed"].includes(mt.status) || !action.reason.trim()) return state;
       dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: "Change requested", change: { by: action.side, reason: action.reason, at }, history: [...m.history, { at, by: action.side, what: `Asked to move: ${action.reason}` }] }));
-      dr = send(dr, mt.eventId, "st_ops1", "A participant asked to move a Deal Room meeting", "/dealroom/meetings", "Email");
+      dr = send(ctx, dr, mt.eventId, "st_ops1", "A participant asked to move a Deal Room meeting", "/dealroom/meetings", "Email");
       return withDr(state, dr);
     }
 
@@ -309,7 +310,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
         history: [...m.history, { at, by: me!.id, what: sameSlot ? `Moved to ${where(state, { ...m, roomId: req.roomId, table: req.table, link: req.link })}, same time` : `Moved to ${fmtStamp(req.start)}; both to confirm again` }],
       }));
       const match = dr.matches.find((x) => x.id === mt.matchId)!;
-      for (const id of [match.seekerId, match.providerId]) dr = send(dr, mt.eventId, id, sameSlot ? "Your Deal Room meeting has a new room" : `Your Deal Room meeting moved to ${fmtStamp(req.start)}; please confirm`, `/dr/${id}`);
+      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, sameSlot ? "Your Deal Room meeting has a new room" : `Your Deal Room meeting moved to ${fmtStamp(req.start)}; please confirm`, `/dr/${id}`);
       return withDr(state, dr);
     }
 
@@ -318,7 +319,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       if (!mt || !drCan(me, "schedule") || !mutable(mt) || !action.reason.trim()) return state;
       dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: "Cancelled", history: [...m.history, { at, by: me!.id, what: `Cancelled: ${action.reason}` }] }));
       const match = dr.matches.find((x) => x.id === mt.matchId)!;
-      for (const id of [match.seekerId, match.providerId]) dr = send(dr, mt.eventId, id, `Your Deal Room meeting on ${fmtStamp(mt.start)} is cancelled`, `/dr/${id}`);
+      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Your Deal Room meeting on ${fmtStamp(mt.start)} is cancelled`, `/dr/${id}`);
       return withDr(state, dr);
     }
 
@@ -357,15 +358,15 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       const outcome: DrOutcome | undefined = action.outcome ? { ...action.outcome, by: me!.id, at } : undefined;
       if (recorded) {
         const was = mt.outcome ? `${mt.outcome.category} by ${staffName(dr, mt.outcome.by)}` : mt.status;
-        dr = exception(dr, mt.eventId, me!.id, "Paper entry over an outcome", `${action.paper!.trim()} (replaced ${was})`, mt.id);
+        dr = exception(ctx, dr, mt.eventId, me!.id, "Paper entry over an outcome", `${action.paper!.trim()} (replaced ${was})`, mt.id);
         dr = patchMeeting(dr, mt.id, (m) => ({ ...m, history: [...m.history, { at, by: me!.id, what: `Entered from the paper sheet over ${was}: ${action.paper!.trim()}` }] }));
-        return withDr(state, applyOutcome(dr, dr.meetings.find((m) => m.id === mt.id)!, action.attendance, action.noShow, outcome, me!.id));
+        return withDr(state, applyOutcome(ctx, dr, dr.meetings.find((m) => m.id === mt.id)!, action.attendance, action.noShow, outcome, me!.id));
       }
       // with no connection the record waits on the device, with the id it was given there (Flow 7)
       if (dr.offline) {
-        return withDr(state, { ...dr, queue: [...dr.queue, { device: action.device ?? "This device", meetingId: mt.id, attendance: action.attendance === "Cancelled" ? "No-show" : action.attendance, noShow: action.noShow, outcome: outcome ?? { category: "No fit", by: me!.id, at, clientId: uid("cl", at) } }] });
+        return withDr(state, { ...dr, queue: [...dr.queue, { device: action.device ?? "This device", meetingId: mt.id, attendance: action.attendance === "Cancelled" ? "No-show" : action.attendance, noShow: action.noShow, outcome: outcome ?? { category: "No fit", by: me!.id, at, clientId: ctx.newId("cl") } }] });
       }
-      return withDr(state, applyOutcome(dr, mt, action.attendance, action.noShow, outcome, me!.id));
+      return withDr(state, applyOutcome(ctx, dr, mt, action.attendance, action.noShow, outcome, me!.id));
     }
 
     case "dr/refill": {
@@ -378,7 +379,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       let next = state;
       for (const start of times) {
         const before = next;
-        next = book(next, { matchId: action.matchId, roomId: mt.roomId, table: mt.table, link: mt.link, start }, me!.id);
+        next = book(ctx, next, { matchId: action.matchId, roomId: mt.roomId, table: mt.table, link: mt.link, start }, me!.id);
         if (next !== before) break;
       }
       return next;
@@ -386,8 +387,8 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
 
     case "dr/offline": {
       if (action.on === dr.offline) return state;
-      if (action.on) return withDr(state, { ...dr, offline: true, incidents: [{ id: uid("inc", at), startedAt: at, cause: "Connection lost at the venue", synced: 0, duplicates: 0, conflicts: 0 }, ...dr.incidents] });
-      return drMeetReducer(withDr(state, { ...dr, offline: false }), { type: "dr/sync" });
+      if (action.on) return withDr(state, { ...dr, offline: true, incidents: [{ id: ctx.newId("inc"), startedAt: at, cause: "Connection lost at the venue", synced: 0, duplicates: 0, conflicts: 0 }, ...dr.incidents] });
+      return drMeetReducer(withDr(state, { ...dr, offline: false }), { type: "dr/sync" }, ctx);
     }
 
     case "dr/sync": {
@@ -405,15 +406,15 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
         }
         if (mt.outcome) {
           conflicts++;
-          dr = { ...dr, conflicts: [...dr.conflicts, { id: uid("cf", at) + dr.conflicts.length, meetingId: mt.id, kept: mt.outcome, incoming: { ...q.outcome, device: q.device } }] };
+          dr = { ...dr, conflicts: [...dr.conflicts, { id: ctx.newId("cf"), meetingId: mt.id, kept: mt.outcome, incoming: { ...q.outcome, device: q.device } }] };
           continue;
         }
         synced++;
-        dr = applyOutcome(dr, mt, q.attendance, q.noShow, q.outcome, q.outcome.by);
+        dr = applyOutcome(ctx, dr, mt, q.attendance, q.noShow, q.outcome, q.outcome.by);
       }
       const inc = dr.incidents.find((i) => !i.endedAt);
       dr = { ...dr, queue: [], incidents: dr.incidents.map((i) => (i === inc ? { ...i, endedAt: at, synced, duplicates, conflicts } : i)) };
-      if (inc) dr = send(dr, Object.keys(dr.configs)[0], "st_lead", `Incident report: offline ${fmtStamp(inc.startedAt)} to ${at.slice(11)}; ${synced} record${synced === 1 ? "" : "s"} synced, ${duplicates} duplicate${duplicates === 1 ? "" : "s"} dropped, ${conflicts} conflict${conflicts === 1 ? "" : "s"} to resolve`, "/dealroom/live", "Email");
+      if (inc) dr = send(ctx, dr, Object.keys(dr.configs)[0], "st_lead", `Incident report: offline ${fmtStamp(inc.startedAt)} to ${at.slice(11)}; ${synced} record${synced === 1 ? "" : "s"} synced, ${duplicates} duplicate${duplicates === 1 ? "" : "s"} dropped, ${conflicts} conflict${conflicts === 1 ? "" : "s"} to resolve`, "/dealroom/live", "Email");
       return withDr(state, dr);
     }
 
@@ -425,7 +426,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       if (action.chose === "incoming") {
         const { device, ...incoming } = c.incoming;
         dr = patchMeeting(dr, c.meetingId, (m) => ({ ...m, outcome: incoming, history: [...m.history, { at, by: me.id, what: `Conflict resolved: kept the record from ${device}` }] }));
-        dr = exception(dr, Object.keys(dr.configs)[0], me.id, "Paper entry over an outcome", `Outcome replaced by the record from ${device}`, c.meetingId);
+        dr = exception(ctx, dr, Object.keys(dr.configs)[0], me.id, "Paper entry over an outcome", `Outcome replaced by the record from ${device}`, c.meetingId);
       }
       return withDr(state, dr);
     }
@@ -446,8 +447,8 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
 }
 
 /** Attendance and outcome on one meeting; an outcome with a next action opens an opportunity with its owner (PRD Meetings req. 12). */
-function applyOutcome(dr: DealRoomState, mt: DrMeeting, attendance: "Held" | "No-show" | "Cancelled", noShow: "seeker" | "provider" | "both" | undefined, outcome: DrOutcome | undefined, by: string): DealRoomState {
-  const at = dr.clock;
+function applyOutcome(ctx: Ctx, dr: DealRoomState, mt: DrMeeting, attendance: "Held" | "No-show" | "Cancelled", noShow: "seeker" | "provider" | "both" | undefined, outcome: DrOutcome | undefined, by: string): DealRoomState {
+  const at = ctx.now;
   dr = patchMeeting(dr, mt.id, (m) => ({
     ...m,
     status: attendance,
@@ -457,7 +458,7 @@ function applyOutcome(dr: DealRoomState, mt: DrMeeting, attendance: "Held" | "No
   }));
   if (attendance === "Held" && outcome?.nextAction && outcome.owner && !dr.opportunities.some((o) => o.meetingId === mt.id)) {
     const opp: DrOpportunity = {
-      id: uid("op", at) + dr.opportunities.length,
+      id: ctx.newId("op"),
       eventId: mt.eventId,
       meetingId: mt.id,
       matchId: mt.matchId,
@@ -467,14 +468,14 @@ function applyOutcome(dr: DealRoomState, mt: DrMeeting, attendance: "Held" | "No
       nextAction: outcome.nextAction,
       due: outcome.due ?? addMinutes(at, 7 * 1440).slice(0, 10),
       // a meeting that ends in diligence, a proposal or a documented commitment records an expression of interest at once
-      outcomes: ["Due diligence", "Financing or partnership proposal", "Commitment documented"].includes(outcome.category) ? [{ id: uid("oo", at), kind: "Expression of interest", date: at.slice(0, 10), evidence: `Meeting outcome: ${outcome.category}`, by, at }] : [],
+      outcomes: ["Due diligence", "Financing or partnership proposal", "Commitment documented"].includes(outcome.category) ? [{ id: ctx.newId("oo"), kind: "Expression of interest", date: at.slice(0, 10), evidence: `Meeting outcome: ${outcome.category}`, by, at }] : [],
       updates: [],
       requests: [],
       reviews: [],
       history: [{ at, by, what: "Opened from the meeting outcome" }],
     };
     dr = { ...dr, opportunities: [...dr.opportunities, opp] };
-    dr = send(dr, mt.eventId, outcome.owner, "A Deal Room opportunity is assigned to you", "/dealroom", "Email");
+    dr = send(ctx, dr, mt.eventId, outcome.owner, "A Deal Room opportunity is assigned to you", "/dealroom", "Email");
   }
   return dr;
 }

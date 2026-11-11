@@ -5,11 +5,12 @@
  * day and every attendee leaves with an outcome in the paper's seven categories. A session a participant has
  * accepted holds their time, so no meeting can be booked over it, and the reverse.
  */
+import type { Ctx } from "../ctx";
 import type { AppState } from "../types";
 import { addMinutes, crosses, fmtStamp } from "../time";
 import { acting, drCan, feeSettled, occupies, qualified, sessionClash, sessionHolds, staffName } from "./logic";
 import type { DealRoomState, DrApplication, DrSession, MeetingOutcome } from "./types";
-import { send, uid, withDr } from "./util";
+import { send, withDr } from "./util";
 
 export type DrSessionDraft = Pick<DrSession, "format" | "title" | "start" | "end" | "roomId" | "host" | "track"> & { id?: string; eventId: string };
 
@@ -82,9 +83,9 @@ const when = (s: DrSession) => `${fmtStamp(s.start)} to ${s.end.slice(11)}`;
 const patch = (dr: DealRoomState, id: string, f: (s: DrSession) => DrSession) => ({ ...dr, sessions: dr.sessions.map((s) => (s.id === id ? f(s) : s)) });
 const accepted = (s: DrSession) => Object.entries(s.responses).filter(([, r]) => r.answer === "Accepted").map(([id]) => id);
 
-export function drSessionReducer(state: AppState, action: DrSessionAction): AppState {
+export function drSessionReducer(state: AppState, action: DrSessionAction, ctx: Ctx): AppState {
   let dr = state.dealRoom;
-  const at = dr.clock;
+  const at = ctx.now;
   const me = acting(dr);
   const s = "sessionId" in action ? dr.sessions.find((x) => x.id === action.sessionId) : undefined;
 
@@ -98,12 +99,12 @@ export function drSessionReducer(state: AppState, action: DrSessionAction): AppS
         const moved = before.start !== d.start || before.end !== d.end || before.roomId !== d.roomId;
         dr = patch(dr, before.id, (x) => ({ ...x, format: d.format, title: d.title.trim(), start: d.start, end: d.end, roomId: d.roomId, host: d.host, track: d.track, history: [...x.history, { at, by: me!.id, what: moved ? `Moved to ${d.start}, ${state.rooms.find((r) => r.id === d.roomId)?.name ?? d.roomId}` : "Details updated" }] }));
         // anyone who accepted hears of a move; the host too
-        if (moved) for (const id of new Set([...accepted(before), ...(d.host ? [d.host] : [])])) dr = send(dr, before.eventId, id, `Session moved: ${d.title}, now ${fmtStamp(d.start)}`, `/dr/${id}?tab=Programme`);
+        if (moved) for (const id of new Set([...accepted(before), ...(d.host ? [d.host] : [])])) dr = send(ctx, dr, before.eventId, id, `Session moved: ${d.title}, now ${fmtStamp(d.start)}`, `/dr/${id}?tab=Programme`);
         return withDr(state, dr);
       }
-      const session: DrSession = { id: uid("ses", at) + dr.sessions.length, eventId: d.eventId, format: d.format, title: d.title.trim(), start: d.start, end: d.end, roomId: d.roomId, host: d.host, track: d.track, owner: me!.id, invitees: [], responses: {}, attended: [], outcomes: [], history: [{ at, by: me!.id, what: "Planned" }] };
+      const session: DrSession = { id: ctx.newId("ses"), eventId: d.eventId, format: d.format, title: d.title.trim(), start: d.start, end: d.end, roomId: d.roomId, host: d.host, track: d.track, owner: me!.id, invitees: [], responses: {}, attended: [], outcomes: [], history: [{ at, by: me!.id, what: "Planned" }] };
       dr = { ...dr, sessions: [...dr.sessions, session] };
-      if (d.host) dr = send(dr, d.eventId, d.host, `You are hosting: ${session.title}, ${when(session)}`, `/dr/${d.host}?tab=Programme`);
+      if (d.host) dr = send(ctx, dr, d.eventId, d.host, `You are hosting: ${session.title}, ${when(session)}`, `/dr/${d.host}?tab=Programme`);
       return withDr(state, dr);
     }
 
@@ -112,7 +113,7 @@ export function drSessionReducer(state: AppState, action: DrSessionAction): AppS
       const add = action.appIds.filter((id) => id !== s.host && !s.invitees.includes(id) && invitable(dr.apps.find((a) => a.id === id) ?? ({} as DrApplication)));
       if (!add.length) return state;
       dr = patch(dr, s.id, (x) => ({ ...x, invitees: [...x.invitees, ...add], history: [...x.history, { at, by: me!.id, what: `Invited ${add.length}` }] }));
-      for (const id of add) dr = send(dr, s.eventId, id, `Invitation: ${s.title}, ${when(s)}. Accept or decline`, `/dr/${id}?tab=Programme`);
+      for (const id of add) dr = send(ctx, dr, s.eventId, id, `Invitation: ${s.title}, ${when(s)}. Accept or decline`, `/dr/${id}?tab=Programme`);
       return withDr(state, dr);
     }
 
@@ -162,7 +163,7 @@ export function drSessionReducer(state: AppState, action: DrSessionAction): AppS
     case "dr/sessionCancel": {
       if (!s || s.cancelled || !drCan(me, "schedule") || s.start <= at || !action.reason.trim()) return state;
       dr = patch(dr, s.id, (x) => ({ ...x, cancelled: { by: me!.id, at, reason: action.reason.trim() }, history: [...x.history, { at, by: me!.id, what: `Cancelled by ${staffName(dr, me!.id)}: ${action.reason.trim()}` }] }));
-      for (const id of new Set([...accepted(s), ...(s.host ? [s.host] : [])])) dr = send(dr, s.eventId, id, `Cancelled: ${s.title}, ${when(s)}. ${action.reason.trim()}`, `/dr/${id}?tab=Programme`);
+      for (const id of new Set([...accepted(s), ...(s.host ? [s.host] : [])])) dr = send(ctx, dr, s.eventId, id, `Cancelled: ${s.title}, ${when(s)}. ${action.reason.trim()}`, `/dr/${id}?tab=Programme`);
       return withDr(state, dr);
     }
   }

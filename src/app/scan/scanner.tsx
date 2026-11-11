@@ -7,6 +7,7 @@ import { overrider, roomVerdict, scanOperator, scanRefusal, scanVerdict, session
 import { can } from "@/lib/roles";
 import { DR_ZONE, eventDay, sessionHolds } from "@/lib/dealroom/logic";
 import { moduleClock } from "@/lib/clock";
+import { nairobiNow } from "@/lib/ctx";
 import { deskProblem, deskRefusal } from "@/lib/expo/ops";
 import type { DrMeeting, DrSession } from "@/lib/dealroom/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
@@ -190,7 +191,7 @@ export function Scanner() {
       if (v.delegate && v.session) dispatch({ type: "roomScan", delegateId: v.delegate.id, roomId: post.roomId, sessionId: v.session.id, day: DAY, verdict: v.verdict, reason: v.reason });
       return done(v);
     }
-    const v = scanVerdict(state, c, post.zoneId, post.direction, mod?.at);
+    const v = scanVerdict(state, c, post.zoneId, post.direction, mod?.at ?? nairobiNow(new Date()), !!mod);
     if (v.delegate) dispatch({ type: "scan", delegateId: v.delegate.id, zoneId: post.zoneId, direction: post.direction, verdict: v.verdict, reason: v.reason, day: DAY, at });
     done(v);
   }

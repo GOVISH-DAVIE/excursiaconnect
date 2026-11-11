@@ -3,6 +3,7 @@
  * on an unapproved exhibitor, a payment above what is owed, an overlapping booth.
  */
 import { fmtStamp } from "../time";
+import type { Ctx } from "../ctx";
 import type { AppState, Capability } from "../types";
 import {
   bookingStage,
@@ -66,14 +67,14 @@ const NEEDS: Partial<Record<ExpoAction["type"], Capability[]>> = {
   "expo/remind": ["money.view"],
 };
 
-export function expoReducer(state: AppState, action: ExpoAction): AppState {
+export function expoReducer(state: AppState, action: ExpoAction, ctx: Ctx): AppState {
   let expo = state.expo;
-  const at = expo.clock;
+  const at = ctx.now;
   const me = state.team.find((m) => m.id === expo.actingMemberId);
   const by = "as" in action && action.as === "exhibitor" ? "exhibitor" : me?.id ?? "system";
 
   // the stand and its logistics have their own reducer, with the same conventions
-  if (ONSITE_TYPES.has(action.type)) return onsiteReducer(state, action as OnsiteAction);
+  if (ONSITE_TYPES.has(action.type)) return onsiteReducer(state, action as OnsiteAction, ctx);
   // a staff action needs one of its capabilities; the portal and the public form act for the exhibitor
   const needs = NEEDS[action.type];
   const asExhibitor = "as" in action && action.as === "exhibitor";
@@ -92,7 +93,7 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
         const codes = k.boothIds.map((id) => expo.booths.find((b) => b.id === id)?.code).join(", ");
         expo = { ...expo, bookings: expo.bookings.map((x) => (x.id === k.id ? { ...x, history: [...x.history, note(`Hold lapsed unsigned; ${codes} back on sale`, "system", until)] } : x)) };
         // the message is dated when the hold lapsed, not when the clock was moved
-        expo = { ...send({ ...expo, clock: until }, k.eventId, k.exhibitorId, `Your hold on ${codes} has lapsed`, `/exhibitor/${k.exhibitorId}`, "Email and SMS"), clock: was };
+        expo = send({ ...ctx, now: until }, expo, k.eventId, k.exhibitorId, `Your hold on ${codes} has lapsed`, `/exhibitor/${k.exhibitorId}`, "Email and SMS");
       }
       let next = withExpo(state, { ...expo, clock: action.clock });
       // passing the exhibitors' opening time on a later show day plays that morning's arrivals (OPS-1, OPS-3)
@@ -164,7 +165,7 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
       const n = expo.seq.exhibitor + 1;
       const ex: Exhibitor = { ...x, ref: exhibitorRef(n), status: "Applied", statusAt: at, history: [note("Applied", "public", at)] };
       expo = { ...expo, exhibitors: [...expo.exhibitors, ex], seq: { ...expo.seq, exhibitor: n } };
-      expo = send(expo, ex.eventId, ex.id, `Application received, reference ${ex.ref}`, `/exhibitor/${ex.id}`, "Email and SMS");
+      expo = send(ctx, expo, ex.eventId, ex.id, `Application received, reference ${ex.ref}`, `/exhibitor/${ex.id}`, "Email and SMS");
       return withExpo(state, expo);
     }
 
@@ -175,7 +176,7 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
       const e = expo.exhibitors.find((x) => x.id === action.exhibitorId);
       if (!e || e.status === action.decision || (action.decision !== "Approved" && !action.note.trim())) return state;
       expo = patchEx(expo, e.id, (x) => ({ ...x, status: action.decision, statusAt: at, decisionNote: action.note.trim() || undefined, history: [...x.history, note(`${action.decision}${action.note.trim() ? `: ${action.note.trim()}` : ""}`, by, at)] }));
-      expo = send(expo, e.eventId, e.id, action.decision === "Approved" ? "Approved to exhibit: choose your booth" : action.decision === "Waitlisted" ? "Your application is on the waitlist" : "A decision on your application", `/exhibitor/${e.id}`, "Email and SMS");
+      expo = send(ctx, expo, e.eventId, e.id, action.decision === "Approved" ? "Approved to exhibit: choose your booth" : action.decision === "Waitlisted" ? "Your application is on the waitlist" : "A decision on your application", `/exhibitor/${e.id}`, "Email and SMS");
       // approving a company approves the people waiting under it (EXH-6)
       const delegates = action.decision === "Approved" ? state.delegates.map((d) => (d.exhibitorId === e.id && d.status === "Pending" ? { ...d, status: "Confirmed" as const } : d)) : state.delegates;
       return { ...withExpo(state, expo), delegates };
@@ -198,7 +199,7 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
       if (holdProblems(expo, cfg, e, action.boothIds, at).length || expo.bookings.some((k) => k.id === action.id)) return state;
       const codes = action.boothIds.map((id) => expo.booths.find((b) => b.id === id)!.code).join(", ");
       expo = { ...expo, bookings: [...expo.bookings, { id: action.id, eventId: e.eventId, exhibitorId: e.id, boothIds: action.boothIds, heldAt: at, heldBy: by, history: [note(`${asExhibitor ? "Chose" : "Allocated"} ${codes}, held for ${cfg.holdHours} hours`, by, at)] }] };
-      expo = send(expo, e.eventId, e.id, `Booth ${codes} is held for you: sign the contract within ${cfg.holdHours} hours`, `/exhibitor/${e.id}`, "Email and SMS");
+      expo = send(ctx, expo, e.eventId, e.id, `Booth ${codes} is held for you: sign the contract within ${cfg.holdHours} hours`, `/exhibitor/${e.id}`, "Email and SMS");
       return withExpo(state, expo);
     }
 
@@ -219,7 +220,7 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
         invoices: [...expo.invoices, ...invoices],
         bookings: expo.bookings.map((x) => (x.id === k.id ? { ...x, contract: { version: cfg.contractVersion, name: action.name.trim(), title: action.title.trim(), at, paper: action.paper }, history: [...x.history, note(`Contract ${cfg.contractVersion} signed by ${action.name.trim()}, ${action.title.trim()}${action.paper ? " (paper copy recorded)" : ""}`, by, at), ...invoices.map((v) => note(`${v.number} issued: ${v.kind.toLowerCase()}, due ${fmtStamp(v.due, false)}`, "system", at))] } : x)),
       };
-      expo = send(expo, k.eventId, e.id, invoices.length ? `Contract signed: ${invoices.length === 1 ? "your invoice is" : "your invoices are"} ready` : "Contract signed: your stand is confirmed", `/exhibitor/${e.id}`);
+      expo = send(ctx, expo, k.eventId, e.id, invoices.length ? `Contract signed: ${invoices.length === 1 ? "your invoice is" : "your invoices are"} ready` : "Contract signed: your stand is confirmed", `/exhibitor/${e.id}`);
       return withExpo(state, expo);
     }
 
@@ -231,10 +232,10 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
       const amount = action.type === "expo/pay" ? owed : action.amount;
       // a payment settles what is owed and no more: an overpayment stays on the bank line for Finance to resolve
       if (owed <= 0 || amount <= 0 || amount > owed || !action.reference.trim()) return state;
-      const pay: Payment = { id: `pay_${expo.payments.length + 1}`, eventId: inv.eventId, invoiceId: inv.id, method: action.type === "expo/pay" ? "M-Pesa" : action.method, reference: action.reference.trim(), amount, at: action.type === "expo/recordPayment" && action.date ? `${action.date} ${at.slice(11)}` : at, by };
+      const pay: Payment = { id: ctx.newId("pay"), eventId: inv.eventId, invoiceId: inv.id, method: action.type === "expo/pay" ? "M-Pesa" : action.method, reference: action.reference.trim(), amount, at: action.type === "expo/recordPayment" && action.date ? `${action.date} ${at.slice(11)}` : at, by };
       expo = { ...expo, payments: [...expo.payments, pay] };
       expo = logBooking(expo, inv.bookingId, `${kes(amount)} received for ${inv.number} by ${pay.method}, ${pay.reference}`, by, at);
-      expo = send(expo, inv.eventId, inv.exhibitorId, `Payment received for ${inv.number}`, `/exhibitor/${inv.exhibitorId}`);
+      expo = send(ctx, expo, inv.eventId, inv.exhibitorId, `Payment received for ${inv.number}`, `/exhibitor/${inv.exhibitorId}`);
       return withExpo(state, expo);
     }
 
@@ -244,7 +245,7 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
       if (!line || !inv || line.matched) return state;
       const owed = invoiceOwed(expo, inv);
       if (line.amount <= 0 || line.amount > owed) return state;
-      const pay: Payment = { id: `pay_${expo.payments.length + 1}`, eventId: inv.eventId, invoiceId: inv.id, method: "Bank", reference: line.reference, amount: line.amount, at: `${line.date} ${at.slice(11)}`, by, bankLineId: line.id };
+      const pay: Payment = { id: ctx.newId("pay"), eventId: inv.eventId, invoiceId: inv.id, method: "Bank", reference: line.reference, amount: line.amount, at: `${line.date} ${at.slice(11)}`, by, bankLineId: line.id };
       expo = { ...expo, payments: [...expo.payments, pay], bankLines: expo.bankLines.map((x) => (x.id === line.id ? { ...x, matched: { invoiceId: inv.id, paymentId: pay.id, by, at } } : x)) };
       expo = logBooking(expo, inv.bookingId, `${kes(line.amount)} matched from the bank statement to ${inv.number}`, by, at);
       return withExpo(state, expo);
@@ -275,7 +276,7 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
         invoices: expo.invoices.map((i) => (voidable.some((v) => v.id === i.id) ? { ...i, state: "Void" as const, voidReason: "Booking cancelled" } : i)),
         bookings: expo.bookings.map((x) => (x.id === k.id ? { ...x, cancelled: { at, by, reason: action.reason.trim() }, history: [...x.history, note(`Cancelled: ${action.reason.trim()}`, by, at)] } : x)),
       };
-      expo = send(expo, k.eventId, k.exhibitorId, "Your booking is cancelled", `/exhibitor/${k.exhibitorId}`);
+      expo = send(ctx, expo, k.eventId, k.exhibitorId, "Your booking is cancelled", `/exhibitor/${k.exhibitorId}`);
       return withExpo(state, expo);
     }
 
@@ -283,7 +284,7 @@ export function expoReducer(state: AppState, action: ExpoAction): AppState {
       const inv = expo.invoices.find((x) => x.id === action.invoiceId);
       if (!inv || invoiceOwed(expo, inv) <= 0) return state;
       expo = logBooking(expo, inv.bookingId, `Reminder sent for ${inv.number}`, by, at);
-      return withExpo(state, send(expo, inv.eventId, inv.exhibitorId, `Reminder: ${inv.number} ${inv.due < at.slice(0, 10) ? "was" : "is"} due ${fmtStamp(inv.due, false)}`, `/exhibitor/${inv.exhibitorId}`, "Email and SMS"));
+      return withExpo(state, send(ctx, expo, inv.eventId, inv.exhibitorId, `Reminder: ${inv.number} ${inv.due < at.slice(0, 10) ? "was" : "is"} due ${fmtStamp(inv.due, false)}`, `/exhibitor/${inv.exhibitorId}`, "Email and SMS"));
     }
   }
   return state;

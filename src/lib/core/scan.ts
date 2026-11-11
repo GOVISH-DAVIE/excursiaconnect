@@ -2,12 +2,10 @@
 import { doorProblem } from "../expo/ops";
 import { can } from "../roles";
 import type { AppState, Delegate, Session, TeamMember } from "../types";
-import { nowTime } from "./clock";
 
 // `waivable`: a deny staff may override with a PIN; a bad, unpaid or unaccredited badge never is (AZ-5)
 export type ScanVerdict = { verdict: "allow" | "deny"; reason?: string; delegate?: Delegate; waivable?: boolean };
 
-/** `now`, a full stamp, is a module's clock; without it the zone windows use the wall clock and the hall door rules are not applied. */
 /* ---------- who may scan, and what a PIN may waive (AZ-1, AZ-5) ---------- */
 
 /** Why a team member cannot work a scanner for this event; undefined when they can. */
@@ -46,7 +44,11 @@ export function entryBar(d: Delegate, state: AppState): string | undefined {
   return undefined;
 }
 
-export function scanVerdict(state: AppState, code: string, zoneId: string, direction: "in" | "out", now?: string): ScanVerdict {
+/**
+ * A zone door's verdict. `now` is "YYYY-MM-DD HH:MM"; `hallDoors` applies the exhibition's door hours, which
+ * only run on a module clock (an event with an Exhibition or Deal Room).
+ */
+export function scanVerdict(state: AppState, code: string, zoneId: string, direction: "in" | "out", now: string, hallDoors = false): ScanVerdict {
   const delegate = state.delegates.find((d) => d.badgeCode.toLowerCase() === code.trim().toLowerCase() || d.id === code.trim());
   if (!delegate) return { verdict: "deny", reason: "Invalid or cancelled badge", waivable: false };
   // the desk comes first: no zone door admits a badge that is not valid, paid and accredited, and no PIN waives it (DE-12, AZ-2)
@@ -61,11 +63,11 @@ export function scanVerdict(state: AppState, code: string, zoneId: string, direc
   // "entitled here, now": a zone with an opening window (the dining hall at lunch) refuses outside it
   if (zone.window) {
     const [from, to] = zone.window.split(/[–-]/).map((t) => t.trim());
-    const hm = now ? now.slice(11, 16) : nowTime();
+    const hm = now.slice(11, 16);
     if (from && to && (hm < from || hm > to)) return { verdict: "deny", reason: `${zone.name} opens ${from} to ${to}`, delegate, waivable: true };
   }
   // the exhibition halls open to stand staff and contractors at their own hours (OPS-2)
-  const door = now ? doorProblem(state, delegate, zoneId, now) : undefined;
+  const door = hallDoors ? doorProblem(state, delegate, zoneId, now) : undefined;
   if (door) return { verdict: "deny", reason: door, delegate, waivable: true };
   const last = delegate.zoneLog.find((l) => l.zoneId === zoneId);
   if (last && last.direction === "in" && last.verdict !== "deny") return { verdict: "deny", reason: "Anti-passback: already inside", delegate, waivable: true };

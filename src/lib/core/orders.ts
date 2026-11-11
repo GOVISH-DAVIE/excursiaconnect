@@ -1,16 +1,18 @@
 /** Money on the core platform: amounts, orders, categories and the organiser payouts. */
+import type { Ctx } from "../ctx";
 import type { AppState, Category, Order, PaymentMethod } from "../types";
 
 export function money(n: number, currency = "KES") {
   return `${currency} ${n.toLocaleString("en-KE")}`;
 }
 
-export function makeOrder(tierPrice: number, currency: "KES" | "USD", commissionPct: number, method: PaymentMethod, delegateId: string, tierId: string, eventId: string, discount = 0): Order {
+/** An order for a ticket. Ids and the date come from `ctx`; on the server the payment reference is the provider's. */
+export function makeOrder(ctx: Pick<Ctx, "now" | "newId">, tierPrice: number, currency: "KES" | "USD", commissionPct: number, method: PaymentMethod, delegateId: string, tierId: string, eventId: string, discount = 0): Order {
   const gross = tierPrice - discount;
   const commission = Math.round(gross * (commissionPct / 100));
   const gatewayFee = method === "bank" ? 0 : Math.round(gross * 0.015);
-  const ref = method === "mpesa" ? `R${Math.random().toString(36).slice(2, 10).toUpperCase()}` : method === "card" ? `PSK_${Math.random().toString(16).slice(2, 10)}` : `INV-${Math.floor(1000 + Math.random() * 9000)}`;
-  return { id: `o_${Date.now()}`, eventId, delegateId, tierId, gross, discount, gatewayFee, commission, net: gross - commission, method, reference: ref, status: method === "bank" ? "pending" : "paid", at: new Date().toISOString().slice(0, 10) };
+  const ref = ctx.newId(method === "mpesa" ? "MP" : method === "card" ? "PSK" : "INV");
+  return { id: ctx.newId("o"), eventId, delegateId, tierId, gross, discount, gatewayFee, commission, net: gross - commission, method, reference: ref, status: method === "bank" ? "pending" : "paid", at: ctx.now.slice(0, 10) };
 }
 
 export const CATEGORIES: Category[] = ["General Delegate", "Speaker", "Panelist", "Sponsor", "Exhibitor", "VIP"];

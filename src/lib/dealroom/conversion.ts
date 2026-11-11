@@ -2,10 +2,11 @@
  * Cut 3: what happens to an opportunity after the summit (PRD Conversion tracking). The rules live in
  * `applyStep`, which both staff actions and the seeded timeline go through, so neither can skip one.
  */
+import type { Ctx } from "../ctx";
 import type { AppState } from "../types";
 import { CLOSE_REASONS, OPEN_STAGES, acting, drCan, oppOpen, oppOverdue, oppParties, staffName } from "./logic";
 import type { CloseReason, DealRoomState, DrDocument, DrOpportunity, DrOppOutcome, DrScriptStep, OppStage, OutcomeKind } from "./types";
-import { portal, send, uid, withDr } from "./util";
+import { portal, send, withDr } from "./util";
 
 /** The tiers that rest on a signed document: a signed commitment, financing approved but not disbursed, and deployed. */
 export const SIGNED: OutcomeKind[] = ["Signed commitment", "Approved, not disbursed", "Deployed"];
@@ -36,12 +37,12 @@ function patchOpp(dr: DealRoomState, id: string, fn: (o: DrOpportunity) => DrOpp
 }
 
 /** A message stamped at the moment it was due, not the moment the clock was moved past it. */
-function sendAt(dr: DealRoomState, at: string, eventId: string, to: string, subject: string, link: string) {
-  return { ...send({ ...dr, clock: at }, eventId, to, subject, link, "Email"), clock: dr.clock };
+function sendAt(ctx: Ctx, dr: DealRoomState, at: string, eventId: string, to: string, subject: string, link: string) {
+  return send({ ...ctx, now: at }, dr, eventId, to, subject, link, "Email");
 }
 
 /** One change to an opportunity, or null when a rule refuses it. */
-export function applyStep(dr: DealRoomState, o: DrOpportunity, step: DrScriptStep, by: string, at: string): DealRoomState | null {
+export function applyStep(ctx: Ctx, dr: DealRoomState, o: DrOpportunity, step: DrScriptStep, by: string, at: string): DealRoomState | null {
   const day = at.slice(0, 10);
   const log = (x: DrOpportunity, what: string) => ({ ...x, history: [...x.history, { at, by, what }] });
   switch (step.kind) {
@@ -60,14 +61,14 @@ export function applyStep(dr: DealRoomState, o: DrOpportunity, step: DrScriptSte
       if (SIGNED.includes(x.kind) && (!x.amount || x.amount <= 0 || !x.currency)) return null;
       if (x.kind === "Signed commitment" && !x.instrument) return null;
       const what = TIER_WORDS[x.kind];
-      return patchOpp(dr, o.id, (y) => log({ ...y, outcomes: [...y.outcomes, { ...x, evidence: x.evidence.trim(), id: uid("oo", at) + y.outcomes.length, by, at }] }, `Recorded ${what}, dated ${x.date}`));
+      return patchOpp(dr, o.id, (y) => log({ ...y, outcomes: [...y.outcomes, { ...x, evidence: x.evidence.trim(), id: ctx.newId("oo"), by, at }] }, `Recorded ${what}, dated ${x.date}`));
     }
     case "update": {
       if (!step.text.trim()) return null;
       let answered = false;
       return patchOpp(dr, o.id, (y) => ({
         ...y,
-        updates: [...y.updates, { id: uid("up", at) + y.updates.length, from: step.from, text: step.text.trim(), at, by, doc: step.doc }],
+        updates: [...y.updates, { id: ctx.newId("up"), from: step.from, text: step.text.trim(), at, by, doc: step.doc }],
         // a participant's reply answers the oldest request still open for their side
         requests: y.requests.map((r) => (!answered && step.from !== "owner" && r.to === step.from && !r.answeredAt ? ((answered = true), { ...r, answeredAt: at }) : r)),
       }));
@@ -89,15 +90,15 @@ export function applyStep(dr: DealRoomState, o: DrOpportunity, step: DrScriptSte
       if (!oppOpen(o)) return null;
       const app = oppParties(dr, o)[step.to];
       if (!app) return null;
-      const next = patchOpp(dr, o.id, (y) => log({ ...y, requests: [...y.requests, { id: uid("rq", at) + y.requests.length, to: step.to, at, by }] }, `Status update requested from the ${step.to}`));
-      return sendAt(next, at, o.eventId, app.id, `The Deal Room team asks for an update, ${new Date(day + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}`, portal(app));
+      const next = patchOpp(dr, o.id, (y) => log({ ...y, requests: [...y.requests, { id: ctx.newId("rq"), to: step.to, at, by }] }, `Status update requested from the ${step.to}`));
+      return sendAt(ctx, next, at, o.eventId, app.id, `The Deal Room team asks for an update, ${new Date(day + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}`, portal(app));
     }
   }
 }
 
-export function drConvReducer(state: AppState, action: DrConvAction): AppState {
+export function drConvReducer(state: AppState, action: DrConvAction, ctx: Ctx): AppState {
   const dr = state.dealRoom;
-  const at = dr.clock;
+  const at = ctx.now;
   const me = acting(dr);
 
   if (action.type === "dr/retention") {
@@ -112,7 +113,7 @@ export function drConvReducer(state: AppState, action: DrConvAction): AppState {
     let next = dr;
     for (const id of action.oppIds) {
       const o = next.opportunities.find((x) => x.id === id);
-      const r = o && applyStep(next, o, { kind: "review", note: action.note }, me!.id, at);
+      const r = o && applyStep(ctx, next, o, { kind: "review", note: action.note }, me!.id, at);
       if (r) next = r;
     }
     return withDr(state, next);
@@ -125,9 +126,9 @@ export function drConvReducer(state: AppState, action: DrConvAction): AppState {
   if (action.type === "dr/oppReply") {
     const app = oppParties(dr, o)[action.side];
     if (!app) return state;
-    let next = applyStep(dr, o, { kind: "update", from: action.side, text: action.text, doc: action.doc }, app.id, at);
+    let next = applyStep(ctx, dr, o, { kind: "update", from: action.side, text: action.text, doc: action.doc }, app.id, at);
     if (!next) return state;
-    next = send(next, o.eventId, o.owner, `A participant sent an update on an opportunity you own`, `/dealroom/opportunities/${o.id}`, "Email");
+    next = send(ctx, next, o.eventId, o.owner, `A participant sent an update on an opportunity you own`, `/dealroom/opportunities/${o.id}`, "Email");
     return withDr(state, next);
   }
 
@@ -138,30 +139,30 @@ export function drConvReducer(state: AppState, action: DrConvAction): AppState {
   let next: DealRoomState | null = null;
   switch (action.type) {
     case "dr/oppStage":
-      next = applyStep(dr, o, { kind: "stage", stage: action.stage, evidence: action.evidence }, me!.id, at);
+      next = applyStep(ctx, dr, o, { kind: "stage", stage: action.stage, evidence: action.evidence }, me!.id, at);
       break;
     case "dr/oppOutcome":
-      next = applyStep(dr, o, { kind: "outcome", outcome: action.outcome }, me!.id, at);
+      next = applyStep(ctx, dr, o, { kind: "outcome", outcome: action.outcome }, me!.id, at);
       break;
     case "dr/oppNext":
-      next = applyStep(dr, o, { kind: "next", nextAction: action.nextAction, due: action.due }, me!.id, at);
+      next = applyStep(ctx, dr, o, { kind: "next", nextAction: action.nextAction, due: action.due }, me!.id, at);
       break;
     case "dr/oppNote":
-      next = applyStep(dr, o, { kind: "update", from: "owner", text: action.text, doc: action.doc }, me!.id, at);
+      next = applyStep(ctx, dr, o, { kind: "update", from: "owner", text: action.text, doc: action.doc }, me!.id, at);
       break;
     case "dr/oppClose":
-      next = applyStep(dr, o, { kind: "close", reason: action.reason, note: action.note }, me!.id, at);
+      next = applyStep(ctx, dr, o, { kind: "close", reason: action.reason, note: action.note }, me!.id, at);
       break;
     case "dr/oppRequest":
       next = dr;
-      for (const to of action.to) next = applyStep(next, next.opportunities.find((x) => x.id === o.id)!, { kind: "request", to }, me!.id, at) ?? next;
+      for (const to of action.to) next = applyStep(ctx, next, next.opportunities.find((x) => x.id === o.id)!, { kind: "request", to }, me!.id, at) ?? next;
       if (next === dr) next = null;
       break;
     case "dr/oppReassign": {
       const to = dr.staff.find((s) => s.id === action.owner && s.active && s.role !== "Operations");
       if (!drCan(me, "conversion") || !to || to.id === o.owner || !oppOpen(o) || !action.reason.trim()) return state;
       next = patchOpp(dr, o.id, (y) => ({ ...y, owner: to.id, history: [...y.history, { at, by: me!.id, what: `Reassigned from ${staffName(dr, o.owner)} to ${to.name}: ${action.reason.trim()}` }] }));
-      next = send(next, o.eventId, to.id, "A Deal Room opportunity is reassigned to you", `/dealroom/opportunities/${o.id}`, "Email");
+      next = send(ctx, next, o.eventId, to.id, "A Deal Room opportunity is reassigned to you", `/dealroom/opportunities/${o.id}`, "Email");
       break;
     }
   }
@@ -172,13 +173,13 @@ export function drConvReducer(state: AppState, action: DrConvAction): AppState {
  * Moving the clock from `from` to `to`: the seeded timeline plays its steps in order, each owner gets the
  * weekly digest for the last Monday passed, and the lead gets a conversion report for each month that ended.
  */
-export function playForward(dr: DealRoomState, events: AppState["events"], from: string, to: string): DealRoomState {
+export function playForward(ctx: Ctx, dr: DealRoomState, events: AppState["events"], from: string, to: string): DealRoomState {
   const script = dr.script ?? [];
   const now = script.filter((s) => s.at > from && s.at <= to).sort((a, b) => a.at.localeCompare(b.at));
   let next: DealRoomState = { ...dr, script: script.filter((s) => !(s.at > from && s.at <= to)) };
   for (const s of now) {
     const o = next.opportunities.find((x) => x.id === s.oppId);
-    const r = o && applyStep(next, o, s.step, s.by, s.at);
+    const r = o && applyStep(ctx, next, o, s.step, s.by, s.at);
     if (r) next = r;
   }
   let sent = false;
@@ -197,7 +198,7 @@ export function playForward(dr: DealRoomState, events: AppState["events"], from:
       if (iso.endsWith("-01") && stamp > from && stamp <= to && iso > ev.endDate) {
         const prev = new Date(iso + "T12:00:00Z");
         prev.setUTCMonth(prev.getUTCMonth() - 1);
-        next = sendAt(next, stamp, c.eventId, "st_lead", `Monthly conversion report, ${MONTH(prev.toISOString().slice(0, 7))}`, "/dealroom/reports?tab=Conversion");
+        next = sendAt(ctx, next, stamp, c.eventId, "st_lead", `Monthly conversion report, ${MONTH(prev.toISOString().slice(0, 7))}`, "/dealroom/reports?tab=Conversion");
         sent = true;
       }
     }
@@ -206,7 +207,7 @@ export function playForward(dr: DealRoomState, events: AppState["events"], from:
       for (const owner of owners) {
         const mine = next.opportunities.filter((o) => o.owner === owner && oppOpen(o));
         const late = mine.filter((o) => oppOverdue(o, `${monday} 08:00`)).length;
-        next = sendAt(next, `${monday} 08:00`, c.eventId, owner, `Weekly digest, ${Number(monday.slice(8))} ${MONTH(monday.slice(0, 7)).split(" ")[0]}: ${mine.length} open opportunities, ${late} overdue`, "/dealroom/opportunities");
+        next = sendAt(ctx, next, `${monday} 08:00`, c.eventId, owner, `Weekly digest, ${Number(monday.slice(8))} ${MONTH(monday.slice(0, 7)).split(" ")[0]}: ${mine.length} open opportunities, ${late} overdue`, "/dealroom/opportunities");
         sent = true;
       }
     }

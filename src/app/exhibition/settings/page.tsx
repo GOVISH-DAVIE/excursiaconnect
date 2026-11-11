@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { PageHeader, Section, Tabs } from "@/components/ui";
 import { boothStatus, DEFAULT_INCLUDES, doorAlong, doorOn, hallProblems, includesOf, kes, passLine, resizeHall, validateExpo, wallOf, WALLS, type Wall } from "@/lib/expo/logic";
-import { expoReducer } from "@/lib/expo/reducer";
+import { reducer } from "@/lib/store";
 import type { BoothCategory, BoothType, ExpoConfig, Exhibitor, Hall, HallFeature } from "@/lib/expo/types";
 import type { AppState } from "@/lib/types";
 import { fmtStamp } from "@/lib/time";
@@ -280,7 +280,7 @@ function Checks() {
     const base: AppState = { ...state, expo: { ...expo, actingMemberId: "u_staff2", exhibitors: [...expo.exhibitors, ...fake] } };
     const burst = (target: (i: number) => string) => {
       let s = base;
-      fake.forEach((e, i) => (s = expoReducer(s, { type: "expo/hold", id: `bk_test${i}`, exhibitorId: e.id, boothIds: [target(i)] })));
+      fake.forEach((e, i) => (s = reducer(s, { type: "expo/hold", id: `bk_test${i}`, exhibitorId: e.id, boothIds: [target(i)] })));
       return s;
     };
     const one = burst(() => free[0].id);

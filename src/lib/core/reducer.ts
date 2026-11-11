@@ -3,13 +3,13 @@
  * scanning, team and payouts. Pure: no React, no browser storage. The Deal Room and Exhibition reducers are
  * reached through it. Prototype-only actions (reset, hydrate) are handled by the client store, not here.
  */
-import { overlaps } from "../time";
 import { drReducer, type DrAction } from "../dealroom/reducer";
 import { expoReducer, type ExpoAction } from "../expo/reducer";
 import { deskRefusal } from "../expo/ops";
 import { meetingInRoom } from "../dealroom/logic";
 import type { AppState, Capability, Delegate, EventState, FormField, Order, PaymentMethod, Role, Room, Session, SpeakerProfile, Sponsor, TeamMember, Tier, Zone } from "../types";
-import { nowTime, stamp } from "./clock";
+import { addMinutes, overlaps } from "../time";
+import type { Ctx } from "../ctx";
 import { makeOrder, payoutsFor } from "./orders";
 import { entryBar, overrider, scanOperator, scanRefusal } from "./scan";
 
@@ -74,9 +74,11 @@ export type Action =
   | { type: "removeRoom"; roomId: string }
   | { type: "setBrand"; eventId: string; brand: AppState["events"][number]["brand"]; tagline?: string };
 
-export function reducer(state: AppState, action: Action): AppState {
-  if (action.type.startsWith("dr/")) return drReducer(state, action as DrAction);
-  if (action.type.startsWith("expo/")) return expoReducer(state, action as ExpoAction);
+export function reducer(state: AppState, action: Action, ctx: Ctx): AppState {
+  if (action.type.startsWith("dr/")) return drReducer(state, action as DrAction, ctx);
+  if (action.type.startsWith("expo/")) return expoReducer(state, action as ExpoAction, ctx);
+  // "HH:MM" of now, for the logs that keep a time of day
+  const hm = ctx.now.slice(11, 16);
   switch (action.type) {
     case "register": {
       const tiers = state.tiers.map((t) => (t.id === action.delegate.tierId && action.delegate.status === "Confirmed" ? { ...t, sold: t.sold + 1 } : t));
@@ -105,7 +107,7 @@ export function reducer(state: AppState, action: Action): AppState {
           const next = restore ? "Live" : action.state;
           const addOn = action.state === "Approved" && action.pricing?.dealRoom?.enabled ? `, with the Deal Room add-on at KES ${action.pricing.dealRoom.addOnPrice.toLocaleString("en-KE")} and ${action.pricing.dealRoom.deskStaff} desk staff a day` : "";
           const what = (restore ? "Approved on the new terms; registration continues" : action.state + (action.note ? `: ${action.note}` : "")) + addOn;
-          return { ...e, ...action.pricing, state: next, stateBefore: leavingLive ? "Live" : restore || action.state === "Live" ? undefined : e.stateBefore, reviewNote: action.note ?? e.reviewNote, history: [...(e.history ?? []), { at: stamp(), what }] };
+          return { ...e, ...action.pricing, state: next, stateBefore: leavingLive ? "Live" : restore || action.state === "Live" ? undefined : e.stateBefore, reviewNote: action.note ?? e.reviewNote, history: [...(e.history ?? []), { at: ctx.now, what }] };
         }),
         // the pending price takes effect on approval; a rejection or a request for changes drops it
         tiers: state.tiers.map((t) => {
@@ -119,7 +121,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "addEvent":
       return { ...state, events: [...state.events, action.event] };
     case "closeEvent":
-      return { ...state, events: state.events.map((e) => (e.id === action.eventId ? { ...e, state: "Closed", closedAt: stamp(), history: [...(e.history ?? []), { at: stamp(), what: "Closed; post-event report issued" }] } : e)) };
+      return { ...state, events: state.events.map((e) => (e.id === action.eventId ? { ...e, state: "Closed", closedAt: ctx.now, history: [...(e.history ?? []), { at: ctx.now, what: "Closed; post-event report issued" }] } : e)) };
     case "setProfileLock":
       return { ...state, events: state.events.map((e) => (e.id === action.eventId ? { ...e, profileLocked: action.locked } : e)) };
     case "importDelegates": {
@@ -150,7 +152,7 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "releaseWaitlist": {
       // OS-7: the place is held for 24 hours; the delegate pays from the badge, or the seat goes to the next in line
-      const until = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
+      const until = addMinutes(ctx.now, 24 * 60);
       return { ...state, delegates: state.delegates.map((d) => (d.id === action.delegateId && d.status === "Waitlisted" ? { ...d, status: "Awaiting payment", offerExpires: until } : d)) };
     }
     case "expireOffer":
@@ -164,7 +166,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const hasOrder = state.orders.some((o) => o.delegateId === d.id);
       const tier = state.tiers.find((t) => t.id === d.tierId);
       const event = state.events.find((e) => e.id === d.eventId);
-      const newOrder: Order | null = !hasOrder && tier && event && tier.price > 0 ? makeOrder(tier.price, tier.currency, event.commissionPct, action.method ?? "bank", d.id, tier.id, event.id) : null;
+      const newOrder: Order | null = !hasOrder && tier && event && tier.price > 0 ? makeOrder(ctx, tier.price, tier.currency, event.commissionPct, action.method ?? "bank", d.id, tier.id, event.id) : null;
       return {
         ...state,
         delegates: state.delegates.map((x) => (x.id === d.id ? { ...x, status: "Confirmed", offerExpires: undefined } : x)),
@@ -177,7 +179,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "setRateCard":
       return { ...state, organisers: state.organisers.map((o) => (o.id === action.organiserId ? { ...o, licenceFee: action.licenceFee, commissionPct: action.commissionPct } : o)) };
     case "resolveException":
-      return { ...state, exceptions: state.exceptions.map((x) => (x.ref === action.ref ? { ...x, resolved: { at: stamp(), how: action.how } } : x)) };
+      return { ...state, exceptions: state.exceptions.map((x) => (x.ref === action.ref ? { ...x, resolved: { at: ctx.now, how: action.how } } : x)) };
     case "runPayouts": {
       // PA-7: one key per organiser and period; a held organiser (KYC pending) or a zero balance is never paid
       const ok = action.payoutIds.filter((key) => {
@@ -202,7 +204,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const tiers = exists ? state.tiers.map((t) => (t.id === action.tier.id ? saved : t)) : [...state.tiers, action.tier];
       const events = state.events.map((e) =>
         e.id === action.tier.eventId && e.state === "Live" && moneyChanged
-          ? { ...e, state: "Under review" as const, stateBefore: "Live" as const, reviewNote: `${action.tier.name} price changed from ${old!.price} to ${action.tier.price}; registration continues on the approved terms`, history: [...(e.history ?? []), { at: stamp(), what: `Under review: ${action.tier.name} price changed to ${action.tier.currency} ${action.tier.price}` }] }
+          ? { ...e, state: "Under review" as const, stateBefore: "Live" as const, reviewNote: `${action.tier.name} price changed from ${old!.price} to ${action.tier.price}; registration continues on the approved terms`, history: [...(e.history ?? []), { at: ctx.now, what: `Under review: ${action.tier.name} price changed to ${action.tier.currency} ${action.tier.price}` }] }
           : e,
       );
       return { ...state, tiers, events };
@@ -244,7 +246,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const refusal = deskRefusal(state, who);
       const approver = action.override?.trim() ? overrider(state, action.pin ?? "", who.eventId) : undefined;
       if (refusal && !(refusal.waivable && approver)) return state;
-      const at = action.at ?? nowTime();
+      const at = action.at ?? hm;
       const expo =
         refusal && who.exhibitorId && approver
           ? { ...state.expo, overrides: [...state.expo.overrides, { id: `ov_${state.expo.overrides.length + 1}`, eventId: who.eventId, delegateId: who.id, exhibitorId: who.exhibitorId, reason: `${action.override!.trim()} (${refusal.reason})`, day: action.day, at: `${state.expo.clock.slice(0, 11)}${at}`, by: approver.id, operator: op.member.id }] }
@@ -283,8 +285,8 @@ export function reducer(state: AppState, action: Action): AppState {
             ? {
                 ...d,
                 status: action.verdict !== "deny" && d.status === "Confirmed" ? "Checked in" : d.status,
-                checkIns: action.verdict !== "deny" && !d.checkIns.some((c) => c.day === action.day) ? [...d.checkIns, { day: action.day, at: action.at ?? nowTime() }] : d.checkIns,
-                zoneLog: [{ zoneId: action.zoneId, direction: action.direction, at: action.at ?? nowTime(), verdict: action.verdict, reason: action.reason, by: op.member.id, approvedBy: approver?.id }, ...d.zoneLog],
+                checkIns: action.verdict !== "deny" && !d.checkIns.some((c) => c.day === action.day) ? [...d.checkIns, { day: action.day, at: action.at ?? hm }] : d.checkIns,
+                zoneLog: [{ zoneId: action.zoneId, direction: action.direction, at: action.at ?? hm, verdict: action.verdict, reason: action.reason, by: op.member.id, approvedBy: approver?.id }, ...d.zoneLog],
               }
             : d,
         ),
@@ -298,7 +300,7 @@ export function reducer(state: AppState, action: Action): AppState {
       if (action.verdict === "override" && (!approver || entryBar(who, state))) return state;
       return {
         ...state,
-        delegates: state.delegates.map((d) => (d.id === action.delegateId ? { ...d, roomLog: [{ roomId: action.roomId, sessionId: action.sessionId, day: action.day, at: nowTime(), verdict: action.verdict, reason: action.reason, by: op.member.id, approvedBy: approver?.id }, ...(d.roomLog ?? [])] } : d)),
+        delegates: state.delegates.map((d) => (d.id === action.delegateId ? { ...d, roomLog: [{ roomId: action.roomId, sessionId: action.sessionId, day: action.day, at: hm, verdict: action.verdict, reason: action.reason, by: op.member.id, approvedBy: approver?.id }, ...(d.roomLog ?? [])] } : d)),
       };
     }
     case "enrol": {
@@ -322,7 +324,7 @@ export function reducer(state: AppState, action: Action): AppState {
         delegates: state.delegates.map((d) => (d.id === action.hostId && d.slots ? { ...d, slots: d.slots.map((s, i) => (i === action.slotIndex ? { ...s, bookedBy: action.byId } : s)) } : d)),
       };
     case "message":
-      return { ...state, messages: [...state.messages, { id: `m_${Date.now()}`, from: action.from, to: action.to, body: action.body, at: nowTime() }] };
+      return { ...state, messages: [...state.messages, { id: ctx.newId("m"), from: action.from, to: action.to, body: action.body, at: hm }] };
     case "updateDelegate":
       return { ...state, delegates: state.delegates.map((d) => (d.id === action.delegateId ? { ...d, ...action.patch, ...(d.category === "Deal Room" ? { bookable: false } : {}) } : d)) };
     case "setCurrentDelegate":
@@ -342,7 +344,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "verifyKyc":
       return { ...state, organisers: state.organisers.map((o) => (o.id === action.organiserId ? { ...o, kycStatus: "Verified" } : o)) };
     case "signDpa":
-      return { ...state, organisers: state.organisers.map((o) => (o.id === action.organiserId ? { ...o, dpaSigned: { by: action.by, at: stamp() } } : o)) };
+      return { ...state, organisers: state.organisers.map((o) => (o.id === action.organiserId ? { ...o, dpaSigned: { by: action.by, at: ctx.now } } : o)) };
     case "refund": {
       // the seat goes back to the tier, so the waitlist can take it (OS-7)
       const d = state.delegates.find((x) => x.id === action.delegateId);

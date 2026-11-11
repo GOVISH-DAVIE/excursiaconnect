@@ -3,6 +3,7 @@
  * issues a platform badge and meetings share rooms with the programme. Every rule is enforced here;
  * a refused action returns the state unchanged and the screen explains why beforehand.
  */
+import type { Ctx } from "../ctx";
 import type { AppState, Delegate } from "../types";
 import { addMinutes } from "../time";
 import {
@@ -35,7 +36,7 @@ import type {
   Layer,
   Readiness,
 } from "./types";
-import { exception, note, patchApp, portal, send, uid, withDr } from "./util";
+import { exception, note, patchApp, portal, send, withDr } from "./util";
 import { drConvReducer, playForward, type DrConvAction } from "./conversion";
 import { drMeetReducer, type DrMeetAction } from "./meetings";
 import { drSessionReducer, type DrSessionAction } from "./sessions";
@@ -84,7 +85,7 @@ export type DrAction =
   | { type: "dr/exception"; kind: DrException["kind"]; reason: string; ref: string };
 
 /** An approved seeker or a verified provider becomes a platform delegate with a Deal Room badge. */
-function issueBadge(state: AppState, app: DrApplication): AppState {
+function issueBadge(ctx: Ctx, state: AppState, app: DrApplication): AppState {
   if (app.delegateId) {
     // a later decision that qualifies again revives the same badge
     return { ...state, delegates: state.delegates.map((d) => (d.id === app.delegateId ? { ...d, status: d.accredited ? "Checked in" : "Confirmed", cancelled: false } : d)) };
@@ -118,7 +119,7 @@ function issueBadge(state: AppState, app: DrApplication): AppState {
   };
 }
 
-function revokeBadge(state: AppState, app: DrApplication): AppState {
+function revokeBadge(ctx: Ctx, state: AppState, app: DrApplication): AppState {
   if (!app.delegateId) return state;
   return { ...state, delegates: state.delegates.map((d) => (d.id === app.delegateId ? { ...d, status: "Cancelled", cancelled: true } : d)) };
 }
@@ -131,9 +132,9 @@ const STAFF_ACTIONS = new Set([
 
 /* ---------- the reducer ---------- */
 
-export function drReducer(state: AppState, action: DrAction): AppState {
+export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState {
   let dr = state.dealRoom;
-  const at = dr.clock;
+  const at = ctx.now;
   const me = acting(dr);
 
   // after the conversion end date the Deal Room is read-only (DA-8); only the clock and the switcher still move
@@ -155,7 +156,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
         for (let d = ev.startDate; d <= ev.endDate; d = new Date(new Date(d + "T12:00:00Z").getTime() + 86400000).toISOString().slice(0, 10)) {
           const seven = `${d} 19:00`;
           // stamped at 19:00 that day, even when the clock jumps past several evenings at once
-          if (dr.clock < seven && action.clock >= seven) next = { ...send({ ...next, clock: seven }, c.eventId, "st_lead", `Daily Deal Room report, ${new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}`, `/dealroom/reports?day=${d}`, "Email"), clock: next.clock };
+          if (dr.clock < seven && action.clock >= seven) next = send({ ...ctx, now: seven }, next, c.eventId, "st_lead", `Daily Deal Room report, ${new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}`, `/dealroom/reports?day=${d}`, "Email");
         }
       }
       // an approved seeker who has not paid gets one reminder, the configured days after the link went out
@@ -165,17 +166,17 @@ export function drReducer(state: AppState, action: DrAction): AppState {
         const due = addMinutes(a.fee!.sentAt, c.seekerFee.reminderDays * 1440);
         if (dr.clock < due && action.clock >= due) {
           next = patchApp(next, a.id, (x) => note({ ...x, fee: { ...x.fee!, reminderAt: due } }, "system", "Payment reminder sent", due));
-          next = { ...send({ ...next, clock: due }, a.eventId, a.id, `Reminder: pay the ${feeLabel(a.fee!)} Deal Room fee to be matched and get your badge`, `/dr/${a.id}?pay=1`, "Email and SMS"), clock: next.clock };
+          next = send({ ...ctx, now: due }, next, a.eventId, a.id, `Reminder: pay the ${feeLabel(a.fee!)} Deal Room fee to be matched and get your badge`, `/dr/${a.id}?pay=1`, "Email and SMS");
         }
       }
       // after the summit: the seeded opportunities move on, owners get weekly digests, the lead a monthly report
-      next = playForward(next, state.events, dr.clock, action.clock);
+      next = playForward(ctx, next, state.events, dr.clock, action.clock);
       next = { ...next, outbox: [...next.outbox].sort((a, b) => b.at.localeCompare(a.at)) };
       // tracking ends on the conversion end date: the Deal Room becomes read-only and the pack goes to the lead (DA-8)
       for (const c of Object.values(dr.configs))
         if (!next.archivedAt && action.clock.slice(0, 10) > c.rules.conversionEnd) {
           next = { ...next, archivedAt: `${c.rules.conversionEnd} 23:59` };
-          next = { ...send({ ...next, clock: next.archivedAt! }, c.eventId, "st_lead", "The Deal Room is archived: the post-summit pack is ready", "/dealroom/opportunities?tab=Export", "Email"), clock: next.clock };
+          next = send({ ...ctx, now: next.archivedAt! }, next, c.eventId, "st_lead", "The Deal Room is archived: the post-summit pack is ready", "/dealroom/opportunities?tab=Export", "Email");
         }
       return withDr(state, next);
     }
@@ -189,7 +190,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
       const structural = ["rubric", "matching", "missions"].some((k) => k in action.patch);
       const afterFreeze = at.slice(0, 10) > c.freezeDate;
       dr = { ...dr, configs: { ...dr.configs, [action.eventId]: { ...c, ...action.patch, log: [...c.log, { at, by: me!.id, what: action.note }] } } };
-      if (structural && afterFreeze) dr = exception(dr, action.eventId, me!.id, "Change after freeze", action.note, "Settings");
+      if (structural && afterFreeze) dr = exception(ctx, dr, action.eventId, me!.id, "Change after freeze", action.note, "Settings");
       return withDr(state, dr);
     }
 
@@ -224,7 +225,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
           at,
         ),
       );
-      dr = send(dr, app.eventId, app.id, `Application received, reference ${ref}`, portal(app));
+      dr = send(ctx, dr, app.eventId, app.id, `Application received, reference ${ref}`, portal(app));
       return withDr(state, dr);
     }
 
@@ -239,7 +240,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
         const a = dr.apps.find((x) => x.id === id);
         if (!a || (a.status !== "Lead" && a.status !== "Invited")) continue;
         dr = patchApp(dr, id, (x) => note({ ...x, status: "Invited", statusAt: at, invite: { token: x.invite?.token ?? id, sentAt: at } }, me!.id, "Invitation sent", at));
-        dr = send(dr, a.eventId, id, "Your invitation to apply to the Deal Room", `/e/connected-africa-3/deal-room/apply?invite=${a.invite?.token ?? id}`);
+        dr = send(ctx, dr, a.eventId, id, "Your invitation to apply to the Deal Room", `/e/connected-africa-3/deal-room/apply?invite=${a.invite?.token ?? id}`);
       }
       return withDr(state, dr);
     }
@@ -263,7 +264,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
       // a score rests on a document; without one it needs a written note (PRD Qualification req. 2)
       if (action.layer !== "eligibility" && !action.docId && !action.note?.trim()) return state;
       if (action.score !== undefined && (action.score < 0 || action.score > 100)) return state;
-      const entry = { id: uid("as", at) + app.assessments.length, layer: action.layer, criterion: action.criterion, pass: action.pass, score: action.score, docId: action.docId, note: action.note, by: me!.id, at };
+      const entry = { id: ctx.newId("as"), layer: action.layer, criterion: action.criterion, pass: action.pass, score: action.score, docId: action.docId, note: action.note, by: me!.id, at };
       return withDr(
         state,
         patchApp(dr, app.id, (a) => ({
@@ -278,11 +279,11 @@ export function drReducer(state: AppState, action: DrAction): AppState {
     case "dr/requestInfo": {
       if (!app || !cfg || !drCan(me, "review") || app.status !== "In review" || !action.questions.filter(Boolean).length) return state;
       dr = patchApp(dr, app.id, (a) =>
-        note({ ...a, status: "Information requested", statusAt: at, rfis: [...a.rfis, { id: uid("rfi", at), questions: action.questions.filter(Boolean), docs: action.docs, by: me!.id, at }] }, me!.id, `Information requested: ${action.questions.filter(Boolean).length} question${action.questions.length > 1 ? "s" : ""}`, at),
+        note({ ...a, status: "Information requested", statusAt: at, rfis: [...a.rfis, { id: ctx.newId("rfi"), questions: action.questions.filter(Boolean), docs: action.docs, by: me!.id, at }] }, me!.id, `Information requested: ${action.questions.filter(Boolean).length} question${action.questions.length > 1 ? "s" : ""}`, at),
       );
       const due = new Date(at.slice(0, 10) + "T12:00:00Z");
       due.setUTCDate(due.getUTCDate() + cfg.rules.rfiDays);
-      dr = send(dr, app.eventId, app.id, `Information requested on your application, reply by ${due.toISOString().slice(0, 10)}`, portal(app));
+      dr = send(ctx, dr, app.eventId, app.id, `Information requested on your application, reply by ${due.toISOString().slice(0, 10)}`, portal(app));
       return withDr(state, dr);
     }
 
@@ -304,7 +305,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
           at,
         ),
       );
-      if (a_assignee(app)) dr = send(dr, app.eventId, app.assignee!, `${app.ref} responded to your request`, `/dealroom/applications/${app.id}`, "Email");
+      if (a_assignee(app)) dr = send(ctx, dr, app.eventId, app.assignee!, `${app.ref} responded to your request`, `/dealroom/applications/${app.id}`, "Email");
       return withDr(state, dr);
     }
 
@@ -325,16 +326,16 @@ export function drReducer(state: AppState, action: DrAction): AppState {
           at,
         ),
       );
-      dr = exception(dr, app.eventId, me.id, "Expired request", `${action.how}: ${action.note}`, app.ref ?? app.id);
+      dr = exception(ctx, dr, app.eventId, me.id, "Expired request", `${action.how}: ${action.note}`, app.ref ?? app.id);
       if (action.how === "Referred" || action.how === "Declined") {
-        return drReducer(withDr(state, dr), { type: "dr/decide", appId: app.id, decision: action.how, reason: `No response to the information request. ${action.note}`, conditions: [] });
+        return drReducer(withDr(state, dr), { type: "dr/decide", appId: app.id, decision: action.how, reason: `No response to the information request. ${action.note}`, conditions: [] }, ctx);
       }
       return withDr(state, dr);
     }
 
     case "dr/recommend": {
       if (!app || !drCan(me, "review") || app.status !== "In review" || !action.reason.trim()) return state;
-      return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, recommendations: [...a.recommendations, { id: uid("rec", at), decision: action.decision, reason: action.reason, by: me!.id, at }] }, me!.id, `Recommended: ${action.decision}`, at)));
+      return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, recommendations: [...a.recommendations, { id: ctx.newId("rec"), decision: action.decision, reason: action.reason, by: me!.id, at }] }, me!.id, `Recommended: ${action.decision}`, at)));
     }
 
     case "dr/decide": {
@@ -345,10 +346,10 @@ export function drReducer(state: AppState, action: DrAction): AppState {
       const usd = app.ask ? (app.ask.currency === "USD" ? app.ask.amount : app.ask.amount / 130) : 0;
       const needsSecond = (action.decision === "Declined" && cfg.secondReview.decline) || usd > cfg.secondReview.askAbove;
       const entry = {
-        id: uid("dec", at),
+        id: ctx.newId("dec"),
         decision: action.decision,
         reason: action.reason,
-        conditions: action.conditions.filter((c) => c.text.trim()).map((c, i) => ({ id: `${uid("cond", at)}${i}`, text: c.text, due: c.due })),
+        conditions: action.conditions.filter((c) => c.text.trim()).map((c, i) => ({ id: `${ctx.newId("cond")}${i}`, text: c.text, due: c.due })),
         by: me!.id,
         at,
         needsSecond: needsSecond || undefined,
@@ -357,7 +358,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
         note({ ...a, decisions: [...a.decisions, entry], status: needsSecond ? a.status : "Decided", statusAt: needsSecond ? a.statusAt : at, reReview: needsSecond ? a.reReview : undefined }, me!.id, needsSecond ? `Decided ${action.decision}, waiting for a second decider` : `Decided: ${action.decision}`, at),
       );
       if (needsSecond) return withDr(state, dr);
-      return settleDecision(withDr(state, dr), app.id);
+      return settleDecision(ctx, withDr(state, dr), app.id);
     }
 
     case "dr/confirmSecond": {
@@ -365,7 +366,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
       const p = pendingSecond(app);
       if (!p || p.by === me!.id) return state; // the second decider is a different person
       dr = patchApp(dr, app.id, (a) => note({ ...a, status: "Decided", statusAt: at, reReview: undefined, decisions: a.decisions.map((d) => (d.id === p.id ? { ...d, second: { by: me!.id, at } } : d)) }, me!.id, `Second decider confirmed: ${p.decision}`, at));
-      return settleDecision(withDr(state, dr), app.id);
+      return settleDecision(ctx, withDr(state, dr), app.id);
     }
 
     case "dr/meetCondition": {
@@ -384,7 +385,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
       if (!app || !cfg || !drCan(me, "readiness") || app.type !== "seeker" || !qualified(app)) return state;
       if (action.readiness === "Deal Room Ready" && readinessBlockers(app, cfg).length) return state;
       dr = patchApp(dr, app.id, (a) => note({ ...a, readiness: action.readiness, readinessAt: at }, me!.id, `Readiness: ${action.readiness}`, at));
-      if (action.readiness === "Deal Room Ready") dr = send(dr, app.eventId, app.id, "You are Deal Room Ready", portal(app));
+      if (action.readiness === "Deal Room Ready") dr = send(ctx, dr, app.eventId, app.id, "You are Deal Room Ready", portal(app));
       return withDr(state, dr);
     }
 
@@ -393,18 +394,18 @@ export function drReducer(state: AppState, action: DrAction): AppState {
       if (!app || !feeOwed(app) || !qualified(app) || !action.reference.trim()) return state;
       const kes = action.method === "M-Pesa" ? feeInKes(app.fee!) : undefined;
       dr = patchApp(dr, app.id, (a) => note({ ...a, fee: { ...a.fee!, paid: { at, method: action.method, reference: action.reference.trim().slice(0, 40), kes } } }, "applicant", `Paid ${feeLabel(app.fee!)} by ${action.method}, ref ${action.reference.trim()}`, at));
-      dr = send(dr, app.eventId, app.id, `Payment received, ${feeLabel(app.fee!)}: your Deal Room badge is ready`, `/dr/${app.id}`, "Email and SMS");
-      return issueBadge(withDr(state, dr), dr.apps.find((a) => a.id === app.id)!);
+      dr = send(ctx, dr, app.eventId, app.id, `Payment received, ${feeLabel(app.fee!)}: your Deal Room badge is ready`, `/dr/${app.id}`, "Email and SMS");
+      return issueBadge(ctx, withDr(state, dr), dr.apps.find((a) => a.id === app.id)!);
     }
 
     case "dr/waiveFee": {
       // the lead may waive it, for a sponsored place say, always with a reason
       if (!app || me?.role !== "Lead" || !feeOwed(app) || !action.reason.trim()) return state;
       dr = patchApp(dr, app.id, (a) => note({ ...a, fee: { ...a.fee!, waived: { by: me!.id, at, reason: action.reason.trim() } } }, me!.id, `Fee waived: ${action.reason.trim()}`, at));
-      dr = send(dr, app.eventId, app.id, "Your Deal Room fee is waived: your badge is ready", `/dr/${app.id}`, "Email and SMS");
+      dr = send(ctx, dr, app.eventId, app.id, "Your Deal Room fee is waived: your badge is ready", `/dr/${app.id}`, "Email and SMS");
       const next = withDr(state, dr);
       const updated = dr.apps.find((a) => a.id === app.id)!;
-      return qualified(updated) ? issueBadge(next, updated) : next;
+      return qualified(updated) ? issueBadge(ctx, next, updated) : next;
     }
 
     case "dr/updateProfile": {
@@ -423,7 +424,7 @@ export function drReducer(state: AppState, action: DrAction): AppState {
         if (decided && material.length) next = { ...next, reReview: { fields: material, at } };
         return note(next, "applicant", material.length && decided ? `Changed ${material.join(", ")}; sent for re-review` : p.challenge ? "Challenge updated" : "Profile updated", at);
       });
-      if (decided && material.length && app.assignee) dr = send(dr, app.eventId, app.assignee, `${app.ref} changed its ${app.type === "seeker" ? "ask" : "mandate"}: re-review`, `/dealroom/applications/${app.id}`, "Email");
+      if (decided && material.length && app.assignee) dr = send(ctx, dr, app.eventId, app.assignee, `${app.ref} changed its ${app.type === "seeker" ? "ask" : "mandate"}: re-review`, `/dealroom/applications/${app.id}`, "Email");
       return withDr(state, dr);
     }
 
@@ -495,10 +496,10 @@ export function drReducer(state: AppState, action: DrAction): AppState {
       dr = patchApp(dr, app.id, (a) =>
         note({ ...a, status: "Decided", statusAt: at, reReview: undefined, verification: { ...a.verification!, state: action.outcome, decided: { by: me!.id, at, reason: action.reason } } }, me!.id, `Verification: ${action.outcome}`, at),
       );
-      dr = send(dr, app.eventId, app.id, action.outcome === "Verified" ? "Your organisation is verified: the Deal Room directory is open" : "A decision on your Deal Room application", portal(app));
+      dr = send(ctx, dr, app.eventId, app.id, action.outcome === "Verified" ? "Your organisation is verified: the Deal Room directory is open" : "A decision on your Deal Room application", portal(app));
       let next = withDr(state, dr);
       const fresh = next.dealRoom.apps.find((a) => a.id === app.id)!;
-      next = action.outcome === "Verified" ? issueBadge(next, fresh) : revokeBadge(next, fresh);
+      next = action.outcome === "Verified" ? issueBadge(ctx, next, fresh) : revokeBadge(ctx, next, fresh);
       return next;
     }
 
@@ -548,44 +549,44 @@ export function drReducer(state: AppState, action: DrAction): AppState {
       if (!app || !drCan(me, "grantSupport") || !action.reason.trim()) return state;
       const expires = new Date(at.replace(" ", "T") + ":00Z");
       expires.setUTCHours(expires.getUTCHours() + action.hours);
-      const g = { id: uid("gr", at), appId: app.id, to: action.to, reason: action.reason, by: me!.id, at, expires: expires.toISOString().slice(0, 16).replace("T", " ") };
+      const g = { id: ctx.newId("gr"), appId: app.id, to: action.to, reason: action.reason, by: me!.id, at, expires: expires.toISOString().slice(0, 16).replace("T", " ") };
       return withDr(state, { ...dr, grants: [g, ...dr.grants], adminLog: [{ at, by: me!.id, what: `Support access to ${app.ref ?? app.org.name} granted to ${action.to} until ${g.expires}: ${action.reason}` }, ...dr.adminLog] });
     }
 
     case "dr/supportView": {
       const ok = dr.grants.some((g) => g.appId === action.appId && g.to === action.viewer && g.expires > at);
       if (!ok || !app) return state;
-      return withDr(state, { ...dr, access: [{ id: uid("acc", at), seekerId: app.id, item: "profile", viewer: "admin", action: "view", at }, ...dr.access], adminLog: [{ at, by: "admin", what: `${action.viewer} opened ${app.ref ?? app.org.name} under a support grant` }, ...dr.adminLog] });
+      return withDr(state, { ...dr, access: [{ id: ctx.newId("acc"), seekerId: app.id, item: "profile", viewer: "admin", action: "view", at }, ...dr.access], adminLog: [{ at, by: "admin", what: `${action.viewer} opened ${app.ref ?? app.org.name} under a support grant` }, ...dr.adminLog] });
     }
 
     case "dr/exception": {
       if (!me) return state;
-      return withDr(state, exception(dr, Object.keys(dr.configs)[0], me.id, action.kind, action.reason, action.ref));
+      return withDr(state, exception(ctx, dr, Object.keys(dr.configs)[0], me.id, action.kind, action.reason, action.ref));
     }
 
     default:
-      if (action.type.startsWith("dr/opp") || action.type === "dr/retention") return drConvReducer(state, action as DrConvAction);
-      if (action.type.startsWith("dr/session")) return drSessionReducer(state, action as DrSessionAction);
-      return drMeetReducer(state, action as DrMeetAction);
+      if (action.type.startsWith("dr/opp") || action.type === "dr/retention") return drConvReducer(state, action as DrConvAction, ctx);
+      if (action.type.startsWith("dr/session")) return drSessionReducer(state, action as DrSessionAction, ctx);
+      return drMeetReducer(state, action as DrMeetAction, ctx);
   }
 }
 
 const a_assignee = (a: DrApplication) => !!a.assignee;
 
 /** After a decision takes effect: notify, issue or revoke the badge. */
-function settleDecision(state: AppState, appId: string): AppState {
+function settleDecision(ctx: Ctx, state: AppState, appId: string): AppState {
   let app = state.dealRoom.apps.find((a) => a.id === appId)!;
   const d = decisionOf(app);
   if (!d) return state;
-  let dr = send(state.dealRoom, app.eventId, app.id, "A decision on your Deal Room application", `/dr/${app.id}`);
+  let dr = send(ctx, state.dealRoom, app.eventId, app.id, "A decision on your Deal Room application", `/dr/${app.id}`);
   // an approved capital seeker is sent the payment link with the decision; the badge and matching wait for it
   const fee = dr.configs[app.eventId]?.seekerFee;
   if (qualified(app) && app.type === "seeker" && !app.fee && fee && fee.amount > 0) {
     dr = patchApp(dr, app.id, (a) => note({ ...a, fee: { amount: fee.amount, currency: fee.currency, sentAt: dr.clock } }, "system", `Payment link sent: ${feeLabel(fee)}`, dr.clock));
-    dr = send(dr, app.eventId, app.id, `Approved: pay the ${feeLabel(fee)} participation fee to join the Deal Room`, `/dr/${app.id}?pay=1`, "Email and SMS");
+    dr = send(ctx, dr, app.eventId, app.id, `Approved: pay the ${feeLabel(fee)} participation fee to join the Deal Room`, `/dr/${app.id}?pay=1`, "Email and SMS");
     app = dr.apps.find((a) => a.id === appId)!;
   }
   let next = withDr(state, dr);
-  next = qualified(app) && feeSettled(app) ? issueBadge(next, app) : revokeBadge(next, app);
+  next = qualified(app) && feeSettled(app) ? issueBadge(ctx, next, app) : revokeBadge(ctx, next, app);
   return next;
 }

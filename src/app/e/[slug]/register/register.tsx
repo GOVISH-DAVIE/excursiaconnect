@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Wordmark } from "@/components/ui";
-import { CATEGORIES, makeOrder, money, useStore } from "@/lib/store";
+import { CATEGORIES, makeOrder, money, protoCtx, useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
 import { useToday } from "@/lib/use-today";
 import type { Category, PaymentMethod } from "@/lib/types";
@@ -55,7 +55,7 @@ export function Register({ slug }: { slug: string }) {
     // the payer first, so their badge opens on Done; colleagues each get their own badge and claim link (DE-16)
     for (const p of [...people].reverse()) {
       const status = statusFor(p.tier);
-      const order = p.tier.price > 0 && status !== "Pending" && status !== "Waitlisted" ? makeOrder(p.tier.price, p.tier.currency, event.commissionPct, method, p.id, p.tier.id, event.id, p.disc) : undefined;
+      const order = p.tier.price > 0 && status !== "Pending" && status !== "Waitlisted" ? makeOrder(protoCtx(state), p.tier.price, p.tier.currency, event.commissionPct, method, p.id, p.tier.id, event.id, p.disc) : undefined;
       dispatch({
         type: "register",
         delegate: {
