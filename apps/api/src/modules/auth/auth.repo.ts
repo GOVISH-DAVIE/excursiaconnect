@@ -5,13 +5,31 @@
  */
 import type { Db } from "@excursia/db";
 
-export type UserRow = { id: string; kind: "admin" | "staff" | "participant"; email: string | null; name: string; passwordHash: string | null; disabledAt: Date | null };
-export type SessionRow = { id: string; userId: string; expiresAt: Date; lastSeenAt: Date; stepUpAt: Date | null; revokedAt: Date | null; user: UserRow };
+export type UserRow = {
+  id: string;
+  kind: "admin" | "staff" | "participant";
+  email: string | null;
+  name: string;
+  passwordHash: string | null;
+  disabledAt: Date | null;
+  mfaGraceUntil: Date | null;
+};
+export type SessionRow = { id: string; userId: string; expiresAt: Date; lastSeenAt: Date; stepUpAt: Date | null; mfaSkipped: boolean; revokedAt: Date | null; user: UserRow };
 export type OtpRow = { id: string; codeHash: string; attempts: number; expiresAt: Date };
 export type TotpRow = { secretEncrypted: string; confirmedAt: Date | null; lastUsedStep: bigint | null; recoveryCodeHashes: string[] };
-export type NewSession = { tokenHash: string; userId: string; createdAt: Date; lastSeenAt: Date; expiresAt: Date; stepUpAt: Date | null; ip: string | null; userAgent: string | null };
+export type NewSession = {
+  tokenHash: string;
+  userId: string;
+  createdAt: Date;
+  lastSeenAt: Date;
+  expiresAt: Date;
+  stepUpAt: Date | null;
+  mfaSkipped: boolean;
+  ip: string | null;
+  userAgent: string | null;
+};
 
-const userSelect = { id: true, kind: true, email: true, name: true, passwordHash: true, disabledAt: true } as const;
+const userSelect = { id: true, kind: true, email: true, name: true, passwordHash: true, disabledAt: true, mfaGraceUntil: true } as const;
 
 export function createAuthRepo(db: Db) {
   return {
@@ -69,7 +87,7 @@ export function createAuthRepo(db: Db) {
     sessionByTokenHash: (tokenHash: string): Promise<SessionRow | null> =>
       db.session.findUnique({
         where: { tokenHash },
-        select: { id: true, userId: true, expiresAt: true, lastSeenAt: true, stepUpAt: true, revokedAt: true, user: { select: userSelect } },
+        select: { id: true, userId: true, expiresAt: true, lastSeenAt: true, stepUpAt: true, mfaSkipped: true, revokedAt: true, user: { select: userSelect } },
       }),
 
     touchSession: (id: string, at: Date) => db.session.updateMany({ where: { id, revokedAt: null }, data: { lastSeenAt: at } }),
@@ -85,21 +103,27 @@ export function createAuthRepo(db: Db) {
       });
     },
 
+    /** Starts the 7 days' grace at the first sign-in without an authenticator, once; returns when it ends. */
+    async startGrace(userId: string, until: Date): Promise<Date> {
+      await db.user.updateMany({ where: { id: userId, mfaGraceUntil: null }, data: { mfaGraceUntil: until } });
+      const row = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { mfaGraceUntil: true } });
+      return row.mfaGraceUntil!;
+    },
+
     totpOf: (userId: string): Promise<TotpRow | null> =>
       db.totpSecret.findUnique({ where: { userId }, select: { secretEncrypted: true, confirmedAt: true, lastUsedStep: true, recoveryCodeHashes: true } }),
 
-    /** A new, unconfirmed secret; refused (false) if one is already confirmed. */
-    async startTotp(userId: string, secretEncrypted: string): Promise<boolean> {
-      return db.$transaction(async (tx) => {
-        const existing = await tx.totpSecret.findUnique({ where: { userId }, select: { confirmedAt: true } });
-        if (existing?.confirmedAt) return false;
-        await tx.totpSecret.upsert({
-          where: { userId },
-          create: { userId, secretEncrypted, recoveryCodeHashes: [] },
-          update: { secretEncrypted, lastUsedStep: null, recoveryCodeHashes: [] },
-        });
-        return true;
-      });
+    /**
+     * The secret waiting to be confirmed: the one already waiting if there is one, so a second request (a reload, a
+     * double click) shows the same secret instead of silently replacing the one on screen; otherwise this new one.
+     * Null if an authenticator is already confirmed.
+     */
+    async startTotp(userId: string, secretEncrypted: string): Promise<string | null> {
+      // insert-if-absent in one statement: two requests at once both get the same row back
+      await db.$executeRaw`INSERT INTO totp_secret (user_id, secret_encrypted, recovery_code_hashes)
+        VALUES (${userId}, ${secretEncrypted}, '{}') ON CONFLICT (user_id) DO NOTHING`;
+      const row = await db.totpSecret.findUnique({ where: { userId }, select: { secretEncrypted: true, confirmedAt: true } });
+      return row && !row.confirmedAt ? row.secretEncrypted : null;
     },
 
     async confirmTotp(userId: string, step: number, recoveryCodeHashes: string[], at: Date): Promise<boolean> {

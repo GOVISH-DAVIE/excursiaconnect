@@ -18,6 +18,7 @@ export function authRoutes(c: AuthController): Router {
   r.post("/auth/totp/setup", requireSession({ staff: true, pending: true }), c.startTotp);
   r.post("/auth/totp/confirm", requireSession({ staff: true, pending: true }), c.confirmTotp);
   r.post("/auth/totp/verify", requireSession({ staff: true, pending: true }), c.verifyTotp);
+  r.post("/auth/totp/skip", requireSession({ staff: true, pending: true }), c.skipTotp);
   // everyone
   r.post("/auth/signout", c.signOut);
   r.get("/session", requireSession({ pending: true }), c.session);

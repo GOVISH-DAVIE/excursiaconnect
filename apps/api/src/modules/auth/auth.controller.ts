@@ -38,9 +38,9 @@ export function createAuthController(service: AuthService, config: Config, now: 
 
     staffSignIn: (async (req, res) => {
       const { email, password } = StaffSignIn.parse(req.body);
-      const { next, ...issued } = await service.signInStaff(email, password, meta(req));
+      const { next, skipUntil, ...issued } = await service.signInStaff(email, password, meta(req));
       setSessionCookie(res, config, issued, now());
-      res.json({ next } satisfies SignInNext);
+      res.json({ next, ...(skipUntil ? { skipUntil } : {}) } satisfies SignInNext);
     }) satisfies RequestHandler,
 
     requestPasswordCode: (async (req, res) => {
@@ -70,6 +70,12 @@ export function createAuthController(service: AuthService, config: Config, now: 
     verifyTotp: (async (req, res) => {
       const proof = TotpVerify.parse(req.body);
       const issued = await service.verifyTotp(sessionOf(res), proof, meta(req));
+      setSessionCookie(res, config, issued, now());
+      res.json({ next: "done" } satisfies SignInNext);
+    }) satisfies RequestHandler,
+
+    skipTotp: (async (req, res) => {
+      const issued = await service.skipTotp(sessionOf(res), meta(req));
       setSessionCookie(res, config, issued, now());
       res.json({ next: "done" } satisfies SignInNext);
     }) satisfies RequestHandler,

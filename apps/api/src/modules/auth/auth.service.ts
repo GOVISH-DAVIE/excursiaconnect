@@ -32,6 +32,9 @@ export const POLICY = {
 } as const;
 
 const CODE_TTL = { sign_in: 10 * MIN, set_password: 30 * MIN } as const;
+
+/** D14: staff may put off setting up the authenticator for this long after their first sign-in. */
+export const MFA_GRACE_MS = 7 * DAY;
 const CODE_ATTEMPTS = 5;
 
 /** Attempts allowed per window. nginx limits per address too; these are the real ones (deploy.md). */
@@ -91,7 +94,7 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
     if (!(await repo.consumeOtp(otp.id, now()))) throw expired;
   }
 
-  async function issue(user: UserRow, meta: ClientMeta, kind: keyof typeof POLICY, stepUp: boolean, replacing?: string): Promise<Issued> {
+  async function issue(user: UserRow, meta: ClientMeta, kind: keyof typeof POLICY, stepUp: boolean, replacing?: string, mfaSkipped = false): Promise<Issued> {
     const token = newToken();
     const at = now();
     const next = {
@@ -101,6 +104,7 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
       lastSeenAt: at,
       expiresAt: new Date(at.getTime() + POLICY[kind].absoluteMs),
       stepUpAt: stepUp ? at : null,
+      mfaSkipped,
       ip: meta.ip,
       userAgent: meta.userAgent?.slice(0, 300) ?? null,
     };
@@ -149,7 +153,10 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
       if (!ok || !candidate) throw new HttpError("unauthenticated", "That email or password is not right.");
       const totp = await repo.totpOf(candidate.id);
       const issued = await issue(candidate, meta, "pending", false);
-      return { ...issued, next: totp?.confirmedAt ? "totp" : "totp_enrol" };
+      if (totp?.confirmedAt) return { ...issued, next: "totp" };
+      // no authenticator yet: the first such sign-in starts the 7 days in which it may be put off
+      const graceUntil = await repo.startGrace(candidate.id, new Date(now().getTime() + MFA_GRACE_MS));
+      return { ...issued, next: "totp_enrol", ...(now() < graceUntil ? { skipUntil: graceUntil.toISOString() } : {}) };
     },
 
     /** Always the same answer; a code goes out only to an existing staff account. */
@@ -171,9 +178,9 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
     /** A new authenticator secret for a staff member who has none confirmed. Shown once. */
     async startTotp(r: Resolved) {
       if (!isStaff(r.user)) throw new HttpError("forbidden", "Only staff accounts use an authenticator.");
-      const secret = newTotpSecret();
-      if (!(await repo.startTotp(r.user.id, encrypt(keys.totp, secret))))
-        throw new HttpError("conflict", "An authenticator is already set up for this account. Ask an Algotech admin to reset it.");
+      const waiting = await repo.startTotp(r.user.id, encrypt(keys.totp, newTotpSecret()));
+      if (!waiting) throw new HttpError("conflict", "An authenticator is already set up for this account. Ask an Algotech admin to reset it.");
+      const secret = decrypt(keys.totp, waiting);
       return { secret, uri: otpauthUri(secret, r.user.email ?? r.user.name) };
     },
 
@@ -203,13 +210,26 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
       return stepUp(r, meta);
     },
 
+    /**
+     * "Set up later" (D14): within the 7 days, a staff member with no authenticator finishes signing in without one.
+     * The new session says so (mfa "skipped"); setting one up later steps it up like any other.
+     */
+    async skipTotp(r: Resolved, meta: ClientMeta): Promise<Issued> {
+      if (!isStaff(r.user)) throw new HttpError("forbidden", "Only staff accounts use an authenticator.");
+      const totp = await repo.totpOf(r.user.id);
+      if (totp?.confirmedAt) throw new HttpError("conflict", "Your authenticator is set up: enter its code to sign in.");
+      if (!r.user.mfaGraceUntil || now() >= r.user.mfaGraceUntil)
+        throw new HttpError("forbidden", "The 7 days to set up your authenticator are over. Set it up now to continue.");
+      return issue(r.user, meta, "staff", false, r.session.id, true);
+    },
+
     /** The session behind a cookie, if it is still good; touching it keeps it from going idle. */
     async resolve(token: string | undefined): Promise<Resolved | null> {
       if (!token || token.length > 100) return null;
       const session = await repo.sessionByTokenHash(hashToken(token));
       if (!session || session.revokedAt || session.user.disabledAt) return null;
       const at = now();
-      const pending = isStaff(session.user) && !session.stepUpAt;
+      const pending = isStaff(session.user) && !session.stepUpAt && !session.mfaSkipped;
       const policy = POLICY[pending ? "pending" : isStaff(session.user) ? "staff" : "participant"];
       if (at >= session.expiresAt || at.getTime() - session.lastSeenAt.getTime() > policy.idleMs) {
         await repo.revokeSession(session.id, at);
@@ -223,10 +243,16 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
     signOut: (r: Resolved) => repo.revokeSession(r.session.id, now()),
 
     async view(r: Resolved): Promise<SessionView> {
-      const memberships = await repo.memberships(r.user.id);
+      const staff = isStaff(r.user);
+      const [memberships, totp] = await Promise.all([repo.memberships(r.user.id), staff ? repo.totpOf(r.user.id) : null]);
+      const skipped = staff && !r.pending && r.session.mfaSkipped;
+      const enrolling = r.pending && !totp?.confirmedAt;
+      const grace = r.user.mfaGraceUntil && now() < r.user.mfaGraceUntil ? r.user.mfaGraceUntil.toISOString() : undefined;
       return {
         user: { id: r.user.id, name: r.user.name, email: r.user.email, kind: r.user.kind },
-        mfa: !isStaff(r.user) ? "not_required" : r.pending ? "pending" : "complete",
+        mfa: !staff ? "not_required" : r.pending ? "pending" : skipped ? "skipped" : "complete",
+        ...(r.pending ? { pendingStep: totp?.confirmedAt ? ("totp" as const) : ("totp_enrol" as const) } : {}),
+        ...((skipped || enrolling) && grace ? { mfaDueBy: grace } : {}),
         memberships: memberships.map((m) => ({ role: m.role, eventId: m.eventId, organiserId: m.organiserId, canDecide: m.canDecide })),
         expiresAt: r.session.expiresAt.toISOString(),
       };

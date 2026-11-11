@@ -24,7 +24,11 @@ export const TotpConfirm = z.object({ code: SixDigits });
 export const TotpVerify = z.union([z.object({ code: SixDigits }), z.object({ recoveryCode: z.string().trim().min(10).max(20) })]);
 
 /** What to do after a sign-in step: nothing more, or prove the authenticator, or set one up first. */
-export const SignInNext = z.object({ next: z.enum(["done", "totp", "totp_enrol"]) });
+export const SignInNext = z.object({
+  next: z.enum(["done", "totp", "totp_enrol"]),
+  /** For totp_enrol: until when "set up later" is still allowed (D14: 7 days from the first sign-in). */
+  skipUntil: z.string().optional(),
+});
 export type SignInNext = z.infer<typeof SignInNext>;
 
 /** Shown once: the secret to type or the URI to scan. */
@@ -38,7 +42,12 @@ export type RecoveryCodes = z.infer<typeof RecoveryCodes>;
 export const SessionView = z.object({
   user: z.object({ id: z.string(), name: z.string(), email: z.string().nullable(), kind: z.enum(["admin", "staff", "participant"]) }),
   /** pending: the password was right, the authenticator is still to come; only the TOTP routes answer. */
-  mfa: z.enum(["complete", "pending", "not_required"]),
+  /** skipped: a staff member who chose "set up later" within the 7 days' grace (D14). */
+  mfa: z.enum(["complete", "pending", "skipped", "not_required"]),
+  /** For a pending session: whether the authenticator is to be set up or only asked for. */
+  pendingStep: z.enum(["totp", "totp_enrol"]).optional(),
+  /** When the authenticator must be set up by, while it may still be skipped. */
+  mfaDueBy: z.string().optional(),
   memberships: z.array(z.object({ role: z.string(), eventId: z.string().nullable(), organiserId: z.string().nullable(), canDecide: z.boolean() })),
   expiresAt: z.string(),
 });

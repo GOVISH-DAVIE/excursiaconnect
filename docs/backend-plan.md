@@ -209,7 +209,7 @@ One Prisma schema, keyed by `eventId` everywhere, even where the code is single-
   - The actor comes from the session only.
   - A Zod schema validates every action.
   - Ownership and tenancy are checked for every record an action names, not just the role, which closes IDOR.
-  - MFA is a property of the role, enforced by the server; it is not an editable flag.
+  - MFA is a property of the role, enforced by the server; it is not an editable flag. Staff get 7 days' grace from their first sign-in to set it up (D14).
   - Staff accounts are managed by Algotech admins only.
 - **Sessions:**
   - The cookie is `__Secure-sid`, set by the API with `Domain=.example.co.ke` so the web app's server components see it too. It is Secure, HttpOnly, and SameSite Lax (Strict for staff), and holds a 256-bit random id stored hashed. (`__Host-` can't carry a domain, so it can't be shared across the two subdomains.)
@@ -408,6 +408,19 @@ What applicants and reviewers need on day one comes first. Anything that can fol
   - a new password ending sessions
   - the same refusal for an unknown email and a wrong password
   - cross-site writes
+- **The 7 days' grace (D14):**
+  - The first password sign-in without an authenticator starts the 7 days, recorded once in `app_user.mfa_grace_until`.
+  - Within them, `POST /v1/auth/totp/skip` finishes the sign-in. The session is marked `mfa_skipped`, and `GET /v1/session` reports `mfa: "skipped"` with the due date.
+  - After them, skipping is refused, and so is skipping for anyone who already has an authenticator.
+  - Five tests cover it.
+- **The sign-in page** (`apps/web/src/app/signin`) is the first screen on the API, and the start of M0.5's client foundations:
+  - `features/http.ts`, the only `fetch`
+  - `features/auth/` with its API client, query contract and hooks
+  - `QueryClientProvider` in `app/providers.tsx`
+
+  It does both flows, the authenticator setup with a QR code and recovery codes, "set up later", and password set and reset. A finished sign-in goes straight to the person's workspace. Tested in Chrome: an applicant with an emailed code; a lead setting a password, then an authenticator; a reviewer putting it off. Two bugs were found and fixed on the way:
+  - Setup called twice, the second replacing the secret on screen. Setup now returns the secret already waiting.
+  - The key breaking across lines.
 - **Not yet:**
   - ending a person's sessions when their role changes (with staff management, when memberships first change through the API)
   - deleting old `rate_limit` windows (a worker job, M1.4)
@@ -494,6 +507,7 @@ The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only 
 | D10 | The apps | Confirm whether the Flutter apps are needed for February, or the web on phones is enough | The web is now laid out for phones; the apps add store approval as a risk |
 | D11 | Team | Confirm the number of developers from Phase 1 | The phase windows assume at least two |
 | D12 | Content Security Policy | **Hash-based CSP with Next's experimental SRI**, or inline scripts allowed with strict other directives | A nonce-based CSP is incompatible with partial prerendering, which this app uses |
+| D14 | Staff MFA | **Decided 11 Nov 2026: required, with 7 days' grace.** A staff member may choose "set up later" for 7 days from their first sign-in; the session is marked as skipped, and the sign-in page reminds them. After that, the authenticator is required | Onboarding a team of reviewers shouldn't stall on phones and apps in week one; reviewers see applicants' financials, so the grace is short and ends on its own |
 | D13 | The backend process | **Decided 11 Nov 2026: Express, separate from Next.js, in an npm-workspaces monorepo**, with the API on its own subdomain | One API for the web app and the Flutter apps; the web app holds no database access or secrets; the rules and contracts stay shared |
 
 ## Risks

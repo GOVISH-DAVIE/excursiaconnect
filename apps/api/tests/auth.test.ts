@@ -223,11 +223,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("sign-in and sessions", () => {
     test("the first sign-in sets up the authenticator; the session is pending until it is confirmed", async () => {
       const b = browser("10.0.2.5");
       const first = await b.call("POST", "/v1/auth/staff/signin", { email, password });
-      expect(SignInNext.parse(first.json)).toEqual({ next: "totp_enrol" });
+      expect(SignInNext.parse(first.json)).toMatchObject({ next: "totp_enrol", skipUntil: expect.any(String) });
       expect(b.setCookie).toMatch(/SameSite=Strict/);
       expect(SessionView.parse((await b.call("GET", "/v1/session")).json).mfa).toBe("pending");
 
-      const enrol = TotpEnrolment.parse((await b.call("POST", "/v1/auth/totp/setup")).json);
+      // two setup requests at once (a double effect, a double click) must show the same secret, the stored one
+      const [one, two] = await Promise.all([b.call("POST", "/v1/auth/totp/setup"), b.call("POST", "/v1/auth/totp/setup")]);
+      const enrol = TotpEnrolment.parse(one.json);
+      expect(TotpEnrolment.parse(two.json).secret).toBe(enrol.secret);
       secret = enrol.secret;
       expect(enrol.uri).toContain(`secret=${secret}`);
       const stored = await db.totpSecret.findFirst({ where: { user: { email } } });
@@ -305,6 +308,77 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("sign-in and sessions", () => {
       await browser("10.0.3.4").call("POST", "/v1/auth/staff/password/code", { email });
       await browser("10.0.3.4").call("POST", "/v1/auth/staff/password", { email, code: lastCodeTo(email), password: `${password} again` });
       expect((await b.call("GET", "/v1/session")).status).toBe(401);
+    });
+  });
+
+  describe("putting off the authenticator (D14: 7 days from the first sign-in)", () => {
+    const email = `later@${run}.example`;
+    const password = "a long enough staff password";
+
+    beforeAll(async () => {
+      const u = await db.user.create({ data: { kind: "staff", email, name: "Test Reviewer" } });
+      madeUsers.push(u.id);
+      const b = browser("10.0.5.1");
+      await b.call("POST", "/v1/auth/staff/password/code", { email });
+      await b.call("POST", "/v1/auth/staff/password", { email, code: lastCodeTo(email), password });
+    });
+
+    test("the first sign-in offers 7 days to set it up; skipping signs in, marked as skipped", async () => {
+      const b = browser("10.0.5.2");
+      const first = SignInNext.parse((await b.call("POST", "/v1/auth/staff/signin", { email, password })).json);
+      expect(first.next).toBe("totp_enrol");
+      expect(new Date(first.skipUntil!).getTime() - clock.getTime()).toBeCloseTo(7 * 24 * 60 * MIN, -4);
+
+      const pending = SessionView.parse((await b.call("GET", "/v1/session")).json);
+      expect(pending).toMatchObject({ mfa: "pending", pendingStep: "totp_enrol", mfaDueBy: first.skipUntil });
+
+      const pendingToken = b.cookie;
+      expect((await b.call("POST", "/v1/auth/totp/skip")).status).toBe(200);
+      expect(b.cookie).not.toBe(pendingToken);
+      const me = SessionView.parse((await b.call("GET", "/v1/session")).json);
+      expect(me).toMatchObject({ mfa: "skipped", mfaDueBy: first.skipUntil });
+    });
+
+    test("the 7 days count from the first sign-in, not the latest", async () => {
+      advance(3 * 24 * 60 * MIN);
+      const b = browser("10.0.5.3");
+      const again = SignInNext.parse((await b.call("POST", "/v1/auth/staff/signin", { email, password })).json);
+      expect(new Date(again.skipUntil!).getTime() - clock.getTime()).toBeCloseTo(4 * 24 * 60 * MIN, -4);
+    });
+
+    test("after 7 days, setting it up is the only way in", async () => {
+      advance(4 * 24 * 60 * MIN + MIN);
+      const b = browser("10.0.5.4");
+      const late = SignInNext.parse((await b.call("POST", "/v1/auth/staff/signin", { email, password })).json);
+      expect(late).toEqual({ next: "totp_enrol" });
+      const skip = await b.call("POST", "/v1/auth/totp/skip");
+      expect(skip.status).toBe(403);
+      expect(errorOf(skip).message).toMatch(/7 days/);
+      expect(SessionView.parse((await b.call("GET", "/v1/session")).json).mfa).toBe("pending");
+    });
+
+    test("a skipped session can set it up later, and is then complete", async () => {
+      const u = await db.user.findUniqueOrThrow({ where: { email } });
+      await db.user.update({ where: { id: u.id }, data: { mfaGraceUntil: new Date(clock.getTime() + 24 * 60 * MIN) } });
+      const b = browser("10.0.5.5");
+      await b.call("POST", "/v1/auth/staff/signin", { email, password });
+      await b.call("POST", "/v1/auth/totp/skip");
+      const { secret: s } = TotpEnrolment.parse((await b.call("POST", "/v1/auth/totp/setup")).json);
+      expect((await b.call("POST", "/v1/auth/totp/confirm", { code: totpCode(s, stepAt(clock)) })).status).toBe(200);
+      expect(SessionView.parse((await b.call("GET", "/v1/session")).json)).toMatchObject({ mfa: "complete" });
+
+      // and once it is set up, skipping is no longer offered or allowed
+      const c = browser("10.0.5.6");
+      expect(SignInNext.parse((await c.call("POST", "/v1/auth/staff/signin", { email, password })).json)).toEqual({ next: "totp" });
+      expect((await c.call("POST", "/v1/auth/totp/skip")).status).toBe(409);
+    });
+
+    test("applicants have nothing to skip", async () => {
+      const b = browser("10.0.5.7");
+      const who = `nothing@${run}.example`;
+      await b.call("POST", "/v1/auth/code", { email: who });
+      await b.call("POST", "/v1/auth/code/verify", { email: who, code: lastCodeTo(who) });
+      expect((await b.call("POST", "/v1/auth/totp/skip")).status).toBe(403);
     });
   });
 

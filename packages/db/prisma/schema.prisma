@@ -24,21 +24,22 @@ datasource db {
 // ---------------------------------------------------------------------------------------------------------------
 
 enum UserKind {
-  admin       // Algotech
-  staff       // an organiser's or the Deal Room's team
+  admin // Algotech
+  staff // an organiser's or the Deal Room's team
   participant // an applicant, delegate or exhibitor contact
 }
 
 model User {
-  id           String    @id @default(uuid(7))
-  kind         UserKind
-  email        String?   @unique @db.Citext
-  phone        String?   @unique
-  name         String
-  passwordHash String?   @map("password_hash") // staff only (argon2); participants sign in with one-time codes
-  demo         Boolean   @default(false) // made by the demo seed; production holds none (backend-plan.md, M0.3)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  disabledAt   DateTime? @map("disabled_at") @db.Timestamptz(3)
+  id            String    @id @default(uuid(7))
+  kind          UserKind
+  email         String?   @unique @db.Citext
+  phone         String?   @unique
+  name          String
+  passwordHash  String?   @map("password_hash") // staff only (argon2); participants sign in with one-time codes
+  demo          Boolean   @default(false) // made by the demo seed; production holds none (backend-plan.md, M0.3)
+  mfaGraceUntil DateTime? @map("mfa_grace_until") @db.Timestamptz(3) // staff may skip the authenticator until then (D14)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  disabledAt    DateTime? @map("disabled_at") @db.Timestamptz(3)
 
   sessions    Session[]
   memberships Membership[]
@@ -56,6 +57,7 @@ model Session {
   lastSeenAt   DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
   expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3) // absolute limit
   stepUpAt     DateTime? @map("step_up_at") @db.Timestamptz(3) // last TOTP or PIN confirmation
+  mfaSkipped   Boolean   @default(false) @map("mfa_skipped") // a staff session that chose "set up later" (D14)
   revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(3)
   scanEventId  String?   @map("scan_event_id") // a scanner signed in for one event
   scanDeviceId String?   @map("scan_device_id")
@@ -91,11 +93,11 @@ model OtpCode {
 
 /// A staff member's TOTP: the secret encrypted at rest, reuse of a step blocked, recovery codes hashed.
 model TotpSecret {
-  userId              String    @id @map("user_id")
-  secretEncrypted     String    @map("secret_encrypted")
-  confirmedAt         DateTime? @map("confirmed_at") @db.Timestamptz(3)
-  lastUsedStep        BigInt?   @map("last_used_step")
-  recoveryCodeHashes  String[]  @map("recovery_code_hashes")
+  userId             String    @id @map("user_id")
+  secretEncrypted    String    @map("secret_encrypted")
+  confirmedAt        DateTime? @map("confirmed_at") @db.Timestamptz(3)
+  lastUsedStep       BigInt?   @map("last_used_step")
+  recoveryCodeHashes String[]  @map("recovery_code_hashes")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -212,12 +214,12 @@ model Event {
   record      Json // the event as the rules know it
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  organiser       Organiser       @relation(fields: [organiserId], references: [id])
-  tiers           Tier[]
-  delegates       Delegate[]
-  memberships     Membership[]
-  scannerDevices  ScannerDevice[]
-  drConfig        DrConfig?
+  organiser      Organiser       @relation(fields: [organiserId], references: [id])
+  tiers          Tier[]
+  delegates      Delegate[]
+  memberships    Membership[]
+  scannerDevices ScannerDevice[]
+  drConfig       DrConfig?
 
   @@index([organiserId])
   @@map("event")
@@ -432,14 +434,14 @@ enum BusySource {
 /// constraints in the migration forbid two active rows with the same key whose time ranges overlap, so no room,
 /// table or person can be double-booked, however many requests arrive at once (backend-plan.md, Concurrency).
 model DrBusy {
-  id        String                     @id @default(uuid(7))
-  eventId   String                     @map("event_id")
+  id        String                   @id @default(uuid(7))
+  eventId   String                   @map("event_id")
   source    BusySource
-  sourceId  String                     @map("source_id")
+  sourceId  String                   @map("source_id")
   key       String // "room:<roomId>:<table>" or "app:<applicationId>"
   slot      Unsupported("tstzrange")
-  active    Boolean                    @default(true)
-  confirmBy DateTime?                  @map("confirm_by") @db.Timestamptz(3) // a proposal lapses after this
+  active    Boolean                  @default(true)
+  confirmBy DateTime?                @map("confirm_by") @db.Timestamptz(3) // a proposal lapses after this
 
   @@index([eventId, sourceId])
   @@map("dr_busy")
@@ -504,22 +506,22 @@ enum PaymentStatus {
 /// A payment, for a Deal Room fee or a ticket order. The provider's own transaction id is unique, so a repeated
 /// webhook inserts nothing; the raw payload is kept for reconciliation.
 model Payment {
-  id              String          @id @default(uuid(7))
-  provider        PaymentProvider
-  providerTxnId   String?         @map("provider_txn_id") // CheckoutRequestID, the card reference…
-  receipt         String?         @unique // the M-Pesa receipt number, once confirmed
-  eventId         String          @map("event_id")
-  purpose         String // "dr_fee" | "order"
-  subjectId       String          @map("subject_id") // the application or order it pays
-  amount          Int
-  currency        String
-  kesAmount       Int?            @map("kes_amount") // locked when the M-Pesa push starts
-  phone           String?
-  callbackToken   String?         @map("callback_token") // hash of the per-transaction token in the callback path
-  status          PaymentStatus   @default(pending)
-  rawPayload      Json?           @map("raw_payload")
-  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
-  confirmedAt     DateTime?       @map("confirmed_at") @db.Timestamptz(3)
+  id            String          @id @default(uuid(7))
+  provider      PaymentProvider
+  providerTxnId String?         @map("provider_txn_id") // CheckoutRequestID, the card reference…
+  receipt       String?         @unique // the M-Pesa receipt number, once confirmed
+  eventId       String          @map("event_id")
+  purpose       String // "dr_fee" | "order"
+  subjectId     String          @map("subject_id") // the application or order it pays
+  amount        Int
+  currency      String
+  kesAmount     Int?            @map("kes_amount") // locked when the M-Pesa push starts
+  phone         String?
+  callbackToken String?         @map("callback_token") // hash of the per-transaction token in the callback path
+  status        PaymentStatus   @default(pending)
+  rawPayload    Json?           @map("raw_payload")
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  confirmedAt   DateTime?       @map("confirmed_at") @db.Timestamptz(3)
 
   @@unique([provider, providerTxnId])
   @@index([subjectId])
