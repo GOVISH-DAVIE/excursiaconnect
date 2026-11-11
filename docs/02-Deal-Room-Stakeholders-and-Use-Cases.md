@@ -1,10 +1,12 @@
 # ExcursiaConnect Deal Room — Stakeholders and Use Cases
 
-Nov 6, 2026 · David Muia
+Nov 6, 2026 · David Muia · updated Nov 11, 2026: commercial or strategic partners are a role of their own (CP)
 
 ## Stakeholders at a glance
 
-Six working roles act inside a Deal Room, plus the public visitor before they apply. Algotech enables and supports; the organiser's Deal Room team decides; participants apply, accept and meet. Use case IDs are prefixed by role (DA, DL, DR, DO, CS, FP) and each names the PRD section and release cut that delivers it.
+Seven working roles act inside a Deal Room, plus the public visitor before they apply. Algotech enables and supports; the organiser's Deal Room team decides; participants apply, accept and meet. Use case IDs are prefixed by role (DA, DL, DR, DO, CS, FP, CP) and each names the PRD section and release cut that delivers it.
+
+Participants register through four pathways: capital seeker, capital provider (FP), commercial or strategic partner (CP), and institutional challenge. A challenge is verified like a provider and matched with businesses that could solve it; it has no use cases of its own here (see the Vis a Vis gaps paper).
 
 | Stakeholder | Who | What they want from the Deal Room | Can do | Cannot do |
 | --- | --- | --- | --- | --- |
@@ -13,7 +15,8 @@ Six working roles act inside a Deal Room, plus the public visitor before they ap
 | Deal Room reviewer | Bouer analysts | A clear queue, consistent criteria, evidence at hand | Review and score, request information, recommend or decide (if authorised), propose and approve matches, send introductions | Configure rules; see conversion values |
 | Operations team | Summit Deal Room desk and room staff | A schedule that holds; quick capture on the day | Schedule meetings, manage rooms, check in, record attendance and outcomes, run the daily report | Approve participants or matches |
 | Capital seeker | Business or project sponsor seeking capital | Meet the right, decided investors; control who sees what | Apply, respond to requests, complete profile, consent to sharing, accept introductions, confirm meetings, see own access log | See other participants' records |
-| Finance provider | Investor, fund, DFI, bank, buyer, distributor | Only qualified, ready opportunities that fit the mandate | Apply, describe mandate, sign NDA, browse teasers, express interest, accept introductions, confirm meetings, update deal status | See documents without seeker consent; book a meeting without an accepted introduction |
+| Finance provider (capital provider) | Angel investor, venture capital, private equity, fund, DFI, bank | Only qualified, ready opportunities that fit the mandate | Apply, describe mandate, sign NDA, browse teasers, express interest, accept introductions, confirm meetings, update deal status | See documents without seeker consent; book a meeting without an accepted introduction |
+| Commercial or strategic partner | Corporate buyer, distributor or channel partner, technology partner, regional operator, ecosystem partner | Qualified suppliers, solutions, distribution and market-entry partners that fit their requirements | Apply, describe requirements (sectors, pathways, contract range), sign NDA, browse teasers, express interest, accept introductions, confirm meetings, host supplier discovery or market-entry sessions, update deal status | See documents without seeker consent; book a meeting without an accepted introduction |
 | Public visitor | Anyone | Understand the Deal Room and whether to apply | Read the page, run the eligibility check, start an application | Anything behind sign-in |
 
 ## Platform admin (Algotech)
@@ -121,9 +124,22 @@ A provider should only spend time on qualified, ready opportunities inside its m
 | FP-9 | Confirm or move a meeting | Slot proposed | Meeting confirmed inside the provider's cap | Meetings | 2 |
 | FP-10 | Report deal progress | Monthly request or own update | Status update, and commitment or disbursement evidence uploaded | Conversion | 3 |
 
+## Commercial or strategic partner
+
+A partner buys, distributes or partners rather than invests: corporates and procurement teams looking for suppliers and solutions, distributors and regional operators looking for products to carry, technology partners and ecosystem partners looking for collaborators. It is verified exactly like a finance provider (KYC pack, sanctions screening, one NDA, a confirmed decision-maker) and sits on the same side of every match, but its mandate is a set of requirements with a contract size, not a ticket.
+
+| ID | Use case | Trigger | Outcome | PRD section | Cut |
+| --- | --- | --- | --- | --- | --- |
+| CP-1 | Apply as a commercial or strategic partner | Public page pathway 3, or an invitation | Organisation type, requirements (sectors, countries, stages, pathways, contract range, exclusions) and decision-maker submitted; reference number | Applications | 1 |
+| CP-2 | Complete verification and sign the NDA | Application received | KYC items uploaded, sanctions screened, one NDA signed; verified as FP-2 and FP-3 | Qualification | 1 |
+| CP-3 | Browse teasers and express interest | Verified | Directory of Deal Room Ready teasers; interest sent to the reviewer queue | Matching | 2 |
+| CP-4 | Accept an introduction and meet | Introduction received | Brief and consented documents viewable; acceptance recorded; meeting confirmed inside the partner's cap | Meetings | 2 |
+| CP-5 | Host supplier discovery or a market-entry session | The team schedules the session | The partner named as host of a corporate procurement and supplier discovery, or market-entry and cross-border partnership, session | Sessions | 2 |
+| CP-6 | Report deal progress | Monthly request or own update | Status update, with a purchase order or contract, or a pilot or partnership agreement, as evidence | Conversion | 3 |
+
 ## Use case index
 
-There are 63 use cases across six roles. 29 of them land in Cut 1, which is what the 11 January onboarding gate needs.
+There are 69 use cases across seven roles. 31 of them land in Cut 1, which is what the 11 January onboarding gate needs.
 
 | Stakeholder | Cut 1 Onboarding | Cut 2 Matching and meetings | Cut 3 Conversion | Total |
 | --- | --- | --- | --- | --- |
@@ -133,6 +149,7 @@ There are 63 use cases across six roles. 29 of them land in Cut 1, which is what
 | Operations team (DO) | 0 | 11 | 0 | 11 |
 | Capital seeker (CS) | 7 | 4 | 1 | 12 |
 | Finance provider (FP) | 4 | 5 | 1 | 10 |
-| Total | 29 | 29 | 5 | 63 |
+| Commercial or strategic partner (CP) | 2 | 3 | 1 | 6 |
+| Total | 31 | 32 | 6 | 69 |
 
 Cut 1 covers everything from the public page to an approved, verified participant. Cut 2 has to be complete by the 19 February freeze, because matching starts on 1 February and meetings are confirmed from 22 February. Cut 3 is small, but it must be live by 19 March, when post-summit tracking begins.

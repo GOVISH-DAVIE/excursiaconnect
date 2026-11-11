@@ -44,9 +44,9 @@ On branch `deal-room-vis-a-vis`, not yet merged.
 | 2 | Missions | Closed | The paper's three |
 | 3 | Strategic tracks | Closed | Six tracks under the missions, chosen on the application and shown in review, the pipeline, the public page and the programme |
 | 4 | Sectors | Closed | The 19-sector taxonomy, each on one track |
-| 5 | Participants | Closed | Ten kinds, angel investor to public institution; a seeker's kind of organisation |
+| 5 | Participants | Closed | Twelve kinds, angel investor to regional operator; a seeker's kind of organisation. Since 11 November the groups are roles too: capital providers and commercial or strategic partners each have a pathway, an apply tab, queue and report lines and partner wording, worked out from the kind |
 | 6 | Transaction pathways | Closed | The eight pathways replace instruments |
-| 7 | Intake routes | Closed | Challenge submissions for public institutions and corporate buyers |
+| 7 | Intake routes | Closed | Challenge submissions for public institutions and corporate buyers; since 11 November the public page offers four registration pathways, so investors register separately from commercial and strategic partners |
 | 8 | Qualification outcome | Closed | Qualified, Conditional, Referred, Declined |
 | 9 | Rubric | Closed | Relevance, credibility, readiness, counterparty fit, consent and confidentiality |
 | 10 | Pipeline | Closed | `/dealroom/pipeline`: the 13 statuses, each with date, owner and evidence from the records |

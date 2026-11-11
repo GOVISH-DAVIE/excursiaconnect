@@ -270,7 +270,7 @@ function Updates({ o, works }: { o: DrOpportunity; works: boolean }) {
           {[...o.updates].reverse().map((u) => (
             <li key={u.id} className="py-2.5 border-b border-line last:border-0 text-[14px]">
               <div className="text-[12px] text-slate">
-                {fmtStamp(u.at)} · {u.from === "owner" ? staffName(dr, u.by) : `${dr.apps.find((a) => a.id === u.by)?.org.name}, the ${u.from}, replying to a request`}
+                {fmtStamp(u.at)} · {u.from === "owner" ? staffName(dr, u.by) : `${dr.apps.find((a) => a.id === u.by)?.org.name}, the ${u.from === "provider" ? "counterparty" : u.from}${o.requests.some((r) => r.to === u.from && r.answeredAt === u.at) ? ", replying to a request" : ""}`}
               </div>
               <div>{u.text}</div>
               {u.doc && <DocLine doc={u.doc} />}
@@ -292,13 +292,13 @@ function Updates({ o, works }: { o: DrOpportunity; works: boolean }) {
               The seeker
             </button>
             <button className="btn-secondary btn-sm" onClick={() => dispatch({ type: "dr/oppRequest", oppId: o.id, to: ["provider"] })}>
-              The provider
+              The counterparty
             </button>
             <button className="btn-secondary btn-sm" onClick={() => dispatch({ type: "dr/oppRequest", oppId: o.id, to: ["seeker", "provider"] })}>
               Both
             </button>
           </div>
-          {open.length > 0 && <p className="text-[13px] text-slate">Waiting for a reply from {open.map((r) => `the ${r.to}, asked ${fmtStamp(r.at, false)}`).join(" and ")}. Replies attach here; the stage stays yours to change.</p>}
+          {open.length > 0 && <p className="text-[13px] text-slate">Waiting for a reply from {open.map((r) => `the ${r.to === "provider" ? "counterparty" : r.to}, asked ${fmtStamp(r.at, false)}`).join(" and ")}. Replies attach here; the stage stays yours to change.</p>}
         </div>
       )}
     </Section>

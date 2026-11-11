@@ -10,11 +10,11 @@ A capital seeker can be matched only after an authorised person approves the app
 
 The review can loop through *Information requested* as many times as needed, and the application stays pending until the applicant responds or the lead applies the expiry policy. A decision always records who made it, when, and why. Approved and conditional applicants complete their matching profile; a conditional applicant must clear every condition before readiness can be set.
 
-## Flow 2 — Finance provider onboarding
+## Flow 2 — Finance provider and partner onboarding
 
-A provider can browse teasers only once it is Verified, which means its mandate has been reviewed, its KYC is complete and its NDA is signed. Use cases: FP-1 to FP-4, DR-4.
+A provider can browse teasers only once it is Verified, which means its mandate has been reviewed, its KYC is complete and its NDA is signed. A commercial or strategic partner follows the same flow. Use cases: FP-1 to FP-4, CP-1, CP-2, DR-4.
 
-1. **Apply.** The provider opens the invitation link or the public page, signs in with a one-time code, and chooses *Finance provider* and its type (investor, fund, DFI, bank, buyer, distributor).
+1. **Apply.** The provider opens the invitation link or the public page, signs in with a one-time code, and chooses its pathway and type: *Capital provider* (angel investor, venture capital, private equity, fund, DFI, bank) or *Commercial or strategic partner* (corporate buyer, distributor or channel partner, technology partner, regional operator, ecosystem partner). A partner's mandate reads as what it is looking for, with a contract range instead of a ticket.
 2. **Describe the mandate.** It enters sectors, countries, stages, the ticket range with currency, instruments and exclusions, then names a decision-maker. Missing advisory fields are flagged, but the provider can still submit.
 3. **Submit.** The system issues a reference number (`CA3-FP-…`), sends an email and SMS, and adds the record to the review queue.
 4. **Upload KYC.** The provider uploads registration documents, beneficial owners and the signatory's ID. Status: *Verification pending*.

@@ -19,7 +19,7 @@ const exhibition = [
 ];
 
 const dealRoom = [
-  { href: "/e/connected-africa-3/deal-room", title: "Deal Room page", desc: "Connected Africa 3.0: who it is for, the eligibility check, how it works, and the two applications." },
+  { href: "/e/connected-africa-3/deal-room", title: "Deal Room page", desc: "Connected Africa 3.0: who should participate, the activities, the four registration pathways, the eligibility check and how it works." },
   { href: "/dealroom", title: "Deal Room team", desc: "Bouer's lead, reviewers and operations: the queue, scoring with evidence, decisions, settings and reports." },
   { href: "/dr/dr_cs54", title: "A business raising capital", desc: "Deal Room Ready: an introduction to answer with consent per document, today's meetings, who opened its file." },
   { href: "/dr/dr_fp19", title: "An investor", desc: "A verified provider: the teaser directory, introductions with watermarked documents, meetings to confirm." },

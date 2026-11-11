@@ -543,7 +543,7 @@ function drSamples(state: AppState, post: Post, eventId: string): string[][] {
     const elsewhere = todays.find((m) => m.roomId !== post.roomId && m.start > clock);
     return [
       [badge(party(here, "seeker")), "Seeker, meeting here"],
-      [badge(party(here, "provider")), "Investor, same meeting"],
+      [badge(party(here, "provider")), "Investor or partner, same meeting"],
       [badge(party(elsewhere, "seeker")), "Meeting elsewhere"],
       other,
     ];
@@ -554,7 +554,7 @@ function drSamples(state: AppState, post: Post, eventId: string): string[][] {
   const idle = dr.apps.find((a) => a.eventId === eventId && a.delegateId && !busy.has(a.id));
   return [
     [badge(party(due, "seeker")), "Seeker, meeting soon"],
-    [badge(party(due, "provider")), "Investor, same meeting"],
+    [badge(party(due, "provider")), "Investor or partner, same meeting"],
     [badge(idle?.id), "No meeting today"],
     other,
   ];

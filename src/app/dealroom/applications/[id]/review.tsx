@@ -23,6 +23,7 @@ import {
   readinessBlockers,
   readinessScore,
   rfiDue,
+  roleOf,
   rfiExpired,
   staffName,
   trackName,
@@ -299,14 +300,14 @@ function ApplicationTab({ app }: { app: DrApplication }) {
             />
           </Section>
         )}
-        <Section title={app.challenge ? "Who could solve it" : "Mandate"}>
+        <Section title={app.challenge ? "Who could solve it" : roleOf(app) === "partner" ? "What the partner is looking for" : "Mandate"}>
           {app.mandate ? (
             <KV
               rows={[
                 ["Sectors", app.mandate.sectors.join(", ")],
                 ["Countries", app.mandate.countries.join(", ")],
                 ["Stages", app.mandate.stages.join(", ")],
-                [app.challenge ? "Contract size" : "Ticket", `${compact(app.mandate.ticketMin, app.mandate.currency)} to ${compact(app.mandate.ticketMax, app.mandate.currency)}`],
+                [app.challenge || roleOf(app) === "partner" ? "Contract size" : "Ticket", `${compact(app.mandate.ticketMin, app.mandate.currency)} to ${compact(app.mandate.ticketMax, app.mandate.currency)}`],
                 ["Pathways", app.mandate.instruments.join(", ")],
                 ["Exclusions", app.mandate.exclusions.join(", ") || "None"],
                 ["Decision timeline", app.mandate.timeline || "–"],

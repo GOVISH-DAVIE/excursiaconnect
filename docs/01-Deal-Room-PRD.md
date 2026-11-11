@@ -1,6 +1,6 @@
 # ExcursiaConnect Deal Room — PRD
 
-Nov 6, 2026 · David Muia
+Nov 6, 2026 · David Muia · updated Nov 11, 2026: four registration pathways, with commercial or strategic partners as a role of their own
 
 ## Overview
 
@@ -42,7 +42,7 @@ The Deal Room is enabled per event by the platform admin at event approval, pric
 
 1. The platform admin switches the Deal Room on for an approved event and records the add-on price and any on-site Deal Room desk staffing on the event's approval record (extends ExcursiaConnect *Event setup and approval* req. 3).
 2. The lead defines **missions** (for Bouer: three) and a **source taxonomy** (referral, partner, outreach campaign, inbound, mission team) **[Bouer]**. Every application and lead carries one mission, one source and one owner.
-3. The lead defines **counterparty types**: capital seeker, and finance provider sub-types (investor, fund, DFI, bank, buyer/offtaker, distributor, project sponsor) **[Bouer]**.
+3. The lead defines **counterparty types**, which the public page offers as four registration pathways: capital seeker; capital provider (angel investor, venture capital, private equity, fund, DFI, bank); commercial or strategic partner (corporate buyer, distributor or channel partner, technology partner, regional operator, ecosystem partner); and institutional challenge (public institution or corporate buyer with a defined challenge) **[Bouer]**. Capital providers, partners and challenges are verified the same way and sit on the provider side of every match; the role is worked out from the organisation type.
 4. The lead configures one **application form per counterparty type** using the ExcursiaConnect form builder (standard plus custom fields, file uploads up to 25 MB for Deal Room documents).
 5. The lead configures one **qualification rubric per counterparty type** (see Qualification) and the **matching fields** both sides must complete.
 6. The lead sets **dates and rules** (see Notifications, rules and deadlines): application window, profile deadline, meeting length, buffers, caps, request-to-confirm window **[Bouer UC-14]**.
@@ -53,14 +53,14 @@ The Deal Room is enabled per event by the platform admin at event approval, pric
 
 ## Applications
 
-A public visitor can check eligibility and apply as a capital seeker or a finance provider; each submission gets a reference number, a status the applicant can see, and a place in the review queue **[Bouer UC-01, UC-02]**.
+A public visitor can check eligibility and register through one of four pathways (capital seeker, capital provider, commercial or strategic partner, institutional challenge); each submission gets a reference number, a status the applicant can see, and a place in the review queue **[Bouer UC-01, UC-02]**.
 
 **Requirements**
 
 1. The public page shows eligibility criteria per counterparty type and a short self-check before the form (sector, geography, stage, instrument sought or offered).
 2. Applicants create an account with email or phone and a one-time code (ExcursiaConnect delegate pattern); a password is optional.
 3. **Capital seeker form**: organisation (legal name, registration number, country, sector, year founded, website), funding ask (amount and currency, instrument: equity, debt, mezzanine, grant, trade finance, other; use of funds; stage), traction (revenue band, customers, key metrics), a named decision-maker (name, title, email, phone), mission and source, and documents (pitch deck, financials for the last two years where available, registration certificate, any feasibility or E&S studies).
-4. **Finance provider form**: organisation and type, mandate (sectors, countries, stages, ticket range min and max, instruments, exclusions), named decision-maker, typical decision timeline, mission and source.
+4. **Capital provider and partner form**: organisation and type, mandate (sectors, countries, stages, ticket or contract range min and max, transaction pathways, exclusions), named decision-maker, typical decision timeline, mission and source. The capital provider pathway offers investor types only; the partner pathway offers partner types only and reads the range as a contract size and the mandate as "what you are looking for".
 5. Forms save as drafts; a draft resumes on any channel (web, Android, iOS) from the server copy, so nothing typed is lost **[Bouer §8]**.
 6. Submission is blocked until required fields and required documents are present; the form names each missing item **[Bouer UC-01]**. Incomplete mandate fields are flagged for correction rather than blocking where the lead marks them advisory **[Bouer UC-02]**.
 7. On submit the system issues a reference number (e.g. `CA3-CS-00123`, `CA3-FP-00045`), confirms by email and SMS, and places the application in the review queue.
@@ -100,7 +100,7 @@ Matching is rule-based and reviewer-approved: the system proposes and explains, 
 
 **Requirements**
 
-1. The match search runs over Deal Room Ready seekers and Verified providers only, using the event's matching fields: sector, country or region, stage, ticket size (seeker ask inside the provider's range), instrument, and exclusions.
+1. The match search runs over Deal Room Ready seekers and Verified providers only, using the event's matching fields: sector, country or region, stage, ticket size (seeker ask inside the provider's range), instrument, and exclusions. A partner is matched on the same fields, with its contract range as the ticket and its pathways (procurement and contracts, market access, strategic partnerships, pilots) as the instrument.
 2. Each candidate pair shows a **fit summary**: which criteria it meets, which it misses, and any exclusion hit. Exclusion hits are shown but not hidden; a ticket-size or exclusion miss needs a reviewer note to approve.
 3. Candidates are ordered by number of criteria met and readiness score; the ordering rule is shown on screen and configurable by the lead, never a black box.
 4. A reviewer **approves, rejects or defers** each pair with a note; the system never creates a match on its own and shows "no suitable match" rather than forcing one.
@@ -122,7 +122,7 @@ A Deal Room meeting is a staff-scheduled 1:1 bound to a room or table, a time sl
 3. On confirmation the meeting gets a room or approved online link, both parties get email, SMS and an .ics invite, and reminders go 24 hours and 30 minutes before.
 4. **Caps**: a per-day and per-event meeting cap per finance provider (set at onboarding) and per capital seeker; operations sees remaining capacity and can override with a logged reason.
 5. **Auto-fill option**: operations can ask the system to propose a full schedule for all *Ready to schedule* matches inside the rules; every proposed slot still needs participant confirmation.
-6. **Changes**: a reschedule needs both parties to re-confirm; a room change inside the same slot does not. Confirmed meetings are never moved by bulk actions **[Bouer §10 scheduling rule]**.
+6. **Changes**: a reschedule needs both parties to re-confirm; a room change inside the same slot does not. Confirmed meetings are never moved by bulk actions **[Bouer §10 scheduling rule]**. A participant who wants to move a meeting proposes a day and time (chosen from slots when both parties and a table are free) with a reason; the other party agrees or declines; only an agreed move goes to the Deal Room team, who accept it, which books it as confirmed by both, or decline it. Until then the meeting keeps its slot.
 7. Schedules export per room, per day and per participant (PDF and Excel) for the printed backup **[Bouer UC-16]**.
 
 **Summit-week requirements**
@@ -216,11 +216,11 @@ The lead's dashboard is one funnel from lead to funds received, shown against Bo
 
 | Area | Measures | Breakdowns |
 | --- | --- | --- |
-| Mobilisation | Leads, applications started, submitted; time to first review | Mission, source, owner, counterparty type |
+| Mobilisation | Leads, applications started, submitted; time to first review | Mission, source, owner, counterparty type (the four pathways) |
 | Qualification | In review, information requested, decided; approved / conditional / waitlisted / declined; Deal Room Ready; days to decision | Mission, type, reviewer |
-| Verification | Providers verified, NDA signed, KYC pending | Provider type |
+| Verification | Providers verified, NDA signed, KYC pending | Pathway (capital provider, partner, challenge), then organisation type |
 | Matchmaking | Proposed, approved, introduced, accepted, declined, expired; acceptance rate per side | Mission, sector, ticket band |
-| Meetings | Requested, confirmed, held, cancelled, rescheduled, no-show; per participant vs cap; room utilisation | Day, room, provider type |
+| Meetings | Requested, confirmed, held, cancelled, rescheduled, no-show; per participant vs cap; room utilisation | Day, room, pathway and organisation type |
 | Conversion | Open opportunities by stage; interest, promised, committed, received (count and value); overdue actions; closed by reason | Owner, mission, sector, month |
 
 **Requirements**
@@ -258,8 +258,8 @@ Eleven new entities attach to the existing Event, Delegate, Room and Scan entiti
 | Application | reference no., counterparty type, mission, source, owner, form answers, status, decision, decision reason, decided by/at, readiness | Event, Delegate (applicant) |
 | Document | file, type, date, tier, consent state, retention date | Application |
 | Assessment | criterion, score, linked document, note, reviewer, timestamp | Application |
-| Mandate | sectors, countries, stages, ticket min/max, currency, instruments, exclusions, decision-maker | Application (finance provider) |
-| Verification | KYC items, sanctions check result, NDA version, signatory, signed at, verified by | Application (finance provider) |
+| Mandate | sectors, countries, stages, ticket or contract min/max, currency, instruments, exclusions, decision-maker | Application (capital provider, partner or challenge) |
+| Verification | KYC items, sanctions check result, NDA version, signatory, signed at, verified by | Application (capital provider, partner or challenge) |
 | Match | seeker application, provider application, criteria met/missed, rationale, brief, reviewer decision, status | Event |
 | Introduction | match, shared items, sent at, seeker response, provider response, expires at | Match |
 | DealRoomMeeting | introduction, room, table or online link, start, end, status, attendance, outcome, next action, owner, notes (sensitive flag) | Introduction, Room |
