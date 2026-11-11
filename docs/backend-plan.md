@@ -8,8 +8,9 @@ How ExcursiaConnect goes from a browser-only prototype to a real backend, in pha
 - Reached from **server-side Next.js**: server components read, server actions write, and route handlers take webhooks and serve the apps' API.
 - Running with `next start` on loopback **behind nginx**.
 - No separate API server.
+- **On the client: TanStack Query for server data, the Context API for app-wide facts, custom hooks as the only way screens get or change data.** No Redux and no Redux-style global store; API calls are kept apart from the UI.
 
-How it runs on the server (processes, nginx, deploys, backups) is in [deploy.md](deploy.md).
+How the code is layered, with the clean-code rules and one feature worked end to end, is in [architecture.md](architecture.md). How it runs on the server (processes, nginx, deploys, backups) is in [deploy.md](deploy.md).
 
 ## Where we start
 
@@ -83,21 +84,24 @@ Before any database work:
 
 ### How a write runs on the server
 
-One server action, `runAction(action)`, keeps the screens' `dispatch` shape. Each action passes through these steps:
+A screen calls a custom hook (`useAssignReviewer`). The hook calls the module's API client, and the API client calls a **server action for that one use case** (`assignReviewerAction`). The server action checks the session, validates its input with Zod, and calls the module's service. Screens never send action objects. The layers are set out in [architecture.md](architecture.md).
+
+Inside the service, every write goes through one helper, `runCommand`, which builds the rule's action from the validated input and runs these steps:
 
 ```
 session → actor
-  → registry: deny by default; is this action allowed for this actor at all?
-  → Zod schema for this action type: whitelisted fields only
-  → ownership: does the actor own, or may they act on, every record the action names?
+  → deny by default: is this use case allowed for this actor at all?
+  → ownership: does the actor own, or may they act on, every record named?
   → per-event advisory lock (pg_advisory_xact_lock)
   → load the module's aggregate for that event
   → run the existing reducer with ctx (server now, server ids, actor)
   → refused? return the reason, write nothing
   → save only the records whose object identity changed (immutable updates make this cheap)
   → write side tables in the same transaction: audit, outbox, busy slots, counters
-  → commit → return the changed slice, filtered for this viewer
+  → commit → return { ok: true, data } as a DTO, or { ok: false, refusal } with the rule's own reason
 ```
+
+The server action then calls `updateTag` for any cached read the write changed, and the hook invalidates or updates its TanStack Query keys.
 
 **Two storage styles, chosen by volume:**
 - **Aggregate style:** the Deal Room's business records (applications, matches, meetings, sessions, opportunities, configuration) and the Exhibition's.
@@ -121,10 +125,13 @@ session → actor
 
 ### How a read runs
 
-- **Each module has loaders that return only what the viewer may see.** Today the whole state goes to every browser (1.2 MB on the seed). Under the loaders, staff screens get a projection, an applicant gets their own record, and the badge page gets the badge.
-- **The client store becomes a cache:** `runAction` returns the re-loaded slice for that viewer and the store replaces its copy. Screens don't also call `refresh()`. The cross-tab sync through the storage event becomes a refetch on focus.
-- **Sessions are read inside `<Suspense>`:** `cacheComponents` is on, so a cookie can't be read at the top of the root layout. The existing `Resolve` boundary hosts it. `connection()` goes where a server component needs "now" with no request API (for example, whether applications are open).
-- **Writes from one tab queue one at a time** (Next runs server actions in order per client). Autosaves merge, "save and submit" is one command, and screens wait for the result before navigating. Phase 1 shows a pending state rather than optimistic updates.
+- **Services return only what the viewer may see.** Today the whole state goes to every browser (1.2 MB on the seed). Under the services, staff screens get a projection, an applicant gets their own record, and the badge page gets the badge, each as a DTO, never a Prisma model.
+- **TanStack Query holds the data in the browser.** Each module has query contracts (`queries.ts`): the key, the options and the server cache tag in one place, imported by both the server prefetch and the client hook.
+- **The first paint has data:** a page's server component prefetches through the service inside `<Suspense>` and passes the result down with `<HydrationBoundary>`. The client hook reads the same key with `useSuspenseQuery`. Later reads go through the API client to a GET route handler.
+- **Caching:** per-viewer data is dynamic and uses the standard `dehydrate`. Cached public data (an event page) uses `'use cache'` with `cacheTag`, and the Next guide's prerenderable hydration helper, because `dehydrate()` reads the clock during a prerender.
+- **Sessions are read inside `<Suspense>`:** `cacheComponents` is on, so a cookie can't be read at the top of the root layout. `connection()` goes where a server component needs "now" with no request API (for example, whether applications are open).
+- **Writes from one tab queue one at a time** (Next runs server actions in order per client). Autosaves merge, "save and submit" is one mutation, and screens wait for the result before navigating. Phase 1 shows a pending state. Optimistic updates (`onMutate`) come where a screen needs them, such as the live board.
+- **Context holds no records:** only the session, the current event and toasts (architecture.md, "Where state lives").
 
 ### Concurrency and correctness
 
@@ -257,7 +264,7 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 
 | Phase | Window | Gate |
 | --- | --- | --- |
-| 0. Server-safe rules and foundations | Thu 12 Nov to Fri 27 Nov 2026 | The rules run on the server; sign-in and the gateway run on staging |
+| 0. Server-safe rules and foundations | Thu 12 Nov to Fri 27 Nov 2026 | The rules run on the server; sign-in and the layers, end to end, run on staging |
 | 1. Deal Room onboarding | Mon 23 Nov 2026 to Fri 8 Jan 2027 | **Applications open Tue 15 Dec**; decisions from Tue 22 Dec; fees from Fri 8 Jan |
 | 2. Core platform and scanning | Mon 4 Jan to Fri 29 Jan 2027 | Badges, accreditation and scanners for the summit; ticketing for other events |
 | 3. Deal Room summit operations | Mon 4 Jan to Wed 10 Feb 2027 | Design freeze Fri 22 Jan; rehearsal Wed 10 Feb; **summit 15 to 18 Feb** |
@@ -274,7 +281,7 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 | M0.2 | **Database and Prisma**: PostgreSQL with database roles, the first schema (identity, minimal event, tier and delegate, the Deal Room aggregate and its tables), migrations, connection limits and timeouts | `prisma migrate deploy` runs clean on an empty database, as the `migrator` role |
 | M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record |
 | M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL |
-| M0.5 | **The gateway**: registry, Zod schemas, ownership checks, per-event lock, aggregate load and save, audit, the module flag (server or local data), filtered results | Assigning a reviewer runs end to end from the existing screen; a test proves another organiser's and another applicant's records are refused |
+| M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the first server action and GET route handler; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` helpers, `ApiError`); the feature-folder pattern; Zod; the lint rules that enforce the layer boundaries (architecture.md) | Assigning a reviewer runs from a screen through a hook, the API client, a server action, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; lint fails a component that imports the server or Prisma |
 | M0.6 | **CI and staging**: type-check, lint, tests and build on every push; staging deployed behind nginx as in `deploy.md` | CI is green; staging is reachable over HTTPS with the security headers |
 
 **Notes on M0.0, done 11 Nov 2026:**
@@ -283,9 +290,11 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 - **The actor decides:** `staffOf`, `memberOf`/`memberCan`, `actionExhibitor` and `scanOperatorOf`. Algotech-only actions and fee settlement (system only) are enforced in the rules.
 - **Refusals:** `apply()` returns `{ state, refusal }`. Every refusal in the Deal Room's onboarding and review reducer has its reason. Meetings, sessions, conversion, Exhibition and core refusals still return a generic reason; theirs come with their milestones (M3.x, M5.0, Phase 2).
 - **Tests:** 174 Vitest tests in `tests/` (`npm test`): the seven earlier rule suites, the actor checks and the refusal reasons.
-- **Still trusted from the client, to fix in the module's milestone:** registration's price and status, a scan's verdict and time (M2.2, M2.4), and the applicant's ownership of an application (the gateway, M0.5).
+- **Still trusted from the client, to fix in the module's milestone:** registration's price and status, a scan's verdict and time (M2.2, M2.4), and the applicant's ownership of an application (`runCommand`, M0.5).
 
 ### Phase 1: Deal Room onboarding (23 November 2026 to 8 January 2027)
+
+Each milestone from here on builds its feature the same way: contracts, query contracts, API client, hooks, server action, service and repository, as in [architecture.md](architecture.md). It also moves that feature's screens off the prototype store onto the hooks, so a screen is never half on each.
 
 | # | Milestone | Done when |
 | --- | --- | --- |
@@ -345,7 +354,7 @@ The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only 
 
 | # | Milestone | Done when |
 | --- | --- | --- |
-| M6.1 | `/api/v1` route handlers over the same gateway and loaders, token auth for the apps, versioning, rate limits | An OpenAPI file lists every endpoint the apps use |
+| M6.1 | `/api/v1` route handlers over the same services, token auth for the apps, versioning, rate limits | An OpenAPI file lists every endpoint the apps use |
 | M6.2 | Push notifications through the outbox | A test device receives a meeting reminder |
 
 ## Decisions
@@ -372,7 +381,7 @@ The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only 
 | Five weeks to 15 Dec | Day one carries apply, documents, the first half of review and email only; decisions follow on 22 Dec and fees on 8 Jan |
 | M-Pesa approval or the SMS sender ID run late | Filed in week one (M0.1); card and email carry the gate if either is late |
 | Rules drift between the prototype and the server | The server runs the same reducers; their tests run in CI |
-| Leaking data the prototype showed everyone | Loaders filter per viewer; the gateway checks ownership; M3.6 walks every role |
+| Leaking data the prototype showed everyone | Services return per-viewer DTOs; `runCommand` checks ownership; M3.6 walks every role |
 | Summit-day connectivity | Offline queues with client ids, polling that recovers, printed backups |
 | One server fails in summit week | Managed PostgreSQL with HA, a warm standby server, a timed failover drill (M3.7) |
 | The aggregate becomes a bottleneck | Budgets are measured in the load tests; hot paths move to targeted commands |
