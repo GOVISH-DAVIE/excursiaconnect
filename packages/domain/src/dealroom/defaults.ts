@@ -15,7 +15,10 @@ export const STANDARD_SECTORS = [
 export const STANDARD_COUNTRIES = ["Kenya", "Uganda", "Tanzania", "Rwanda", "Ethiopia", "Nigeria", "Ghana", "Côte d'Ivoire", "Senegal", "Zambia", "South Africa"];
 export const STANDARD_SOURCES = ["Referral", "Partner", "Outreach campaign", "Inbound", "Mission team"];
 export const STANDARD_PROVIDER_KINDS: ProviderKind[] = [
-  "Angel investor", "Venture capital", "Private equity", "Fund", "DFI", "Bank", "Corporate buyer", "Distributor or channel partner", "Public institution", "Ecosystem partner",
+  // capital providers, then commercial and strategic partners, then the institution a challenge comes from (PRD, 11 Nov: twelve kinds)
+  "Angel investor", "Venture capital", "Private equity", "Fund", "DFI", "Bank",
+  "Corporate buyer", "Distributor or channel partner", "Ecosystem partner", "Technology partner", "Regional operator",
+  "Public institution",
 ];
 
 export const STANDARD_RUBRIC: DrConfig["rubric"] = {
