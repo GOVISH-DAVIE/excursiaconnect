@@ -21,6 +21,8 @@ export function DealRoomShell({ children }: { children: ReactNode }) {
     { href: "/dealroom/reports", label: "Reports", show: true },
     { href: "/dealroom/notifications", label: "Notifications", show: true },
     { href: "/dealroom/settings", label: "Settings and rules", show: true },
+    // the first screen on the real API, as the signed-in person rather than the persona above (backend-plan.md, M0.5)
+    { href: "/team/applications", label: "Review queue (live data)", show: true },
   ];
   const today = dr.clock.slice(0, 10);
   const steps = [

@@ -21,12 +21,13 @@ export class ApiError extends Error {
   }
 }
 
-type Options<T> = { body?: unknown; schema?: z.ZodType<T> };
+type Options<T> = { body?: unknown; query?: Record<string, string | undefined>; schema?: z.ZodType<T> };
 
-async function request<T>(method: string, path: string, { body, schema }: Options<T> = {}): Promise<T> {
+async function request<T>(method: string, path: string, { body, query, schema }: Options<T> = {}): Promise<T> {
+  const qs = new URLSearchParams(Object.entries(query ?? {}).filter((e): e is [string, string] => !!e[1])).toString();
   let res: Response;
   try {
-    res = await fetch(`${PUBLIC_API}${path}`, {
+    res = await fetch(`${PUBLIC_API}${path}${qs ? `?${qs}` : ""}`, {
       method,
       credentials: "include",
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },

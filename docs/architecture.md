@@ -333,10 +333,7 @@ Mounted once in `apps/web/src/app/providers.tsx`, a client component used by the
 - **`QueryProvider`:** a new `QueryClient` for each server render, one shared client in the browser (the Next guide's pattern).
   - `staleTime` 15 s and one retry.
   - No refetch on window focus for staff screens that poll; the live board sets its own interval.
-- **`SessionProvider`:** the signed-in user, their role and which persona screens to show.
-  - Fetched once on the server from the API's `/v1/session` and passed down.
-  - Exposes `useSession()`. It holds no records.
-- **`EventProvider`:** the current event's id, name, dates and enabled modules. Exposes `useCurrentEvent()`.
+- **The session is not a Context** (decided while building M0.5). It is server data, so it lives in the TanStack Query cache under one key, read with `useSession()` (`features/auth`). A Context would hold a second copy. The current event comes the same way: `useDealRoomEvent()` reads it from the session's memberships.
 - **`ToastProvider`:** `useToast()` for confirmations and refusals that need no inline place.
 
 Each context has its own file, a typed `use…` hook that throws outside its provider, and a value memoised so consumers re-render only when it changes.

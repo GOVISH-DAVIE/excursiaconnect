@@ -148,6 +148,7 @@ export function Rail({
   nav,
   context,
   children,
+  footer = "Prototype, mock data",
 }: {
   persona: string;
   who: string;
@@ -155,6 +156,8 @@ export function Rail({
   context?: ReactNode;
   children: ReactNode;
   accent?: "ink" | "coral";
+  /** the line at the foot of the rail; the prototype's screens say they run on mock data */
+  footer?: ReactNode;
 }) {
   // on a phone, more than four pages go in a drawer behind a Menu button; four or fewer stay as a row of tabs
   const drawer = nav.length > 4;
@@ -175,7 +178,7 @@ export function Rail({
             <RailNav nav={nav} />
           </Suspense>
         </nav>
-        <div className="mt-auto p-5 text-[13px] text-white/40 hidden lg:block">Prototype, mock data</div>
+        <div className="mt-auto p-5 text-[13px] text-white/40 hidden lg:block">{footer}</div>
       </aside>
       <main className="min-w-0">
         <div className="mx-auto max-w-[1200px] px-5 py-6 lg:px-8 lg:py-8">{children}</div>

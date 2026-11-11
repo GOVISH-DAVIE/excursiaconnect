@@ -17,5 +17,7 @@ export default defineConfig({
     include: ["packages/*/tests/**/*.test.ts", "apps/*/tests/**/*.test.ts"],
     environment: "node",
     env: { NODE_ENV: "test" },
+    // the database suites load and remove the demo seed in one shared test database, so files run one at a time
+    fileParallelism: false,
   },
 });

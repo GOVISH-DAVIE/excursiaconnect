@@ -174,7 +174,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("through PostgreSQL, as the app 
   test("the Deal Room comes back from the database as it went in", async () => {
     const stored = await createDealRoomRepo(db).load(EV);
     expect(stored).not.toBeNull();
-    expect(comparable(dealRoomFromRows(EV, stored!, seed.dealRoom.clock))).toEqual(comparable(seed.dealRoom));
+    expect(comparable(dealRoomFromRows(EV, stored!.dealRoom, seed.dealRoom.clock))).toEqual(comparable(seed.dealRoom));
   });
 
   test("the busy slots are in, and the database refuses a clash with any of them", async () => {

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 import { Logo } from "@/components/ui";
 import { SignIn } from "./sign-in";
 
@@ -12,7 +13,9 @@ export default function SignInPage() {
         <Logo variant="icon" className="h-12" />
       </Link>
       <div className="surface mt-8 w-full max-w-md p-6 sm:p-8">
-        <SignIn />
+        <Suspense fallback={<p className="text-[14px] text-slate">Loading…</p>}>
+          <SignIn />
+        </Suspense>
       </div>
       <p className="mt-6 max-w-md text-center text-[13px] text-slate">Signing in keeps your Deal Room application and meetings in one place. We never share your email.</p>
     </main>

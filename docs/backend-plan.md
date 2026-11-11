@@ -296,7 +296,7 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 | M0.2a | **The API as its own process**: npm workspaces; Express with checked settings, security headers, CORS for the web app's origins, the error contract, health checks and a clean shutdown; the lint rules for the workspace boundaries | The prototype runs unchanged from `apps/web`; the API answers `/health/ready` against PostgreSQL; lint fails the web app importing the database. **Done 11 Nov 2026.** Notes below |
 | M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record **Done 11 Nov 2026** for local and the commands staging and production use; staging itself comes with M0.6. Notes below |
 | M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL **Done 11 Nov 2026** in the API; the sign-in screens come with M0.5's client foundations and staging with M0.6. Notes below |
-| M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the module pattern in the API (`routes`, `controller`, `service`, `repo`, as `health` already does); the first POST and GET routes with their contracts; the Origin check on writes; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` client, `ApiError`); the feature-folder pattern in the web app | Assigning a reviewer runs from a screen through a hook, the API client, the Express route, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; a write from another origin is refused |
+| M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the module pattern in the API (`routes`, `controller`, `service`, `repo`, as `health` already does); the first POST and GET routes with their contracts; the Origin check on writes; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` client, `ApiError`); the feature-folder pattern in the web app | Assigning a reviewer runs from a screen through a hook, the API client, the Express route, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; a write from another origin is refused **Done 11 Nov 2026**, apart from moving the prototype's own screens, which goes module by module from M1.1. Notes below |
 | M0.6 | **CI and staging**: type-check, lint, tests and both builds on every push; staging deployed behind nginx as in `deploy.md`, with the web app and the API on their two names | CI is green; both names are reachable over HTTPS with the security headers; the deploy switches the API and then the web app with no failed request |
 
 **Notes on M0.0, done 11 Nov 2026:**
@@ -426,6 +426,41 @@ What applicants and reviewers need on day one comes first. Anything that can fol
   - deleting old `rate_limit` windows (a worker job, M1.4)
   - scanner PIN sign-in (M2.2)
 
+**Notes on M0.5, done 11 Nov 2026:**
+- **`runCommand`** (`apps/api/src/modules/dealroom/dealroom.service.ts`) is the one way the Deal Room changes data. In order:
+  1. **Deny by default:** the signed-in person must be on the event's Deal Room team (`dr_staff.user_id`). That gives the actor.
+  2. **Lock:** one transaction holding `pg_advisory_xact_lock` for the event.
+  3. **Load** the event's aggregate.
+  4. **Ownership:** every record named must be in this event. Another organiser's record simply isn't loaded, so it is refused.
+  5. **Apply:** `apply(state, action, ctx)`, the prototype's own rule. A refusal is a 409 carrying the rule's reason, and nothing is written.
+  6. **Save:** only the rows whose mapped form changed, with an application's `version` bumped.
+  7. **Audit:** one `audit_entry` per changed record (actor, action, a capped copy of the input, the client's address).
+  8. **Commit.**
+- **The first routes** (`/v1/dealroom/:eventId/…`, contracts in `@excursia/contracts/dealroom`):
+  - `GET team`: the signed-in person, whether they may assign, and the team.
+  - `GET applications`: the queue from summary columns, by status and assignee.
+  - `POST applications/assign`
+- **Proved** (`apps/api/tests/dealroom.test.ts`, 10 tests):
+  - the assignment is saved, versioned and audited, and untouched records aren't rewritten
+  - a reviewer is refused with the rule's own reason, and nothing changes
+  - Operations staff can't be given reviews
+  - another organiser's application is refused through either event
+  - an applicant, a half-finished staff sign-in and nobody are refused
+  - a cross-site write is refused
+  - 10 assignments at once are applied one after another, with none lost
+
+  Database test files now run one at a time, since they share the demo seed.
+- **The web app:**
+  - `features/dealroom` holds the API client, query contracts and hooks.
+  - `/team` is the staff workspace on the API, as the signed-in person. A visitor who isn't signed in goes to `/signin?next=…` and comes back.
+  - `/team/applications` is the review queue with "assign selected to…". The prototype's Deal Room menu links to it.
+  - Tested in Chrome: a reviewer sees the queue without assign controls; the lead assigns two applications to her; the database shows the rows, their versions and the audit entries.
+- **The session and the current event come from TanStack Query** (`useSession`, `useDealRoomEvent`), not from Context providers. They are server data, and the architecture keeps server data out of Context.
+- **Not yet:**
+  - the prototype's own `/dealroom` screens, which move with their milestones, the queue in M1.3
+  - Deal Room rules that read rooms or the programme (M3.2)
+  - the per-event aggregate is loaded whole for each write, about 0.8 MB on the seed; the load test (M1.5) decides whether hot paths need targeted commands
+
 ### Phase 1: Deal Room onboarding (23 November 2026 to 8 January 2027)
 
 Each milestone from here on builds its feature the same way, as in [architecture.md](architecture.md): contracts; then the Express route, service and repository; then the web app's query contracts, API client and hooks. It also moves that feature's screens off the prototype store onto the hooks, so a screen is never half on each.
@@ -445,7 +480,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | # | Milestone | Done when |
 | --- | --- | --- |
 | M2.1 | **Badges and delegates**: badge page and email, random badge codes, delegate edits | A paid participant gets a working badge by email and SMS |
-| M2.2 | **Accreditation and scanning**: scanner devices and PIN sign-in with lockout, desk accreditation, zone and room doors, anti-passback through `Presence`, atomic capacity, PIN overrides, the offline queue with idempotent sync | 50 scans a minute on two devices with one offline: no duplicates and no over-capacity after sync |
+| M2.2 | **Accreditation and scanning**: scanner devices and PIN sign-in with lockout, desk accreditation, zone and room doors, anti-passback through `Presence`, atomic capacity, PIN overrides, the offline queue with idempotent sync | 50 scans a minute on two devices with one offline: no duplicates and no over-capacity after sync; the prototype's demo PINs and the applications' invite tokens no longer saved in browser storage (found by the security pass, 11 Nov 2026) |
 | M2.3 | **Organisers and events**: KYC and DPA, the event builder, media uploaded straight to storage, approval by Algotech | An organiser builds and publishes an event on staging |
 | M2.4 | **Registration and orders**: pricing, promo and status worked out on the server; M-Pesa and card checkout; refunds | A delegate registers and pays; a crafted request can't change the price |
 | M2.5 | **Money and comms**: commission, payouts, reconciliation; memberships, shifts, campaigns | A payout run matches the payments to the shilling |

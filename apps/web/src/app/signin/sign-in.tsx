@@ -7,7 +7,7 @@
  * sees who they are, and can sign out.
  */
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import type { SignInNext } from "@excursia/contracts/auth";
 import { Tabs } from "@/components/ui";
@@ -26,6 +26,9 @@ export function SignIn() {
   const session = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
+  // only a path on this site: never an absolute or protocol-relative URL, so the link can't send anyone elsewhere
+  const nextParam = useSearchParams().get("next");
+  const next = nextParam && /^\/(?!\/)[\w\-/?=&.%]*$/.test(nextParam) ? nextParam : null;
   const [who, setWho] = useState<(typeof WHO)[number]>("Applicant");
   /** What the password step said comes next. */
   const [after, setAfter] = useState<SignInNext | null>(null);
@@ -38,7 +41,7 @@ export function SignIn() {
   async function goIn() {
     setLeaving(true);
     const s = await queryClient.fetchQuery({ ...sessionQuery.options(), staleTime: 0 });
-    router.replace(s ? destination(s) : "/signin");
+    router.replace(s ? (next ?? destination(s)) : "/signin");
   }
 
   if (leaving) return <p className="text-[14px] text-slate">Signed in. Taking you in…</p>;

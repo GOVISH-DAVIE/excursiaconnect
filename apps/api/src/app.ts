@@ -17,6 +17,7 @@ import { originCheck } from "./http/origin";
 import { loadSession } from "./http/session";
 import { logMailer, type Mailer } from "./mail/mailer";
 import { authModule } from "./modules/auth";
+import { dealRoomModule } from "./modules/dealroom";
 import { healthModule } from "./modules/health";
 
 export type AppDeps = {
@@ -67,6 +68,7 @@ export function createApp({ config, db, mailer, now, logError = defaultLogError 
   const auth = authModule({ db, config, mailer: mailer ?? logMailer({ production: config.NODE_ENV === "production" }), now });
   app.use("/v1", originCheck(config), loadSession(config, auth.service));
   app.use("/v1", auth.routes);
+  app.use("/v1/dealroom", dealRoomModule({ db, now }));
 
   app.use(notFound);
   app.use(errorHandler(logError));
