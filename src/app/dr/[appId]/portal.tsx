@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { Wordmark } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
 import { PATHWAYS, formatInfo, askBand, compact, decisionOf, feeInKes, feeLabel, feeOwed, feeSettled, matchStage, missionName, openConditions, openRfi, profileDeadline, publicStatus, qualified, rfiDue } from "@/lib/dealroom/logic";
@@ -101,6 +102,12 @@ export function Portal({ id }: { id: string }) {
         {tab === "Mandate" && <Mandate app={app} />}
         {tab === "Messages" && <Messages app={app} />}
       </main>
+
+      <footer className="mx-auto max-w-3xl px-5 pb-8">
+        <p className="flex items-center justify-center gap-2 border-t border-line pt-6 text-[13px] text-slate">
+          Powered by <Wordmark size="sm" />
+        </p>
+      </footer>
     </div>
   );
 }
