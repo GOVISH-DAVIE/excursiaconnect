@@ -23,6 +23,15 @@ const Env = z
     WEB_ORIGINS: list.default(["http://localhost:3010"]),
     /** The parent domain the session cookie is scoped to (".example.co.ke"), so web and api share it. */
     COOKIE_DOMAIN: z.string().optional(),
+    /**
+     * The API's own secret, 32 bytes or more, base64: one-time codes are hashed with a key derived from it and
+     * TOTP secrets encrypted with another, so a copy of the database alone reveals neither.
+     */
+    AUTH_SECRET: z
+      .string()
+      .refine((s) => Buffer.from(s, "base64").length >= 32, "must be at least 32 random bytes, base64 (openssl rand -base64 32)"),
+    /** How email leaves: "log" writes it to the console, for local work and tests only. */
+    MAIL_TRANSPORT: z.enum(["log"]).default("log"),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== "production") return;

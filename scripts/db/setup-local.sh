@@ -95,6 +95,9 @@ echo "Connection strings → $ENV_FILE"
 grep -q "^# PostgreSQL" "$ENV_FILE" 2>/dev/null || printf '\n# PostgreSQL (scripts/db/setup-local.sh); never commit these\n' >> "$ENV_FILE"
 # the demo seed loads only where APP_ENV is local or staging (backend-plan.md, M0.3)
 grep -q "^APP_ENV=" "$ENV_FILE" || printf 'APP_ENV=local\n' >> "$ENV_FILE"
+# the API's own secret: signs one-time codes and encrypts TOTP secrets (M0.4); kept if already there, since
+# changing it makes every enrolled authenticator unreadable
+grep -q "^AUTH_SECRET=" "$ENV_FILE" || printf 'AUTH_SECRET=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"
 upsert DATABASE_URL "$(url excursia_app "$APP_PW" excursia_dev)"
 upsert WORKER_DATABASE_URL "$(url excursia_worker "$WORKER_PW" excursia_dev)"
 upsert REPORTING_DATABASE_URL "$(url excursia_reporting "$REPORTING_PW" excursia_dev)"

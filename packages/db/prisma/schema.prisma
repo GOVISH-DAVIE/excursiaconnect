@@ -71,6 +71,7 @@ model Session {
 enum OtpPurpose {
   sign_in
   verify_contact
+  set_password // a staff member setting or resetting their password
 }
 
 /// A one-time code, hashed: 10-minute expiry, single use, five attempts (backend-plan.md, Security model).

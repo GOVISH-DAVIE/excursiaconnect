@@ -13,11 +13,19 @@ import helmet from "helmet";
 import type { Db } from "@excursia/db";
 import type { Config } from "./config";
 import { errorHandler, notFound } from "./http/errors";
+import { originCheck } from "./http/origin";
+import { loadSession } from "./http/session";
+import { logMailer, type Mailer } from "./mail/mailer";
+import { authModule } from "./modules/auth";
 import { healthModule } from "./modules/health";
 
 export type AppDeps = {
   config: Config;
   db: Db;
+  /** How one-time codes are emailed; config.MAIL_TRANSPORT by default. */
+  mailer?: Mailer;
+  /** The clock; tests move it to expire sessions and codes. */
+  now?: () => Date;
   /** Where unexpected errors are reported; console by default. */
   logError?: (err: unknown, req: { method: string; path: string }) => void;
 };
@@ -27,7 +35,7 @@ const defaultLogError: NonNullable<AppDeps["logError"]> = (err, req) => {
   console.error(`[api] ${req.method} ${req.path} failed:`, err);
 };
 
-export function createApp({ config, db, logError = defaultLogError }: AppDeps): Express {
+export function createApp({ config, db, mailer, now, logError = defaultLogError }: AppDeps): Express {
   const app = express();
 
   app.disable("x-powered-by");
@@ -54,6 +62,11 @@ export function createApp({ config, db, logError = defaultLogError }: AppDeps): 
   app.use(express.json({ limit: "100kb" }));
 
   app.use("/health", healthModule({ db }));
+
+  // everything under /v1: writes must come from the web app (CSRF), and the session cookie is read once
+  const auth = authModule({ db, config, mailer: mailer ?? logMailer({ production: config.NODE_ENV === "production" }), now });
+  app.use("/v1", originCheck(config), loadSession(config, auth.service));
+  app.use("/v1", auth.routes);
 
   app.use(notFound);
   app.use(errorHandler(logError));

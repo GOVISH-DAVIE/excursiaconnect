@@ -15,6 +15,7 @@ import { loadConfig } from "../src/config";
 import { errorHandler, HttpError, notFound } from "../src/http/errors";
 
 const WEB = "https://events.example.co.ke";
+const TEST_SECRET = Buffer.alloc(32, 7).toString("base64");
 
 async function listen(app: Express) {
   const server = await new Promise<Server>((resolve) => {
@@ -25,7 +26,7 @@ async function listen(app: Express) {
 }
 
 async function start(db: Db) {
-  const config = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgresql://unused", WEB_ORIGINS: WEB });
+  const config = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgresql://unused", WEB_ORIGINS: WEB, AUTH_SECRET: TEST_SECRET });
   const logged: unknown[] = [];
   return { ...(await listen(createApp({ config, db, logError: (err) => logged.push(err) }))), logged };
 }
@@ -162,11 +163,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("an API with its database", () =
 
 describe("the API's settings", () => {
   test("production needs https origins and a cookie domain, and names what is wrong without its value", () => {
-    expect(() => loadConfig({ NODE_ENV: "production", DATABASE_URL: "postgresql://u:hunter2@db/x", WEB_ORIGINS: "http://events.example.co.ke" })).toThrow(
+    expect(() => loadConfig({ NODE_ENV: "production", DATABASE_URL: "postgresql://u:hunter2@db/x", WEB_ORIGINS: "http://events.example.co.ke" , AUTH_SECRET: TEST_SECRET })).toThrow(
       /WEB_ORIGINS[\s\S]*COOKIE_DOMAIN/,
     );
     try {
-      loadConfig({ NODE_ENV: "production", DATABASE_URL: "postgresql://u:hunter2@db/x" });
+      loadConfig({ NODE_ENV: "production", DATABASE_URL: "postgresql://u:hunter2@db/x" , AUTH_SECRET: TEST_SECRET });
     } catch (e) {
       expect(String(e)).not.toContain("hunter2");
     }
@@ -177,7 +178,7 @@ describe("the API's settings", () => {
   });
 
   test("origins are a comma-separated list", () => {
-    const c = loadConfig({ DATABASE_URL: "x", WEB_ORIGINS: "https://a.example, https://b.example" });
+    const c = loadConfig({ DATABASE_URL: "x", WEB_ORIGINS: "https://a.example, https://b.example" , AUTH_SECRET: TEST_SECRET });
     expect(c.WEB_ORIGINS).toEqual(["https://a.example", "https://b.example"]);
     expect(c.API_HOST).toBe("127.0.0.1");
   });
