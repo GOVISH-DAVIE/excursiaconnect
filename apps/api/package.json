@@ -8,7 +8,10 @@
     "dev": "tsx watch src/server.ts",
     "build": "node scripts/build.mjs",
     "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:demo": "tsx src/cli/seed-demo.ts",
+    "check-demo": "tsx src/cli/check-demo.ts",
+    "import": "tsx src/cli/import-reference.ts"
   },
   "dependencies": {
     "@excursia/contracts": "*",

@@ -55,6 +55,7 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
     - `DATABASE_URL` (the app role)
     - `WEB_ORIGINS=https://events.example.co.ke`
     - `COOKIE_DOMAIN=.example.co.ke`
+    - `APP_ENV=production` (or `staging`), which every database command also reads from `migrate.env`
     - the provider keys
   - The API refuses to start in production without https origins and a cookie domain.
   - On SIGTERM it stops taking connections, finishes open requests and closes its pool, and exits after 10 s at most.
@@ -88,6 +89,9 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
 2. Copy the repository with both builds to `/srv/excursia/releases/<commit>` and run `npm ci --omit=dev`. That also generates the Prisma client.
 3. Copy `apps/web/.next/static` into the shared static directory. Old hashed files stay for 14 days, so open tabs keep working.
 4. Run `npm run db:deploy` (`prisma migrate deploy`) with `/etc/excursia/migrate.env`, as the `migrator` role. Migrations only **expand** in this step: add columns and tables, never drop.
+   - **Production:** then run `node apps/api/dist/cli/check-demo.js`. If it finds any demo record, the deploy stops.
+   - **Staging:** then run `node apps/api/dist/cli/seed-demo.js` to reload the prototype's data. It refuses if staging holds a real event.
+   - **The first production deploy, and after any change to an event's setup:** run `node apps/api/dist/cli/import-reference.js /etc/excursia/reference/<event>.json`. The file is `0640 root:excursia`, as it holds staff names and emails.
 5. **Switch the API first:**
    - Start the idle API colour.
    - Wait for `GET http://127.0.0.1:400x/health/ready` to return 200.

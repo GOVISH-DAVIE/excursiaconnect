@@ -116,6 +116,11 @@ Each layer imports only from the layers below it.
 
   `apps/api/tests/health.test.ts` tests each layer with a stand-in for the one below: the controller with a fake service, the service with a fake repo.
 
+Beside the modules:
+- `src/persistence/time.ts` converts the rules' Nairobi wall-clock strings to instants and back.
+- A module's `*.mapper.ts` turns the rules' records into rows and back. It is pure, so it is tested without a database.
+- `src/cli/` holds the database commands (`seed-demo`, `check-demo`, `import-reference`). Like `server.ts`, each is a composition root: it builds the repos from one database pool. `npm run build` bundles them into `dist/cli/`.
+
 Every module has the same five files in `src/modules/<module>/`, and is mounted in `app.ts` under `/v1/<module>`. Each layer is a factory that takes the layer below (`createXController(service)`), with no module-level singletons, so tests can swap any layer.
 
 ## Sessions and cookies across the two subdomains

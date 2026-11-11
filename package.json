@@ -17,6 +17,9 @@
     "db:migrate": "npm run migrate -w @excursia/db",
     "db:deploy": "npm run deploy -w @excursia/db",
     "db:generate": "npm run generate -w @excursia/db",
+    "db:seed:demo": "npm run seed:demo -w @excursia/api --",
+    "db:check-demo": "npm run check-demo -w @excursia/api",
+    "db:import": "npm run import -w @excursia/api --",
     "postinstall": "npm run generate -w @excursia/db"
   },
   "devDependencies": {

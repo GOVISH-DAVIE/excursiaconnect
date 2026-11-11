@@ -294,7 +294,7 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 | M0.1 | **Decisions and applications to third parties**: D3 to D11 answered; the Daraja production application and the SMS sender ID filed (each takes one to two weeks); the ODPC registration started | Each decision has an answer in this file; both applications have reference numbers |
 | M0.2 | **Database and Prisma**: PostgreSQL with database roles, the first schema (identity, minimal event, tier and delegate, the Deal Room aggregate and its tables), migrations, connection limits and timeouts | `prisma migrate deploy` runs clean on an empty database, as the `migrator` role **Done 11 Nov 2026.** Notes below |
 | M0.2a | **The API as its own process**: npm workspaces; Express with checked settings, security headers, CORS for the web app's origins, the error contract, health checks and a clean shutdown; the lint rules for the workspace boundaries | The prototype runs unchanged from `apps/web`; the API answers `/health/ready` against PostgreSQL; lint fails the web app importing the database. **Done 11 Nov 2026.** Notes below |
-| M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record |
+| M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record **Done 11 Nov 2026** for local and the commands staging and production use; staging itself comes with M0.6. Notes below |
 | M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL |
 | M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the module pattern in the API (`routes`, `controller`, `service`, `repo`, as `health` already does); the first POST and GET routes with their contracts; the Origin check on writes; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` client, `ApiError`); the feature-folder pattern in the web app | Assigning a reviewer runs from a screen through a hook, the API client, the Express route, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; a write from another origin is refused |
 | M0.6 | **CI and staging**: type-check, lint, tests and both builds on every push; staging deployed behind nginx as in `deploy.md`, with the web app and the API on their two names | CI is green; both names are reachable over HTTPS with the security headers; the deploy switches the API and then the web app with no failed request |
@@ -340,6 +340,34 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 - **Tests:** one Vitest run at the root covers all three suites, 203 tests: the rules, the database's guarantees, and 20 on the API (health, CORS, headers, error shapes, settings, and each health layer with a stand-in below it).
 - **Lint** fails if the web app imports the database, Prisma or Express, if the rules import React, Next.js, Express or the database, or if the contracts import anything of ours.
 - **Running it:** `npm run dev` (web, port 3010) and `npm run dev:api` (API, port 4000). The README has the rest.
+
+**Notes on M0.3, done 11 Nov 2026:**
+- **What the database holds from the seed:**
+  - organisers, events, tiers, delegates and badges
+  - the whole Deal Room: config, staff, applications, matches, meetings, sessions, opportunities, exceptions, incidents, consents, the access log, the outbox and the counters
+  - the staff's users and memberships
+  - a busy-slot row for each room table and person that every live meeting holds
+
+  The rest of the core (zones, rooms, programme, orders, team, shifts and the like) stays on the prototype store until Phase 2 normalises it, and the Exhibition until Phase 5.
+- **The mappers** (`apps/api/src/modules/{events,dealroom}/*.mapper.ts`) go from the rules' state to rows and back.
+  - The summary columns come from the rules' own selectors (`decisionOf`, `pipelineOf`, `occupies`, `confirmBy`).
+  - Times convert at UTC+03:00 exactly.
+  - The round trip is tested, in memory and through PostgreSQL, against the whole seed. Only the order of arrays and the prototype-only fields differ.
+  - The repos' `load()` is what `runCommand` will use (M0.5).
+- **Kept apart by a `demo` flag** on organisers, events and users (migration `…_demo_flags`):
+  - `npm run db:seed:demo` loads the seed in about 0.6 s and replaces any earlier copy.
+    - It refuses when `APP_ENV` is `production`.
+    - It also refuses when the database holds any event it didn't make, whatever `APP_ENV` says.
+    - All 228 slot rows pass the exclusion constraints, so the seed has no clash.
+  - `npm run db:check-demo` exits 1 if any demo record exists. The production deploy runs it.
+  - `npm run db:import -- <file>` imports a real event's organiser, event, Deal Room config and staff from a JSON file checked by Zod (`reference.schema.ts`).
+    - Problems are listed by path, never with values.
+    - It upserts, so a file can be imported again; staff missing from the file are reported, not revoked.
+    - It refuses any id or email that belongs to demo data.
+    - `apps/api/reference/connected-africa-3.example.json` shows the shape. The real file lives on the server, since it holds staff names and emails.
+- **`APP_ENV`** (`local`, `staging` or `production`) is required by every database command and never defaulted. `setup-local.sh` writes `APP_ENV=local`.
+- **Not yet:** busy-slot rows for programmed sessions (M3.3, once the session-room rule is settled); staff passwords (M0.4).
+- **Tests:** 17 new ones; 220 in all.
 
 ### Phase 1: Deal Room onboarding (23 November 2026 to 8 January 2027)
 

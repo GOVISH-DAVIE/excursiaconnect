@@ -36,6 +36,7 @@ model User {
   phone        String?   @unique
   name         String
   passwordHash String?   @map("password_hash") // staff only (argon2); participants sign in with one-time codes
+  demo         Boolean   @default(false) // made by the demo seed; production holds none (backend-plan.md, M0.3)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   disabledAt   DateTime? @map("disabled_at") @db.Timestamptz(3)
 
@@ -188,6 +189,7 @@ model Organiser {
   id        String   @id
   name      String
   record    Json // the organiser as the rules know it, until Phase 2 normalises it
+  demo      Boolean  @default(false) // made by the demo seed; production holds none
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   events      Event[]
@@ -204,6 +206,7 @@ model Event {
   startDate   DateTime @map("start_date") @db.Date
   endDate     DateTime @map("end_date") @db.Date
   timezone    String   @default("Africa/Nairobi")
+  demo        Boolean  @default(false) // made by the demo seed; everything with this event's id goes with it
   state       String // Draft, Under review, Live, Closed… (src/lib/types.ts EventState)
   record      Json // the event as the rules know it
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -279,7 +282,7 @@ model Badge {
 
 model DrConfig {
   eventId   String   @id @map("event_id")
-  record    Json // DrConfig in src/lib/dealroom/types.ts
+  record    Json // DrConfigRecord (apps/api/src/modules/dealroom/dealroom.mapper.ts): the config and the aggregate's extras
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   event Event @relation(fields: [eventId], references: [id])

@@ -18,6 +18,9 @@ The backend being built on branch `backend` ([docs/backend-plan.md](docs/backend
 ```bash
 npm run db:setup     # roles, databases and connection strings in .env.local (needs a local PostgreSQL superuser)
 npm run db:migrate   # apply migrations to the dev database and generate the Prisma client
+npm run db:seed:demo # load the prototype's seed into the dev database (APP_ENV local or staging only)
+npm run db:check-demo  # exits 1 if any demo record is present (the production deploy runs it)
+npm run db:import -- apps/api/reference/connected-africa-3.example.json   # a real event's reference data
 npm run dev:api      # the API: http://localhost:4000/health/ready
 npm test             # every suite: the rules, the database's guarantees, the API
 npm run typecheck    # each workspace

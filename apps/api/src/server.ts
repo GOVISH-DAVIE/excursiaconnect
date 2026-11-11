@@ -2,20 +2,12 @@
  * The API process: read the settings, open the database pool, listen on loopback behind nginx, and close cleanly
  * on SIGTERM so a blue/green switch (deploy.md) never cuts a request in half.
  */
-import { fileURLToPath } from "node:url";
 import { createDb } from "@excursia/db";
 import { createApp } from "./app";
 import { loadConfig } from "./config";
+import { loadLocalEnv } from "./env";
 
-if (process.env.NODE_ENV !== "production") {
-  try {
-    // the repository's .env.local, written by scripts/db/setup-local.sh; a server uses its EnvironmentFile instead
-    process.loadEnvFile(fileURLToPath(new URL("../../../.env.local", import.meta.url)));
-  } catch {
-    // no .env.local: the variables are already in the environment
-  }
-}
-
+loadLocalEnv();
 const config = loadConfig();
 const db = createDb(config.DATABASE_URL, config.DATABASE_POOL_MAX);
 const app = createApp({ config, db });

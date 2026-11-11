@@ -9,7 +9,7 @@
   },
   "scripts": {
     "generate": "prisma generate",
-    "migrate": "prisma migrate dev",
+    "migrate": "prisma migrate dev && prisma generate",
     "deploy": "prisma migrate deploy",
     "typecheck": "tsc --noEmit"
   },

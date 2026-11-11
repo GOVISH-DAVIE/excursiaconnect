@@ -1,5 +1,6 @@
 /**
- * Builds the API into one file, dist/server.js. The workspace packages (@excursia/domain, /contracts, /db) are
+ * Builds the API into dist/server.js, and each database command into dist/cli/ (production runs them without tsx:
+ * node dist/cli/check-demo.js, node dist/cli/import-reference.js <file>). The workspace packages (@excursia/domain, /contracts, /db) are
  * TypeScript source, so they are bundled in; every other package stays in node_modules, as Node expects (Prisma's
  * runtime, pg and Express load files of their own at runtime).
  */
@@ -8,8 +9,8 @@ import { build } from "esbuild";
 const workspace = /^@excursia\//;
 
 await build({
-  entryPoints: ["src/server.ts"],
-  outfile: "dist/server.js",
+  entryPoints: { server: "src/server.ts", "cli/seed-demo": "src/cli/seed-demo.ts", "cli/check-demo": "src/cli/check-demo.ts", "cli/import-reference": "src/cli/import-reference.ts" },
+  outdir: "dist",
   bundle: true,
   platform: "node",
   format: "esm",
