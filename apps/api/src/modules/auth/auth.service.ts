@@ -42,6 +42,8 @@ const LIMITS = {
   codeRequestPerEmail: { max: 3, windowMs: 15 * MIN },
   codeRequestPerIp: { max: 20, windowMs: 15 * MIN },
   codeVerifyPerEmail: { max: 10, windowMs: 15 * MIN },
+  /** one machine guessing codes across many addresses */
+  codeVerifyPerIp: { max: 30, windowMs: 15 * MIN },
   passwordPerEmail: { max: 5, windowMs: 15 * MIN },
   passwordPerIp: { max: 30, windowMs: 15 * MIN },
   totpPerUser: { max: 5, windowMs: 5 * MIN },
@@ -66,6 +68,14 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
       const minutes = Math.ceil((windowStart.getTime() + rule.windowMs - at) / MIN);
       throw new HttpError("rate_limited", `Too many attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`);
     }
+  }
+
+  /**
+   * Before anything that depends on the account: where email can't go out yet, every address gets the same 503,
+   * so "can't send" never tells a staff address from an unknown one.
+   */
+  function mailOrRefuse() {
+    if (!mailer.available) throw new HttpError("unavailable", "Sign-in codes can't be sent from this server yet. Try again later.");
   }
 
   async function sendCode(email: string, purpose: "sign_in" | "set_password") {
@@ -124,6 +134,7 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
   return {
     /** Always the same answer, whether or not the address has an account. */
     async requestSignInCode(email: string, meta: ClientMeta) {
+      mailOrRefuse();
       await limit("code-request:email", email, LIMITS.codeRequestPerEmail);
       if (meta.ip) await limit("code-request:ip", meta.ip, LIMITS.codeRequestPerIp);
       await sendCode(email, "sign_in");
@@ -131,6 +142,7 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
 
     async signInWithCode(email: string, code: string, meta: ClientMeta): Promise<Issued> {
       await limit("code-verify:email", email, LIMITS.codeVerifyPerEmail);
+      if (meta.ip) await limit("code-verify:ip", meta.ip, LIMITS.codeVerifyPerIp);
       const existing = await repo.userByEmail(email);
       // staff never sign in with an emailed code: their sign-in needs the authenticator
       if (existing && isStaff(existing)) {
@@ -161,14 +173,16 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
 
     /** Always the same answer; a code goes out only to an existing staff account. */
     async requestPasswordCode(email: string, meta: ClientMeta) {
+      mailOrRefuse();
       await limit("code-request:email", email, LIMITS.codeRequestPerEmail);
       if (meta.ip) await limit("code-request:ip", meta.ip, LIMITS.codeRequestPerIp);
       const user = await repo.userByEmail(email);
       if (user && isStaff(user) && !user.disabledAt) await sendCode(email, "set_password");
     },
 
-    async setPassword(email: string, code: string, password: string) {
+    async setPassword(email: string, code: string, password: string, meta: ClientMeta) {
       await limit("code-verify:email", email, LIMITS.codeVerifyPerEmail);
+      if (meta.ip) await limit("code-verify:ip", meta.ip, LIMITS.codeVerifyPerIp);
       await spendCode(email, "set_password", code);
       const user = await repo.userByEmail(email);
       if (!user || !isStaff(user) || user.disabledAt) throw new HttpError("unauthenticated", "That code has expired or was already used. Ask for a new one.");

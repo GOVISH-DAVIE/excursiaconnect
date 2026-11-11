@@ -51,7 +51,7 @@ export function createAuthController(service: AuthService, config: Config, now: 
 
     setPassword: (async (req, res) => {
       const { email, code, password } = PasswordSet.parse(req.body);
-      await service.setPassword(email, code, password);
+      await service.setPassword(email, code, password, meta(req));
       clearSessionCookie(res, config);
       res.status(204).end();
     }) satisfies RequestHandler,

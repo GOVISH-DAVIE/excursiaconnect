@@ -13,6 +13,7 @@
     "lint": "eslint",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
+    "security:smoke": "node apps/api/scripts/security-smoke.mjs",
     "db:setup": "scripts/db/setup-local.sh",
     "db:migrate": "npm run migrate -w @excursia/db",
     "db:deploy": "npm run deploy -w @excursia/db",

@@ -6,7 +6,8 @@
  * console for local work and records for tests, and refuses in production rather than pretend to send.
  */
 export type Mail = { to: string; subject: string; text: string };
-export type Mailer = { send(mail: Mail): Promise<void> };
+/** `available` is false where mail can't go out yet; callers check it before anything that would differ by account. */
+export type Mailer = { available: boolean; send(mail: Mail): Promise<void> };
 
 export class MailUnavailable extends Error {
   constructor() {
@@ -18,6 +19,7 @@ export class MailUnavailable extends Error {
 export function logMailer(opts: { production: boolean; write?: (line: string) => void }): Mailer {
   const write = opts.write ?? ((line) => console.log(line));
   return {
+    available: !opts.production,
     async send(mail) {
       if (opts.production) throw new MailUnavailable();
       write(`[mail] to ${mail.to}: ${mail.subject}\n${mail.text}`);
@@ -28,5 +30,5 @@ export function logMailer(opts: { production: boolean; write?: (line: string) =>
 /** For tests: keeps what was sent. */
 export function memoryMailer(): Mailer & { sent: Mail[] } {
   const sent: Mail[] = [];
-  return { sent, send: async (mail) => void sent.push(mail) };
+  return { sent, available: true, send: async (mail) => void sent.push(mail) };
 }
