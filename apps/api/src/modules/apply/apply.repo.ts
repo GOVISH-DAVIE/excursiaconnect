@@ -8,8 +8,8 @@ export function createApplyRepo(db: Db) {
   return {
     /** The event at a public address, if it has a Deal Room. */
     async eventBySlug(slug: string) {
-      const event = await db.event.findUnique({ where: { slug }, select: { id: true, name: true, slug: true, drConfig: { select: { record: true } } } });
-      return event?.drConfig ? { id: event.id, name: event.name, slug: event.slug, config: event.drConfig.record } : null;
+      const event = await db.event.findUnique({ where: { slug }, select: { id: true, name: true, slug: true, record: true, drConfig: { select: { record: true } } } });
+      return event?.drConfig ? { id: event.id, name: event.name, slug: event.slug, event: event.record, config: event.drConfig.record } : null;
     },
 
     /** An applicant's applications in one event: the ones started with, and owned by, their email. */

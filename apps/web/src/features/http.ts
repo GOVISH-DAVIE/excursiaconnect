@@ -49,4 +49,19 @@ async function request<T>(method: string, path: string, { body, query, schema }:
 export const http = {
   get: <T>(path: string, opts?: Options<T>) => request<T>("GET", path, opts),
   post: <T>(path: string, opts?: Options<T>) => request<T>("POST", path, opts),
+  patch: <T>(path: string, opts?: Options<T>) => request<T>("PATCH", path, opts),
+  /** A file's bytes to an upload target: a path on the API (local storage) or a bucket's signed URL. */
+  async upload(url: string, headers: Record<string, string>, file: Blob): Promise<void> {
+    const target = url.startsWith("http") ? url : `${PUBLIC_API}${url}`;
+    let res: Response;
+    try {
+      res = await fetch(target, { method: "PUT", headers, body: file, credentials: url.startsWith("http") ? "omit" : "include" });
+    } catch {
+      throw new ApiError("network", "The upload didn't get through. Check your connection and try again.", 0);
+    }
+    if (!res.ok) {
+      const parsed = ErrorBody.safeParse(await res.json().catch(() => undefined));
+      throw new ApiError(parsed.success ? parsed.data.error.code : "internal", parsed.success ? parsed.data.error.message : "The upload failed. Try again.", res.status);
+    }
+  },
 };

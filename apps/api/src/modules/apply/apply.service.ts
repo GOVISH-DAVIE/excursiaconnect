@@ -32,7 +32,8 @@ export type ApplyDeps = { repo: ApplyRepo; commands: Commands; storage: Storage;
 
 /** The application as its applicant sees it. */
 function view(app: DrApplication, cfg: DrConfig, version: number): MyApplication {
-  const { confirmed: _confirmed, ...decisionMaker } = app.decisionMaker;
+  const dm = app.decisionMaker;
+  const decisionMaker = { name: dm.name, title: dm.title, email: dm.email, phone: dm.phone };
   return {
     id: app.id,
     mode: modeOf(app),
@@ -108,6 +109,7 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
         eventId: e.id,
         eventName: e.name,
         slug: e.slug,
+        brand: (e.event as { brand?: { primary: string; logoText: string } }).brand ?? { primary: "#1c1c1e", logoText: "" },
         opens: c.rules.appOpen,
         closes: c.rules.appClose,
         missions: c.missions,
@@ -160,7 +162,6 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
             if (invited.contact.email.toLowerCase() !== email)
               throw new HttpError("forbidden", "This invitation was sent to another email address. Sign in with that address to accept it.");
             appId = invited.id;
-            ctx.actor = { kind: "applicant", appId };
             return invited.status === "Draft" ? [] : [{ type: "dr/saveDraft", app: invited }];
           }
           const already = s.dealRoom.apps.filter((a) => a.contact.email.toLowerCase() === email).length;

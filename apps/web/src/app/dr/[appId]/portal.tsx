@@ -9,7 +9,7 @@ import { PATHWAYS, formatInfo, askBand, compact, decisionOf, feeInKes, feeLabel,
 import type { DrApplication, DrDocument, Instrument, KycItem } from "@excursia/domain/dealroom/types";
 import { fmtStamp } from "@excursia/domain/time";
 import { ApplicantStatus, DocLine, UploadDoc } from "@/app/dealroom/bits";
-import { ChallengeFields, MandateFields } from "@/app/e/[slug]/deal-room/apply/apply";
+import { ChallengeFields, MandateFields } from "@/app/e/[slug]/deal-room/apply/fields";
 import { AccessLog, Deals, Directory, Introductions, Meetings } from "./deals";
 import { acceptProblems } from "@excursia/domain/dealroom/sessions";
 

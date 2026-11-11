@@ -7,6 +7,7 @@
  *   <module>.repo.ts        the only code that touches @excursia/db
  * and its index.ts assembles them; this file only mounts what each module returns.
  */
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
@@ -17,15 +18,21 @@ import { errorHandler, notFound } from "./http/errors";
 import { originCheck } from "./http/origin";
 import { loadSession } from "./http/session";
 import { logMailer, type Mailer } from "./mail/mailer";
+import { applyModule } from "./modules/apply";
 import { authModule } from "./modules/auth";
 import { dealRoomModule } from "./modules/dealroom";
 import { healthModule } from "./modules/health";
+import { uploadsModule } from "./modules/uploads";
+import { deriveKeys } from "./security/secrets";
+import { createLocalStorage, type LocalStorage } from "./storage/local";
 
 export type AppDeps = {
   config: Config;
   db: Db;
   /** How one-time codes are emailed; config.MAIL_TRANSPORT by default. */
   mailer?: Mailer;
+  /** Where uploads are kept; a local folder (STORAGE_DIR, else data/uploads in the repository) by default. */
+  storage?: LocalStorage;
   /** The clock; tests move it to expire sessions and codes. */
   now?: () => Date;
   /** Where unexpected errors are reported; console by default. */
@@ -37,7 +44,7 @@ const defaultLogError: NonNullable<AppDeps["logError"]> = (err, req) => {
   console.error(`[api] ${req.method} ${req.path} failed:`, err);
 };
 
-export function createApp({ config, db, mailer, now, logError = defaultLogError }: AppDeps): Express {
+export function createApp({ config, db, mailer, now, storage, logError = defaultLogError }: AppDeps): Express {
   const app = express();
 
   app.disable("x-powered-by");
@@ -72,6 +79,13 @@ export function createApp({ config, db, mailer, now, logError = defaultLogError 
   // the rules' clock: the test's clock, else RULES_CLOCK on local and staging, else the real one
   const rulesNow = now ?? rulesClock(config);
   app.use("/v1/dealroom", dealRoomModule({ db, now: rulesNow }));
+
+  const uploadMaxBytes = config.UPLOAD_MAX_MB * 1_048_576;
+  const files =
+    storage ??
+    createLocalStorage({ dir: config.STORAGE_DIR ?? fileURLToPath(new URL("../../../data/uploads", import.meta.url)), key: deriveKeys(config.AUTH_SECRET).upload });
+  app.use("/v1/apply", applyModule({ db, now: rulesNow, storage: files, uploadMaxBytes }));
+  app.use("/v1/uploads", uploadsModule({ storage: files, maxBytes: uploadMaxBytes }));
 
   app.use(notFound);
   app.use(errorHandler(logError));

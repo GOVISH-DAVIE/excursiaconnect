@@ -47,6 +47,8 @@ export const ApplyForm = z.object({
   eventId: z.string(),
   eventName: z.string(),
   slug: z.string(),
+  /** the organiser's colour and short mark, for the form's header */
+  brand: z.object({ primary: z.string(), logoText: z.string() }),
   opens: z.string(),
   closes: z.string(),
   missions: z.array(Named),
