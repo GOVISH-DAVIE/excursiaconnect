@@ -467,13 +467,41 @@ Each milestone from here on builds its feature the same way, as in [architecture
 
 | # | Milestone | Done when |
 | --- | --- | --- |
-| M1.1 | **Apply** (by Fri 11 Dec): seeker, provider and challenge forms; drafts on the server with merged autosaves; resume links; one "save and submit" command; reference numbers from a counter; the portal's status page | An applicant applies from a phone on staging and gets a reference; a second device resumes the draft |
-| M1.2 | **Documents** (by Fri 11 Dec): presigned upload, quarantine, asynchronous virus scan, signed downloads after consent, retention dates | A pitch deck uploads, clears quarantine and opens only for those allowed, through a link that expires |
+| M1.1 | **Apply** (by Fri 11 Dec): seeker, provider and challenge forms; drafts on the server with merged autosaves; resume links; one "save and submit" command; reference numbers from a counter; the portal's status page | An applicant applies from a phone on staging and gets a reference; a second device resumes the draft **Done 11 Nov 2026**, with the core of M1.2's uploads. Notes below |
+| M1.2 | **Documents** (by Fri 11 Dec): presigned upload, quarantine, asynchronous virus scan, signed downloads after consent, retention dates | A pitch deck uploads, clears quarantine and opens only for those allowed, through a link that expires Uploads to storage, quarantine and the checks on arrival are done with M1.1; the virus scan, signed downloads after consent and retention remain |
 | M1.3 | **Review, first half** (by Fri 11 Dec): queue, assignment, rubric scoring with evidence, information requests with expiry | The review rules' tests pass on the server |
 | M1.4 | **Email** (by Fri 11 Dec): the outbox and worker, templates for every onboarding message, delivery status, the Notifications screen reading the outbox | Messages arrive in a real inbox with delivery status |
 | M1.5 | **Go-live** (Mon 14 Dec): production database with point-in-time recovery and a restore drill timed against the RTO, monitoring and alerts, privacy notice, load test of apply and upload | **Applications open Tue 15 Dec 2026** |
 | M1.6 | **Review, second half** (by Tue 22 Dec): recommendations, decisions, second decider, readiness, conditions; provider and challenge verification (KYC, NDA, sanctions, decision-maker) | The first decisions are recorded on production; no record is verified with a step missing |
 | M1.7 | **Fee and SMS** (by Fri 8 Jan): one payment method first (M-Pesa if Daraja is approved, otherwise card), then the second; webhooks as specified; the 3-day reminder job; the lead's waiver; badge on payment, with minimal tier and badge records; SMS through Africa's Talking once the sender ID is approved | A sandbox payment issues a badge; a repeated callback changes nothing; approvals made before 8 Jan get their payment link then |
+
+**Notes on M1.1, done 11 Nov 2026** (with the core of M1.2):
+- **Who owns an application:** an applicant signs in with an emailed code, and an application belongs to the verified email that started it, which can't be changed. That is also the resume: signing in with the same email on another device opens the draft. An invitation link opens the invited application only for the email it was sent to.
+- **Autosave is field by field** (`@excursia/domain/dealroom/apply`, `patchDraft`):
+  - The form sends only the dotted paths that changed.
+  - The server merges them into the draft on record, under the event lock, and runs the prototype's own `dr/saveDraft`.
+  - Paths an applicant may not write are refused by name: status, reference, fee, decisions, reviewer, documents, the owning email, and another kind's fields.
+  - Two devices editing different fields both keep their edits.
+- **Save and submit is one command:** the last changes, then `dr/submit`. The reference comes from the event's counter, and the confirmation message is queued; the outbox's real delivery is M1.4. A refusal names what is still needed and keeps nothing.
+- **The application window is now in the rules:** submitting before `appOpen` is refused with the date. `RULES_CLOCK` sets the rules' time on local and staging (`APP_ENV`), never in production, so the form can be tried before 15 Dec.
+- **Uploads** (storage interface, `apps/api/src/storage`):
+  - The browser asks for a target, PUTs the bytes, then says it's done, and `dr/addDoc` attaches the file.
+  - The target is a signed, 15-minute, single-use permission for one key, one size and one type.
+  - On arrival the first bytes must match the declared type (PDF, Office, PNG, JPEG), and the size must match.
+  - Limits: 15 MB a file, 30 uploads an hour per application, seekers' document kinds only, drafts only.
+  - Files sit in `file` with state `quarantine` until M1.2's scan.
+  - Storage is a local folder (`STORAGE_DIR`) until D6 picks a bucket; the bucket driver replaces it behind the same interface.
+- **The web app:**
+  - `/e/[slug]/deal-room/apply` runs on the API, with the organiser's branding, the real sign-in and the same fields as the prototype (`fields.tsx`, shared with the prototype portal).
+  - After submitting it shows the reference and the status.
+- **Tested:**
+  - 13 API tests and 7 domain tests: ownership, refused paths, merges, the window, uploads (type, contents, size, kind, reuse), atomic submit, invitations, and four simultaneous submissions getting consecutive references.
+  - Walked through on a phone (375 px) and then on a second device in Chrome: started on the phone, resumed in Chrome with the same email, uploaded three documents, submitted for CA3-CS-00078.
+- **Not yet:**
+  - removing an uploaded document from a draft
+  - providers' and challenges' KYC uploads (M1.6)
+  - the applicant's full portal: RFIs, fee, matching
+  - email delivery (M1.4)
 
 ### Phase 2: Core platform and scanning (4 to 29 January 2027)
 

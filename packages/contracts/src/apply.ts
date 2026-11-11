@@ -104,6 +104,10 @@ export const MyApplication = z.object({
       .optional(),
   }),
   documents: z.array(z.object({ id: z.string(), kind: z.string(), name: z.string(), size: z.number(), at: z.string() })),
+  /** information the review team asked for: the open one can be answered from the status page */
+  requests: z.array(
+    z.object({ id: z.string(), questions: z.array(z.string()), docs: z.array(z.string()), at: z.string(), due: z.string(), answeredAt: z.string().nullable(), open: z.boolean() }),
+  ),
   /** what still stands between this draft and submitting, by the rules */
   gaps: z.object({ missing: z.array(z.string()), advisory: z.array(z.string()) }),
 });
@@ -111,6 +115,10 @@ export type MyApplication = z.infer<typeof MyApplication>;
 
 export const MyApplications = z.array(MyApplication.pick({ id: true, mode: true, status: true, ref: true, submittedAt: true, draftSavedAt: true }).extend({ org: z.string() }));
 export type MyApplications = z.infer<typeof MyApplications>;
+
+/** Answering an open information request: the text, and the files uploaded for it. */
+export const RespondInput = z.object({ text: z.string().trim().min(1, "write a response").max(4000), fileIds: z.array(z.string().regex(/^file_[a-z0-9]{8,40}$/)).max(10).default([]) });
+export type RespondInput = z.infer<typeof RespondInput>;
 
 /** Asking to upload one document. */
 export const UploadRequest = z.object({

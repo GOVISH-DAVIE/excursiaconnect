@@ -56,6 +56,8 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
     - `WEB_ORIGINS=https://events.example.co.ke`
     - `COOKIE_DOMAIN=.example.co.ke`
     - `APP_ENV=production` (or `staging`), which every database command also reads from `migrate.env`
+    - `RULES_CLOCK`: staging only, to try dated rules early; the API refuses it in production
+    - `STORAGE_DIR`: where uploads are kept until a bucket is chosen (D6), for example `/srv/excursia/uploads`. It must be on backed-up disk, writable by the API only, and outside every release folder
     - `AUTH_SECRET`: 32 random bytes, base64 (`openssl rand -base64 32`). It is different in each environment and never rotated casually, since changing it makes every enrolled authenticator unreadable. An offline copy goes in the vault with the other secrets.
     - the provider keys
   - The API refuses to start in production without https origins and a cookie domain.
@@ -234,6 +236,14 @@ server {
   location /v1/hooks/ {
     limit_except POST { deny all; }
     client_max_body_size 256k; limit_req zone=hooks burst=100 nodelay;
+    proxy_pass http://excursia_api;
+  }
+
+  # uploads to local storage (until D6's bucket): one file per signed link, up to UPLOAD_MAX_MB
+  location /v1/uploads/ {
+    limit_except PUT OPTIONS { deny all; }
+    client_max_body_size 16m; client_body_timeout 60s; proxy_request_buffering on;
+    limit_req zone=api burst=20 nodelay;
     proxy_pass http://excursia_api;
   }
 

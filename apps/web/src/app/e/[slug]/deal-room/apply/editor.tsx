@@ -14,7 +14,7 @@ import { useMyApplication, useSaveDraft, useSubmitApplication, useUploadDocument
 import { changesSince, snapshot, toDraft, withSaved } from "./draft";
 import { Card, ChallengeFields, F, INSTRUMENTS, MandateFields, REVENUE, STAGES } from "./fields";
 
-export function Editor({ slug, form, initial }: { slug: string; form: ApplyForm; initial: MyApplication }) {
+export function Editor({ slug, form, initial, onSubmitted }: { slug: string; form: ApplyForm; initial: MyApplication; onSubmitted: () => void }) {
   const [app, setApp] = useState<DrApplication>(() => toDraft(initial, form.eventId));
   const saved = useRef(snapshot(app));
   const meta = useMyApplication(slug, initial.id).data ?? initial;
@@ -44,7 +44,7 @@ export function Editor({ slug, form, initial }: { slug: string; form: ApplyForm;
     const changes = changesSince(saved.current, app);
     const before = saved.current;
     saved.current = withSaved(before, changes);
-    submit.mutate(changes, { onError: () => (saved.current = before) });
+    submit.mutate(changes, { onSuccess: onSubmitted, onError: () => (saved.current = before) });
   };
 
   const savedNote = save.isPending ? "Saving…" : save.isError ? `Not saved: ${save.error.message}` : meta.draftSavedAt ? `Draft saved ${fmtStamp(meta.draftSavedAt)}` : "Not saved yet";

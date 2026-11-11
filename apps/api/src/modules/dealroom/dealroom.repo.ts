@@ -143,6 +143,21 @@ export function createDealRoomRepo(db: Db) {
     listStaff: (eventId: string) =>
       db.drStaff.findMany({ where: { eventId, active: true }, orderBy: { id: "asc" }, select: { id: true, role: true, record: true } }),
 
+    /** One application's record and its event's config, for the reviewer's screen. */
+    async forReview(eventId: string, appId: string) {
+      const [app, cfg] = await Promise.all([
+        db.drApplication.findFirst({ where: { id: appId, eventId }, select: { record: true } }),
+        db.drConfig.findUnique({ where: { eventId }, select: { record: true } }),
+      ]);
+      return app && cfg ? { record: app.record, config: cfg.record } : null;
+    },
+
+    /** The stored file behind an application's document, if it has one (the demo seed's documents don't). */
+    fileOf: (id: string, appId: string) => db.file.findFirst({ where: { id, ownerKind: "dr_application", ownerId: appId } }),
+
+    /** Opening a document is recorded, like every change. */
+    audit: (row: AuditRow) => db.auditEntry.create({ data: row }),
+
     auditFor: (entity: string, entityId: string) => db.auditEntry.findMany({ where: { entity, entityId }, orderBy: { at: "asc" } }),
   };
 }

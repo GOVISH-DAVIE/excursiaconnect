@@ -8,10 +8,10 @@
  * (patchDraft), dr/submit for the reference and the confirmation message, dr/addDoc once an upload has arrived.
  */
 import { randomBytes } from "node:crypto";
-import type { ApplyForm, ApplyMode, DraftChanges, MyApplication, MyApplications, UploadTarget } from "@excursia/contracts/apply";
+import type { ApplyForm, ApplyMode, DraftChanges, MyApplication, MyApplications, RespondInput, UploadTarget } from "@excursia/contracts/apply";
 import type { Action } from "@excursia/domain/core/reducer";
 import { blankApplication, modeOf, patchDraft } from "@excursia/domain/dealroom/apply";
-import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, formGaps } from "@excursia/domain/dealroom/logic";
+import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, formGaps, openRfi, rfiDue } from "@excursia/domain/dealroom/logic";
 import type { DrApplication, DrConfig } from "@excursia/domain/dealroom/types";
 import type { AppState } from "@excursia/domain/types";
 import { HttpError } from "../../http/errors";
@@ -57,6 +57,7 @@ function view(app: DrApplication, cfg: DrConfig, version: number): MyApplication
       challenge: app.challenge,
     },
     documents: app.documents.map((d) => ({ id: d.id, kind: d.kind, name: d.name, size: d.size, at: d.at })),
+    requests: app.rfis.map((r) => ({ id: r.id, questions: r.questions, docs: r.docs, at: r.at, due: rfiDue(r, cfg), answeredAt: r.response?.at ?? null, open: !r.response && !r.expiry })),
     gaps: formGaps(app, cfg),
   };
 }
@@ -210,9 +211,15 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
       const email = applicant(session);
       const e = await event(slug);
       const { app } = await ownRow(e.id, appId, email);
-      if (!OPEN.includes(app.status)) throw new HttpError("conflict", "Documents can be added only before the application is submitted.");
-      if (app.type !== "seeker" || !SEEKER_DOCS.some((d) => d.kind === req.kind))
-        throw new HttpError("bad_request", "That isn't a document this application asks for.", ["kind"]);
+      // while a request is open, the documents it asks for; before submitting, the seeker's own
+      const rfi = app.status === "Information requested" ? openRfi(app) : undefined;
+      if (rfi) {
+        if (!(rfi.docs as string[]).includes(req.kind)) throw new HttpError("bad_request", "The review team didn't ask for that document.", ["kind"]);
+      } else {
+        if (!OPEN.includes(app.status)) throw new HttpError("conflict", "Documents can be added only before the application is submitted, or when the review team asks for them.");
+        if (app.type !== "seeker" || !SEEKER_DOCS.some((d) => d.kind === req.kind))
+          throw new HttpError("bad_request", "That isn't a document this application asks for.", ["kind"]);
+      }
       if (!UPLOAD_TYPES[req.contentType]) throw new HttpError("bad_request", "Upload a PDF, a Word, Excel or PowerPoint file, or a PNG or JPEG image.", ["contentType"]);
       if (req.size > uploadMaxBytes) throw new HttpError("payload_too_large", `Files can be up to ${Math.round(uploadMaxBytes / 1_048_576)} MB.`);
       if ((await repo.pendingFiles(appId, new Date(Date.now() - 3_600_000))) >= MAX_UPLOADS_PER_HOUR)
@@ -241,8 +248,39 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
         actions: (s, ctx): Action[] => {
           const app = appIn(s, appId);
           if (app.documents.some((d) => d.id === fileId)) return [];
+          // a file for an open request waits, and goes with the answer (respond), not on its own
+          if (app.status === "Information requested") return [];
           if (!OPEN.includes(app.status)) throw new HttpError("conflict", "Documents can be added only before the application is submitted.");
           return [{ type: "dr/addDoc", appId, doc: { id: fileId, name: file.name, kind: file.kind as DrApplication["documents"][number]["kind"], size: file.size, at: ctx.now, download: true } }];
+        },
+      });
+      return after(state, appId, e.cfg);
+    },
+
+    /** Answers the open information request: the text, and the files uploaded for it, in one command. */
+    async respond(session: Resolved, slug: string, appId: string, input: RespondInput, ip: string | null): Promise<MyApplication> {
+      const email = applicant(session);
+      const e = await event(slug);
+      const files = await Promise.all(
+        [...new Set(input.fileIds)].map(async (id) => {
+          const f = await repo.fileOf(id, appId);
+          const arrived = f && (await storage.stat(f.storageKey));
+          if (!f || !arrived || arrived.size !== f.size) throw new HttpError("conflict", "A file for this answer hasn't arrived. Upload it again.");
+          return f;
+        }),
+      );
+      const state = await commands.run({
+        eventId: e.id,
+        actor: { kind: "applicant", appId },
+        userId: session.user.id,
+        ip,
+        owned: owns(appId, email),
+        actions: (s, ctx): Action[] => {
+          const have = new Set(appIn(s, appId).documents.map((d) => d.id));
+          const docs = files
+            .filter((f) => !have.has(f.id))
+            .map((f) => ({ id: f.id, name: f.name, kind: f.kind as DrApplication["documents"][number]["kind"], size: f.size, at: ctx.now, download: true }));
+          return [{ type: "dr/respondRfi", appId, text: input.text, docs }];
         },
       });
       return after(state, appId, e.cfg);

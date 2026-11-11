@@ -11,6 +11,8 @@ export type UploadTarget = { url: string; method: "PUT"; headers: Record<string,
 export interface Storage {
   uploadTarget(key: string, file: { contentType: string; size: number }): UploadTarget;
   stat(key: string): Promise<{ size: number } | null>;
+  /** A link that downloads one file, for two minutes, as an attachment with this name and type. */
+  downloadUrl(key: string, file: { name: string; contentType: string }): { url: string; expiresAt: Date };
 }
 
 /** The types an applicant may upload, with the bytes each must start with (checked when the file arrives). */

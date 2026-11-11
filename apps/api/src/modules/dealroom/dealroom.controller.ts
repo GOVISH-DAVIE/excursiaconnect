@@ -3,11 +3,43 @@
  */
 import type { RequestHandler } from "express";
 import { ApplicationsQuery, AssignReviewerInput, EventParams, type ApplicationSummary, type TeamView } from "@excursia/contracts/dealroom";
+import { AppIdParams, DocParams, RequestInfoInput, RfiExpiryInput, ScoreInput } from "@excursia/contracts/review";
 import { sessionOf } from "../../http/session";
 import type { DealRoomService } from "./dealroom.service";
 
 export function createDealRoomController(service: DealRoomService) {
+  const ip = (req: Parameters<RequestHandler>[0]) => req.ip ?? null;
   return {
+    review: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.set("Cache-Control", "private, no-store").json(await service.review(sessionOf(res), eventId, appId));
+    }) satisfies RequestHandler,
+
+    startReview: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.startReview(sessionOf(res), eventId, appId, ip(req)));
+    }) satisfies RequestHandler,
+
+    score: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.score(sessionOf(res), eventId, appId, ScoreInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    requestInfo: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.requestInfo(sessionOf(res), eventId, appId, RequestInfoInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    rfiExpiry: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.rfiExpiry(sessionOf(res), eventId, appId, RfiExpiryInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    documentLink: (async (req, res) => {
+      const { eventId, appId, docId } = DocParams.parse(req.params);
+      res.set("Cache-Control", "private, no-store").json(await service.documentLink(sessionOf(res), eventId, appId, docId, ip(req)));
+    }) satisfies RequestHandler,
+
     team: (async (req, res) => {
       const { eventId } = EventParams.parse(req.params);
       res.set("Cache-Control", "private, no-store").json((await service.team(sessionOf(res), eventId)) satisfies TeamView);

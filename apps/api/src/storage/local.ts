@@ -11,9 +11,12 @@ import { sameDigest } from "../security/secrets";
 import { looksLike, type Storage } from "./storage";
 
 const TTL_MS = 15 * 60_000;
+const DOWNLOAD_TTL_MS = 2 * 60_000;
 const SAFE_KEY = /^[a-z0-9][a-z0-9_/-]{2,200}$/;
 
 type Grant = { k: string; s: number; t: string; e: number };
+/** A download grant: the key, the name and type to serve it under, the expiry, and "d" so it can't pass as an upload. */
+type DownloadGrant = { d: 1; k: string; n: string; t: string; e: number };
 
 export class UploadRefused extends Error {
   constructor(message: string) {
@@ -25,6 +28,8 @@ export class UploadRefused extends Error {
 export function createLocalStorage(opts: { dir: string; key: Buffer; now?: () => number }): Storage & {
   /** Checks the token and writes the body; throws UploadRefused with the reason. */
   receive(token: string, contentType: string | undefined, body: Buffer): Promise<void>;
+  /** Checks a download token: the file's path, and the name and type to serve it under. */
+  opening(token: string): Promise<{ path: string; name: string; contentType: string }>;
 } {
   const root = resolve(opts.dir);
   const now = opts.now ?? Date.now;
@@ -39,6 +44,29 @@ export function createLocalStorage(opts: { dir: string; key: Buffer; now?: () =>
       pathOf(key);
       const payload = Buffer.from(JSON.stringify({ k: key, s: file.size, t: file.contentType, e: now() + TTL_MS } satisfies Grant)).toString("base64url");
       return { url: `/v1/uploads/${payload}.${sign(payload)}`, method: "PUT", headers: { "Content-Type": file.contentType } };
+    },
+
+    downloadUrl(key, file) {
+      pathOf(key);
+      const e = now() + DOWNLOAD_TTL_MS;
+      const payload = Buffer.from(JSON.stringify({ d: 1, k: key, n: file.name, t: file.contentType, e } satisfies DownloadGrant)).toString("base64url");
+      return { url: `/v1/files/${payload}.${sign(payload)}`, expiresAt: new Date(e) };
+    },
+
+    async opening(token) {
+      const [payload, mac] = token.split(".");
+      if (!payload || !mac || !sameDigest(mac, sign(payload))) throw new UploadRefused("This link isn't valid");
+      let g: DownloadGrant;
+      try {
+        g = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as DownloadGrant;
+      } catch {
+        throw new UploadRefused("This link isn't valid");
+      }
+      if (g.d !== 1) throw new UploadRefused("This link isn't valid");
+      if (now() > g.e) throw new UploadRefused("This link has expired. Open the document again from the application.");
+      const path = pathOf(g.k);
+      if (!(await stat(path).then(() => true, () => false))) throw new UploadRefused("This file is no longer here");
+      return { path, name: g.n, contentType: g.t };
     },
 
     async stat(key) {

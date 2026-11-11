@@ -5,6 +5,7 @@
  * reviewer, assign. The screen only renders what hooks return and calls what they offer; the API runs the
  * prototype's own rule and says why when it refuses.
  */
+import Link from "next/link";
 import { useState } from "react";
 import type { ApplicationSummary, StaffMember } from "@excursia/contracts/dealroom";
 import { PageHeader, Section } from "@/components/ui";
@@ -96,7 +97,9 @@ function Row({ a, reviewer, pickable, picked, onPick }: { a: ApplicationSummary;
       )}
       <td className="td whitespace-nowrap font-mono text-[12px] sm:text-[13px]">{a.ref ?? a.id}</td>
       <td className="td">
-        {a.org}
+        <Link href={`/team/applications/${a.id}`} className="font-medium hover:underline">
+          {a.org}
+        </Link>
         <span className="block text-[13px] text-slate">
           {a.type === "seeker" ? "Raising capital" : "Investor or provider"}
           {a.country ? `, ${a.country}` : ""}

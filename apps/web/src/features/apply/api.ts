@@ -11,13 +11,18 @@ export const applyApi = {
   start: (slug: string, input: { mode: ApplyMode; invite?: string }) => http.post(`${base(slug)}/mine`, { body: input, schema: MyApplication }),
   save: (slug: string, id: string, changes: DraftChanges) => http.patch(`${base(slug)}/mine/${id}`, { body: { changes }, schema: MyApplication }),
   submit: (slug: string, id: string, changes?: DraftChanges) => http.post(`${base(slug)}/mine/${id}/submit`, { body: { changes }, schema: MyApplication }),
-  /** Three steps: where to put it, the bytes themselves, then "it's there" (which attaches it to the application). */
+  respond: (slug: string, id: string, input: { text: string; fileIds: string[] }) => http.post(`${base(slug)}/mine/${id}/respond`, { body: input, schema: MyApplication }),
+  /**
+   * Three steps: where to put it, the bytes themselves, then "it's there". Before submitting that attaches it; for an
+   * open request it waits, and goes with the answer (respond, with its fileId).
+   */
   async upload(slug: string, id: string, kind: string, file: File) {
     const target = await http.post(`${base(slug)}/mine/${id}/documents`, {
       body: { kind, name: file.name, contentType: file.type, size: file.size },
       schema: UploadTarget,
     });
     await http.upload(target.url, target.headers, file);
-    return http.post(`${base(slug)}/mine/${id}/documents/${target.fileId}/complete`, { schema: MyApplication });
+    const app = await http.post(`${base(slug)}/mine/${id}/documents/${target.fileId}/complete`, { schema: MyApplication });
+    return { fileId: target.fileId, name: file.name, app };
   },
 };

@@ -11,5 +11,12 @@ export function dealRoomRoutes(c: DealRoomController): Router {
   r.get("/:eventId/team", requireSession({ staff: true }), c.team);
   r.get("/:eventId/applications", requireSession({ staff: true }), c.applications);
   r.post("/:eventId/applications/assign", requireSession({ staff: true }), c.assignReviewer);
+  // one application, for its reviewers (M1.3)
+  r.get("/:eventId/applications/:appId", requireSession({ staff: true }), c.review);
+  r.post("/:eventId/applications/:appId/start-review", requireSession({ staff: true }), c.startReview);
+  r.post("/:eventId/applications/:appId/scores", requireSession({ staff: true }), c.score);
+  r.post("/:eventId/applications/:appId/requests", requireSession({ staff: true }), c.requestInfo);
+  r.post("/:eventId/applications/:appId/requests/expiry", requireSession({ staff: true }), c.rfiExpiry);
+  r.get("/:eventId/applications/:appId/documents/:docId", requireSession({ staff: true }), c.documentLink);
   return r;
 }

@@ -10,3 +10,10 @@ export function uploadsRoutes(c: UploadsController, maxBytes: number): Router {
   r.put("/:token", express.raw({ type: () => true, limit: maxBytes }), c.receive);
   return r;
 }
+
+/** GET /v1/files/:token: one document, through a two-minute signed link. */
+export function filesRoutes(c: UploadsController): Router {
+  const r = Router();
+  r.get("/:token", c.send);
+  return r;
+}

@@ -15,6 +15,7 @@ export function applyRoutes(c: ApplyController): Router {
   r.get("/:slug/mine/:appId", signedIn, c.get);
   r.patch("/:slug/mine/:appId", signedIn, c.save);
   r.post("/:slug/mine/:appId/submit", signedIn, c.submit);
+  r.post("/:slug/mine/:appId/respond", signedIn, c.respond);
   r.post("/:slug/mine/:appId/documents", signedIn, c.startUpload);
   r.post("/:slug/mine/:appId/documents/:fileId/complete", signedIn, c.completeUpload);
   return r;

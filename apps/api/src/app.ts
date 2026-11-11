@@ -78,14 +78,17 @@ export function createApp({ config, db, mailer, now, storage, logError = default
   app.use("/v1", auth.routes);
   // the rules' clock: the test's clock, else RULES_CLOCK on local and staging, else the real one
   const rulesNow = now ?? rulesClock(config);
-  app.use("/v1/dealroom", dealRoomModule({ db, now: rulesNow }));
-
   const uploadMaxBytes = config.UPLOAD_MAX_MB * 1_048_576;
   const files =
     storage ??
     createLocalStorage({ dir: config.STORAGE_DIR ?? fileURLToPath(new URL("../../../data/uploads", import.meta.url)), key: deriveKeys(config.AUTH_SECRET).upload });
+  // until M1.2's virus scan, unscanned files open only away from production
+  const allowUnscanned = config.APP_ENV ? config.APP_ENV !== "production" : config.NODE_ENV !== "production";
+  app.use("/v1/dealroom", dealRoomModule({ db, now: rulesNow, storage: files, allowUnscanned }));
   app.use("/v1/apply", applyModule({ db, now: rulesNow, storage: files, uploadMaxBytes }));
-  app.use("/v1/uploads", uploadsModule({ storage: files, maxBytes: uploadMaxBytes }));
+  const transfers = uploadsModule({ storage: files, maxBytes: uploadMaxBytes });
+  app.use("/v1/uploads", transfers.uploads);
+  app.use("/v1/files", transfers.files);
 
   app.use(notFound);
   app.use(errorHandler(logError));

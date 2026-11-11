@@ -43,5 +43,11 @@ export function useSubmitApplication(slug: string, id: string) {
 
 export function useUploadDocument(slug: string, id: string) {
   const keep = useKeepCurrent(slug);
-  return useMutation({ mutationFn: ({ kind, file }: { kind: string; file: File }) => applyApi.upload(slug, id, kind, file), onSuccess: keep });
+  return useMutation({ mutationFn: ({ kind, file }: { kind: string; file: File }) => applyApi.upload(slug, id, kind, file), onSuccess: (r) => keep(r.app) });
+}
+
+/** Answers the team's open request: the text, and the files uploaded for it. */
+export function useRespond(slug: string, id: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: (input: { text: string; fileIds: string[] }) => applyApi.respond(slug, id, input), onSuccess: keep });
 }
