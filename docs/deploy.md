@@ -56,6 +56,7 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
     - `WEB_ORIGINS=https://events.example.co.ke`
     - `COOKIE_DOMAIN=.example.co.ke`
     - `APP_ENV=production` (or `staging`), which every database command also reads from `migrate.env`
+    - `AUTH_SECRET`: 32 random bytes, base64 (`openssl rand -base64 32`). It is different in each environment and never rotated casually, since changing it makes every enrolled authenticator unreadable. An offline copy goes in the vault with the other secrets.
     - the provider keys
   - The API refuses to start in production without https origins and a cookie domain.
   - On SIGTERM it stops taking connections, finishes open requests and closes its pool, and exits after 10 s at most.
@@ -218,8 +219,8 @@ server {
   proxy_connect_timeout 5s; proxy_send_timeout 30s; proxy_read_timeout 30s;
 
   # adjust these paths to the real sign-in, code and payment routes
-  location ~ ^/v1/auth/(signin|staff|scanner)  { limit_req zone=auth burst=5 nodelay; proxy_pass http://excursia_api; }
-  location ~ ^/v1/(apply/verify|auth/code)     { limit_req zone=otp  burst=3 nodelay; proxy_pass http://excursia_api; }
+  location ~ ^/v1/auth/(staff|totp|scanner)/   { limit_req zone=auth burst=5 nodelay; proxy_pass http://excursia_api; }
+  location ~ ^/v1/auth/code                    { limit_req zone=otp  burst=3 nodelay; proxy_pass http://excursia_api; }
   location ~ ^/v1/pay(/|$)                      { limit_req zone=pay  burst=5 nodelay; proxy_pass http://excursia_api; }
 
   # Daraja: the path carries a per-transaction token; Safaricom's addresses are a second layer

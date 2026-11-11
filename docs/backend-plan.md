@@ -295,7 +295,7 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 | M0.2 | **Database and Prisma**: PostgreSQL with database roles, the first schema (identity, minimal event, tier and delegate, the Deal Room aggregate and its tables), migrations, connection limits and timeouts | `prisma migrate deploy` runs clean on an empty database, as the `migrator` role **Done 11 Nov 2026.** Notes below |
 | M0.2a | **The API as its own process**: npm workspaces; Express with checked settings, security headers, CORS for the web app's origins, the error contract, health checks and a clean shutdown; the lint rules for the workspace boundaries | The prototype runs unchanged from `apps/web`; the API answers `/health/ready` against PostgreSQL; lint fails the web app importing the database. **Done 11 Nov 2026.** Notes below |
 | M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record **Done 11 Nov 2026** for local and the commands staging and production use; staging itself comes with M0.6. Notes below |
-| M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL |
+| M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL **Done 11 Nov 2026** in the API; the sign-in screens come with M0.5's client foundations and staging with M0.6. Notes below |
 | M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the module pattern in the API (`routes`, `controller`, `service`, `repo`, as `health` already does); the first POST and GET routes with their contracts; the Origin check on writes; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` client, `ApiError`); the feature-folder pattern in the web app | Assigning a reviewer runs from a screen through a hook, the API client, the Express route, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; a write from another origin is refused |
 | M0.6 | **CI and staging**: type-check, lint, tests and both builds on every push; staging deployed behind nginx as in `deploy.md`, with the web app and the API on their two names | CI is green; both names are reachable over HTTPS with the security headers; the deploy switches the API and then the web app with no failed request |
 
@@ -368,6 +368,50 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 - **`APP_ENV`** (`local`, `staging` or `production`) is required by every database command and never defaulted. `setup-local.sh` writes `APP_ENV=local`.
 - **Not yet:** busy-slot rows for programmed sessions (M3.3, once the session-room rule is settled); staff passwords (M0.4).
 - **Tests:** 17 new ones; 220 in all.
+
+**Notes on M0.4, done 11 Nov 2026:**
+- **Applicants** sign in with a 6-digit code sent by email: `POST /v1/auth/code`, then `POST /v1/auth/code/verify`.
+  - A code lasts ten minutes, works once, and dies after five wrong guesses. Asking again kills the previous one.
+  - The first sign-in makes the account.
+  - Asking for a code answers the same whether or not the address has an account.
+- **Staff** sign in in two steps:
+  1. A password (argon2id, 12 to 128 characters): `POST /v1/auth/staff/signin`. A right password gives a *pending* session, which reaches only the authenticator routes and lapses after ten minutes.
+  2. A code from an authenticator app (RFC 6238): `/v1/auth/totp/verify`. The first time, `/v1/auth/totp/setup` and `/v1/auth/totp/confirm` set it up and issue ten recovery codes, shown once.
+
+  Details:
+  - Each authenticator step works once. Each recovery code works once.
+  - A password is set or reset with a code sent to the staff email (`/v1/auth/staff/password/code`, then `/v1/auth/staff/password`), so no admin screen is needed for onboarding. A new password ends every session.
+  - A wrong email and a wrong password get one refusal, taking the same time.
+  - Staff can't sign in with an emailed code.
+- **Sessions:**
+  - The token is 256 random bits, in an HttpOnly cookie (`__Secure-sid`, scoped to `COOKIE_DOMAIN`; SameSite Strict for staff, Lax for applicants). The database keeps only its SHA-256.
+  - A new token at every step-up, and the old one dies with it.
+  - Staff: 30 minutes idle, 12 hours absolute. Applicants: 7 days idle, 30 days absolute.
+  - `GET /v1/session` says who is signed in, the MFA state and the memberships.
+  - `POST /v1/auth/signout` ends the session.
+- **Secrets:** `AUTH_SECRET` (32 bytes, in the API's environment) derives two keys.
+  - One HMACs the one-time codes, so a copy of the database can't be searched for them.
+  - The other encrypts TOTP secrets with AES-256-GCM.
+- **Attempts are counted in PostgreSQL** (`rate_limit`, keyed by a hash of the address or account):
+  - code requests: 3 per address and 20 per network address in 15 minutes
+  - code checks: 10 per address in 15 minutes
+  - passwords: 5 per address and 30 per network address in 15 minutes
+  - authenticator codes: 5 per person in 5 minutes
+- **CSRF:** every write under `/v1` must carry an `Origin` from `WEB_ORIGINS`. One that carries the session cookie with no `Origin` is refused.
+- **Email:** only one-time codes are sent straight from the API; everything else will go through the outbox (M1.4). The only transport so far is `log`, which prints to the API's console locally and **refuses in production** until the provider is chosen (D7).
+- **Tests:** 20 new ones against the test database, with a clock the tests move:
+  - every flow above
+  - code reuse, expiry and the five-guess limit
+  - the rate limits
+  - TOTP replay and single-use recovery codes
+  - idle and absolute expiry, and rotation at the step-up
+  - a new password ending sessions
+  - the same refusal for an unknown email and a wrong password
+  - cross-site writes
+- **Not yet:**
+  - ending a person's sessions when their role changes (with staff management, when memberships first change through the API)
+  - deleting old `rate_limit` windows (a worker job, M1.4)
+  - scanner PIN sign-in (M2.2)
 
 ### Phase 1: Deal Room onboarding (23 November 2026 to 8 January 2027)
 

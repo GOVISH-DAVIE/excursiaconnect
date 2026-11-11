@@ -292,10 +292,6 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("sign-in and sessions", () => {
         if ((await busy.call("GET", "/v1/session")).status !== 200) break;
       }
       expect(visits).toBe(24); // 24 × 29 min after the step-up passes 12 hours on the 25th visit
-      for (let h = 0; h < 0; h++) {
-        advance(29 * MIN);
-        if ((await busy.call("GET", "/v1/session")).status !== 200) break;
-      }
       expect((await busy.call("GET", "/v1/session")).status).toBe(401);
     });
 

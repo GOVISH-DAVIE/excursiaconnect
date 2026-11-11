@@ -121,6 +121,14 @@ Beside the modules:
 - A module's `*.mapper.ts` turns the rules' records into rows and back. It is pure, so it is tested without a database.
 - `src/cli/` holds the database commands (`seed-demo`, `check-demo`, `import-reference`). Like `server.ts`, each is a composition root: it builds the repos from one database pool. `npm run build` bundles them into `dist/cli/`.
 
+**Sign-in** is the `auth` module (backend-plan.md, notes on M0.4). Around it:
+- `src/http/session.ts` sets and clears the cookie.
+  - `loadSession` resolves the cookie once per request into `res.locals.auth`.
+  - `requireSession({ staff, pending })` is the guard routes put in front of their controllers.
+- `src/http/origin.ts` refuses cross-site writes.
+- `src/security/` holds the cryptography: tokens, code hashing, AES-GCM, TOTP and argon2.
+- `src/mail/` sends the one-time codes.
+
 Every module has the same five files in `src/modules/<module>/`, and is mounted in `app.ts` under `/v1/<module>`. Each layer is a factory that takes the layer below (`createXController(service)`), with no module-level singletons, so tests can swap any layer.
 
 ## Sessions and cookies across the two subdomains

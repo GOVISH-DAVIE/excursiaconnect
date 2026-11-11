@@ -21,7 +21,7 @@ npm run db:migrate   # apply migrations to the dev database and generate the Pri
 npm run db:seed:demo # load the prototype's seed into the dev database (APP_ENV local or staging only)
 npm run db:check-demo  # exits 1 if any demo record is present (the production deploy runs it)
 npm run db:import -- apps/api/reference/connected-africa-3.example.json   # a real event's reference data
-npm run dev:api      # the API: http://localhost:4000/health/ready
+npm run dev:api      # the API: http://localhost:4000/health/ready; sign-in codes print in its console
 npm test             # every suite: the rules, the database's guarantees, the API
 npm run typecheck    # each workspace
 npm run lint         # including the workspace boundaries
