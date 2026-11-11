@@ -11,7 +11,15 @@ npm run dev      # http://localhost:3000
 npm run build && npm start
 ```
 
-No environment variables, database or payment keys are needed. The Rethink Sans font is bundled locally so it builds offline.
+The prototype needs no environment variables, database or payment keys. The Rethink Sans font is bundled locally so it builds offline.
+
+The backend being built on branch `backend` (docs/backend-plan.md) uses PostgreSQL through Prisma. To work on it locally:
+
+```bash
+npm run db:setup     # roles, databases and connection strings in .env.local (needs a local PostgreSQL superuser)
+npm run db:migrate   # apply migrations to the dev database and generate the Prisma client
+npm test             # the rule tests, and the database tests against the test database
+```
 
 One design language covers every screen: tokens, type, buttons and the public site's page rhythm are in [docs/design-system.md](docs/design-system.md). What the prototype covers of the use cases, and what is still missing, is in [docs/coverage.md](docs/coverage.md); a click-through of every screen, with the dead controls and the gaps, is in [docs/qa-findings.md](docs/qa-findings.md).
 

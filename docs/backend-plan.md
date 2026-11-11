@@ -173,7 +173,7 @@ One Prisma schema, keyed by `eventId` everywhere, even where the code is single-
 | Events | Tables | `Organiser`, `Event`, `Tier`, `FormField`, `Zone`, `Room`, `ProgrammeSession`, `Shift`, `Sponsor`, `SpeakerProfile`, `Media` |
 | Delegates and money | Tables | `Delegate`, `Badge`, `Order`, `Payment` (unique provider and transaction id, raw payload), `Refund`, `Payout`, `Campaign`, `Scan`, `Presence`, `RoomScan` |
 | Deal Room | Aggregate | `DrConfig`, `DrStaff`, `DrApplication`, `DrMatch`, `DrMeeting`, `DrSession`, `DrOpportunity`, `DrException`, `DrIncident`: each a JSONB record plus summary columns |
-| Deal Room | Tables | `DrBusy`, `DrCounter`, `DrConsent` and `DrAccess` (the consent and access logs), `DrFeePayment` |
+| Deal Room | Tables | `DrBusy`, `DrCounter`, `DrConsent` and `DrAccess` (the consent and access logs); the fee is a row in the shared `Payment` table |
 | Exhibition | Aggregate | `ExpoConfig`, `Hall`, `Booth`, `Exhibitor`, `Booking`, `Invoice`, `StandOrder`, `Issue` (JSONB plus summary columns) |
 | Platform | Tables | `Outbox` (email, SMS, push; no 400-message cap), `File` (object storage key, quarantine state, retention date), `VisitSession`, `PageView`, `Click` |
 
@@ -278,7 +278,7 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 | --- | --- | --- |
 | M0.0 | **Server-safe rules**: split `store.tsx` into `src/lib/core/*` and the client provider; `Ctx { now, newId, actor }` through every reducer and time-dependent rule; refusals with reasons; Vitest with seed-based tests | The prototype runs unchanged; `src/lib` has no `Date.now`, `Math.random` or React import; the Phase 1 actions have tests that pass. **Done 11 Nov 2026** on `backend`. Notes below |
 | M0.1 | **Decisions and applications to third parties**: D3 to D11 answered; the Daraja production application and the SMS sender ID filed (each takes one to two weeks); the ODPC registration started | Each decision has an answer in this file; both applications have reference numbers |
-| M0.2 | **Database and Prisma**: PostgreSQL with database roles, the first schema (identity, minimal event, tier and delegate, the Deal Room aggregate and its tables), migrations, connection limits and timeouts | `prisma migrate deploy` runs clean on an empty database, as the `migrator` role |
+| M0.2 | **Database and Prisma**: PostgreSQL with database roles, the first schema (identity, minimal event, tier and delegate, the Deal Room aggregate and its tables), migrations, connection limits and timeouts | `prisma migrate deploy` runs clean on an empty database, as the `migrator` role **Done 11 Nov 2026.** Notes below |
 | M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record |
 | M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL |
 | M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the first server action and GET route handler; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` helpers, `ApiError`); the feature-folder pattern; Zod; the lint rules that enforce the layer boundaries (architecture.md) | Assigning a reviewer runs from a screen through a hook, the API client, a server action, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; lint fails a component that imports the server or Prisma |
@@ -291,6 +291,19 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 - **Refusals:** `apply()` returns `{ state, refusal }`. Every refusal in the Deal Room's onboarding and review reducer has its reason. Meetings, sessions, conversion, Exhibition and core refusals still return a generic reason; theirs come with their milestones (M3.x, M5.0, Phase 2).
 - **Tests:** 174 Vitest tests in `tests/` (`npm test`): the seven earlier rule suites, the actor checks and the refusal reasons.
 - **Still trusted from the client, to fix in the module's milestone:** registration's price and status, a scan's verdict and time (M2.2, M2.4), and the applicant's ownership of an application (`runCommand`, M0.5).
+
+**Notes on M0.2, done 11 Nov 2026:**
+- **Prisma 7.10.1** with the `pg` driver adapter. `prisma.config.ts` points migrations at the migrator role; `src/server/db.ts` is the app's client (pool of 10, no query logging); the generated client is in `src/generated/prisma` and not committed.
+- **Roles and databases:** `scripts/db/setup-local.sh` (`npm run db:setup`) creates the four roles (`excursia_migrator`, `excursia_app`, `excursia_worker`, `excursia_reporting`), the dev, test and shadow databases, the timeouts and the default grants. It writes the connection strings to `.env.local`. Servers are provisioned the same way.
+- **The first migration** (`prisma/migrations/…_init`) holds the schema in `prisma/schema.prisma` plus SQL Prisma can't express: the exclusion constraint against double-booking, case-insensitive unique badge codes, partial indexes, time-order checks, and the audit log made append-only for the app and worker. Prisma sees no drift from it.
+- **Proved on the test database, as the app role** (`tests/db`, 9 tests):
+  - 50 simultaneous bookings of one slot: exactly one wins
+  - overlap is refused per room and table and per person; a lapsed proposal frees its slot
+  - badge codes are unique whatever their case
+  - the audit log can't be changed or deleted
+  - the schema can't be changed
+  - a counter hands out each number once under concurrency
+- **Locally this runs on PostgreSQL 15,** the server already on this machine; production's version is chosen with the rest of D2. One `Payment` table carries both Deal Room fees and ticket orders, instead of a separate fee table.
 
 ### Phase 1: Deal Room onboarding (23 November 2026 to 8 January 2027)
 
