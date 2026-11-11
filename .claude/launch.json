@@ -4,13 +4,40 @@
     {
       "name": "excursiaconnect-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@excursia/web", "--", "-p", "3010"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@excursia/web",
+        "--",
+        "-p",
+        "3010"
+      ],
       "port": 3010
     },
     {
       "name": "excursiaconnect-api",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@excursia/api"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@excursia/api"
+      ],
+      "port": 4000
+    },
+    {
+      "name": "excursiaconnect-api-fresh",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "LOCAL_DATABASE=excursia_fresh",
+        "WEB_ORIGINS=http://localhost:3010,http://localhost:3011",
+        "npm",
+        "run",
+        "dev",
+        "-w",
+        "@excursia/api"
+      ],
       "port": 4000
     }
   ]

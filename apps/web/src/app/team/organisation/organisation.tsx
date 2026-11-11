@@ -22,6 +22,15 @@ export function Organisation() {
   return <Kyc key={o.id} initial={o} />;
 }
 
+const formOf = (o: OrganiserView) => ({
+  registrationNo: o.registrationNo,
+  kraPin: o.kraPin,
+  address: o.address,
+  payoutAccount: o.payoutAccount,
+  signatoryName: o.signatory.name,
+  signatoryTitle: o.signatory.title,
+});
+
 function Kyc({ initial }: { initial: OrganiserView }) {
   // the cached view is kept current by every change's answer
   const mine = useMyOrganisers();
@@ -32,14 +41,7 @@ function Kyc({ initial }: { initial: OrganiserView }) {
   const sign = useOrganiserChange(o.id, (by: string) => onboardingApi.signDpa(o.id, by));
   const submit = useOrganiserChange(o.id, () => onboardingApi.submitKyc(o.id));
   const open = useOpenKycDoc(o.id);
-  const [form, setForm] = useState({
-    registrationNo: o.registrationNo,
-    kraPin: o.kraPin,
-    address: o.address,
-    payoutAccount: o.payoutAccount,
-    signatoryName: o.signatory.name,
-    signatoryTitle: o.signatory.title,
-  });
+  const [form, setForm] = useState(() => formOf(o));
   const [signer, setSigner] = useState("");
   const edit = o.can.edit;
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -71,13 +73,17 @@ function Kyc({ initial }: { initial: OrganiserView }) {
               className="grid gap-4 sm:grid-cols-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                save.mutate({
-                  registrationNo: form.registrationNo,
-                  kraPin: form.kraPin,
-                  address: form.address,
-                  payoutAccount: form.payoutAccount,
-                  signatory: { name: form.signatoryName, title: form.signatoryTitle },
-                });
+                save.mutate(
+                  {
+                    registrationNo: form.registrationNo,
+                    kraPin: form.kraPin,
+                    address: form.address,
+                    payoutAccount: form.payoutAccount,
+                    signatory: { name: form.signatoryName, title: form.signatoryTitle },
+                  },
+                  // the form shows what was kept (the PIN in capitals, say), not what was typed
+                  { onSuccess: (view) => setForm(formOf(view)) },
+                );
               }}
             >
               {field("registrationNo", "Registration number")}

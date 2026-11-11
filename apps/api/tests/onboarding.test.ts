@@ -218,6 +218,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     expect(made.status).toBe(201);
     const draft = EventView.parse(made.json);
     eventId = draft.id;
+    // a draft is the organiser's alone: Algotech doesn't see it until it is sent
+    expect((await call("GET", `/v1/events/${eventId}`, "admin")).status).toBe(404);
+    expect(AdminQueue.parse((await call("GET", "/v1/admin/queue", "admin")).json).events.some((e) => e.id === eventId)).toBe(false);
     slug = draft.slug;
     expect(slug).toBe(`savanna-capital-summit-${run}`);
     expect(draft.gaps).toEqual(["The venue"]);

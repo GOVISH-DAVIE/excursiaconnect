@@ -1,14 +1,22 @@
 "use client";
 
 /** Pieces the organiser's and Algotech's screens share: the session wait, statuses, a history list, a file picker. */
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { Tone } from "@/components/ui";
 import { useSession } from "@/features/auth/hooks/use-session";
+
+const noop = () => () => {};
+/**
+ * False while React hydrates what the server rendered, true after. A page streamed in a Suspense boundary
+ * hydrates after the session has loaded; without this its first render would differ from the server's.
+ */
+export const useHydrated = () => useSyncExternalStore(noop, () => true, () => false);
 
 /** Renders its children once a full staff session is in; the shell sends anyone else to the sign-in page. */
 export function Signed({ children }: { children: ReactNode }) {
   const s = useSession().data;
-  if (!s || s.mfa === "pending" || s.user.kind === "participant") return <p className="text-[14px] text-slate">Checking your sign-in…</p>;
+  const hydrated = useHydrated();
+  if (!hydrated || !s || s.mfa === "pending" || s.user.kind === "participant") return <p className="text-[14px] text-slate">Checking your sign-in…</p>;
   return <>{children}</>;
 }
 

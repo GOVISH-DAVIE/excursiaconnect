@@ -39,7 +39,8 @@ export function createPlatformService({ repo, organisers, commands, now }: Platf
       admin(session);
       const [orgs, events] = await Promise.all([
         repo.organisersByStatus(["Not submitted", "Pending", "Returned", "Verified"]),
-        repo.eventsByState(["Draft", "Submitted", "Under review", "Changes requested", "Approved", "Live", "Rejected", "Suspended", "Closed"]),
+        // not drafts: those are the organiser's alone until sent (OR-2)
+        repo.eventsByState(["Submitted", "Under review", "Changes requested", "Approved", "Live", "Rejected", "Suspended", "Closed"]),
       ]);
       const owners = await Promise.all(orgs.map((o) => repo.ownerOf(o.id)));
       return {
@@ -58,7 +59,7 @@ export function createPlatformService({ repo, organisers, commands, now }: Platf
         audit: { actorKind: "admin", actorId: session.user.id, action: `organiser/kyc${input.verdict}`, detail: { note: input.note }, ip },
       }));
       if (!out) throw new HttpError("not_found", "No such organiser.");
-      return organisers.viewOf(organiserId);
+      return organisers.viewOf(organiserId, true);
     },
 
     /** Approving with the Deal Room add-on creates its Deal Room, on the standard settings, in the same transaction. */

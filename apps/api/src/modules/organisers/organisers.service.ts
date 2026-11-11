@@ -66,10 +66,12 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
     if (session.user.kind === "participant" || !(await repo.isOwner(session.user.id, organiserId))) throw new HttpError("not_found", "No such organiser.");
   }
 
-  async function viewOf(organiserId: string): Promise<OrganiserView> {
+  /** An organiser's view; Algotech's leaves out the drafts, which only the organiser sees (OR-2). */
+  async function viewOf(organiserId: string, forAdmin = false): Promise<OrganiserView> {
     const [row, events, owner] = await Promise.all([repo.organiser(organiserId), repo.eventsOf(organiserId), repo.ownerOf(organiserId)]);
     if (!row) throw new HttpError("not_found", "No such organiser.");
-    return organiserView(row.record as unknown as Organiser, events.map((e) => e.record as unknown as EventRecord), owner);
+    const records = events.map((e) => e.record as unknown as EventRecord).filter((e) => !forAdmin || e.state !== "Draft");
+    return organiserView(row.record as unknown as Organiser, records, owner);
   }
 
   async function eventViewOf(eventId: string): Promise<EventView> {
@@ -86,7 +88,9 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
   async function eventFor(session: Resolved, eventId: string) {
     const row = await repo.event(eventId);
     if (!row || row.demo) throw new HttpError("not_found", "No such event.");
-    if (!isAdmin(session) && !(await repo.isOwner(session.user.id, row.organiserId))) throw new HttpError("not_found", "No such event.");
+    // a draft is the organiser's alone (OR-2); Algotech sees it once it is sent
+    const seen = isAdmin(session) ? row.state !== "Draft" : await repo.isOwner(session.user.id, row.organiserId);
+    if (!seen) throw new HttpError("not_found", "No such event.");
     return row;
   }
 
@@ -153,12 +157,12 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
 
     async mine(session: Resolved): Promise<OrganiserView[]> {
       const ids = await repo.ownedBy(session.user.id);
-      return Promise.all(ids.map(viewOf));
+      return Promise.all(ids.map((id) => viewOf(id)));
     },
 
     async organiser(session: Resolved, organiserId: string) {
       await canSee(session, organiserId);
-      return viewOf(organiserId);
+      return viewOf(organiserId, isAdmin(session));
     },
 
     saveKyc: (session: Resolved, organiserId: string, input: KycInput, ip: string | null) =>
