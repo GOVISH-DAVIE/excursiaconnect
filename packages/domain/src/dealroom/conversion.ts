@@ -6,7 +6,7 @@ import type { Ctx } from "../ctx";
 import type { AppState } from "../types";
 import { CLOSE_REASONS, OPEN_STAGES, staffOf, drCan, oppOpen, oppOverdue, oppParties, staffName } from "./logic";
 import type { CloseReason, DealRoomState, DrDocument, DrOpportunity, DrOppOutcome, DrScriptStep, OppStage, OutcomeKind } from "./types";
-import { portal, send, withDr } from "./util";
+import { leadOf, portal, send, withDr } from "./util";
 
 /** The tiers that rest on a signed document: a signed commitment, financing approved but not disbursed, and deployed. */
 export const SIGNED: OutcomeKind[] = ["Signed commitment", "Approved, not disbursed", "Deployed"];
@@ -198,7 +198,7 @@ export function playForward(ctx: Ctx, dr: DealRoomState, events: AppState["event
       if (iso.endsWith("-01") && stamp > from && stamp <= to && iso > ev.endDate) {
         const prev = new Date(iso + "T12:00:00Z");
         prev.setUTCMonth(prev.getUTCMonth() - 1);
-        next = sendAt(ctx, next, stamp, c.eventId, "st_lead", `Monthly conversion report, ${MONTH(prev.toISOString().slice(0, 7))}`, "/dealroom/reports?tab=Conversion");
+        next = sendAt(ctx, next, stamp, c.eventId, leadOf(next, c.eventId), `Monthly conversion report, ${MONTH(prev.toISOString().slice(0, 7))}`, "/dealroom/reports?tab=Conversion");
         sent = true;
       }
     }

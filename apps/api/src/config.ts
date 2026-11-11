@@ -32,8 +32,24 @@ const Env = z
     AUTH_SECRET: z
       .string()
       .refine((s) => Buffer.from(s, "base64").length >= 32, "must be at least 32 random bytes, base64 (openssl rand -base64 32)"),
-    /** How email leaves: "log" writes it to the console, for local work and tests only. */
-    MAIL_TRANSPORT: z.enum(["log"]).default("log"),
+    /** How email leaves: "smtp" through the mail provider (D7: Zoho), or "log" to the console, for local work and tests. */
+    MAIL_TRANSPORT: z.enum(["log", "smtp"]).default("log"),
+    SMTP_HOST: z.string().optional(),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),
+    /** TLS from the first byte (port 465); false means STARTTLS on 587, which nodemailer then requires */
+    SMTP_SECURE: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASSWORD: z.string().optional(),
+    /** The sender, as "Name <address>"; the address must be the SMTP account's own, or one it may send as */
+    EMAIL_FROM: z.string().optional(),
+    /**
+     * Away from production: the only recipients that get real mail, as addresses or @domains, comma separated.
+     * Everyone else's mail is printed to the console, so test addresses never bounce off the real sender.
+     */
+    MAIL_ALLOW: list.default([]),
     /**
      * Local and staging only: the time the rules take as now, "YYYY-MM-DD HH:MM" in Nairobi, running on from there
      * (so a demo can apply before applications open). Sessions and codes keep the real clock. Refused in production.
@@ -50,6 +66,9 @@ const Env = z
   .superRefine((env, ctx) => {
     if (env.RULES_CLOCK && (env.APP_ENV === "production" || (env.NODE_ENV === "production" && env.APP_ENV !== "staging")))
       ctx.addIssue({ code: "custom", path: ["RULES_CLOCK"], message: "is for local and staging only" });
+    if (env.MAIL_TRANSPORT === "smtp")
+      for (const key of ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "EMAIL_FROM"] as const)
+        if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "is required when MAIL_TRANSPORT is smtp" });
     if (env.NODE_ENV !== "production") return;
     if (env.WEB_ORIGINS.some((o) => !o.startsWith("https://")))
       ctx.addIssue({ code: "custom", path: ["WEB_ORIGINS"], message: "every web origin must be https in production" });

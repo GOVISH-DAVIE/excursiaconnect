@@ -98,6 +98,8 @@ export type Command = {
   actions: (state: AppState, ctx: Ctx) => Action[];
   /** Staff the command added, to give sign-ins to in the same transaction (Algotech provisioning, DA-2). */
   accounts?: (after: AppState) => StaffLink[];
+  /** Emails to queue with the change, beyond what the rules send (M1.4): to a staff or application id. */
+  notify?: (after: AppState) => { to: string; subject: string; link: string }[];
 };
 
 export type CommandDeps = { repo: DealRoomRepo; now: () => Date; newId?: (prefix: string) => string };
@@ -107,7 +109,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
     newId,
     /** Runs a command; returns the state after it, as committed. */
     run(cmd: Command): Promise<AppState> {
-      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff }) => {
+      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff, queue }) => {
         if (!stored) throw new HttpError("not_found", "This event has no Deal Room.");
         const at = nairobiNow(now());
         const ctx: Ctx = { now: at, newId, actor: cmd.actor };
@@ -139,6 +141,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
           })),
         );
         await audit(rows);
+        if (cmd.notify) await queue(cmd.notify(state).map((n) => ({ ...n, eventId: cmd.eventId })));
         return state;
       });
     },

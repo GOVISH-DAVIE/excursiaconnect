@@ -23,6 +23,8 @@ npm run db:check-demo  # exits 1 if any demo record is present (the production d
 npm run db:import -- apps/api/reference/connected-africa-3.example.json   # a real event's reference data
 npm run db:admin -- --email you@algotech.example --name "Your Name"   # an Algotech admin (no request can make one)
 npm run dev:api      # the API: http://localhost:4000/health/ready; sign-in codes print in its console
+npm run dev:worker   # sends the outbox; away from production, real mail only to MAIL_ALLOW, the rest is printed
+npm run mail:check   # logs in to the mail server (SMTP_* in .env.local) without sending; -- --to you@x sends a test
 ```
 
 To walk the product from nothing, on real screens and without the demo seed, use a second, empty database. The demo database is left alone:

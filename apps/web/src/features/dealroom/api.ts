@@ -1,6 +1,6 @@
 /** The Deal Room's calls to the API: the only file in the web app that knows these paths. */
 import { z } from "zod";
-import { ApplicationSummary, TeamView, type AssignReviewerInput } from "@excursia/contracts/dealroom";
+import { ApplicationSummary, MessageRow, TeamView, type AssignReviewerInput } from "@excursia/contracts/dealroom";
 import { DocumentLink, ReviewView, type RequestInfoInput, type RfiExpiryInput, type ScoreInput } from "@excursia/contracts/review";
 import { http } from "../http";
 
@@ -17,6 +17,7 @@ export const dealRoomApi = {
   rfiExpiry: (eventId: string, appId: string, input: RfiExpiryInput) =>
     http.post(`/v1/dealroom/${eventId}/applications/${appId}/requests/expiry`, { body: input, schema: ReviewView }),
   documentLink: (eventId: string, appId: string, docId: string) => http.get(`/v1/dealroom/${eventId}/applications/${appId}/documents/${docId}`, { schema: DocumentLink }),
+  messages: (eventId: string) => http.get(`/v1/dealroom/${eventId}/messages`, { schema: z.array(MessageRow) }),
   assignReviewer: (eventId: string, input: AssignReviewerInput) =>
     http.post(`/v1/dealroom/${eventId}/applications/assign`, { body: input, schema: z.array(ApplicationSummary) }),
 };

@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { UploadTarget } from "@excursia/contracts/apply";
 import { ErrorBody } from "@excursia/contracts/http";
 import { AdminQueue, DealRoomSettings, EventView, OrganiserView } from "@excursia/contracts/onboarding";
+import { PublicEvent } from "@excursia/contracts/public";
 import { createDb } from "@excursia/db";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
@@ -105,6 +106,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     const users = await db.user.findMany({ where: { email: { contains: `@${run}.onboarding.example` } }, select: { id: true } });
     const orgIds = (await db.organiser.findMany({ where: { name: { contains: run } }, select: { id: true } })).map((o) => o.id);
     const events = (await db.event.findMany({ where: { organiserId: { in: orgIds } }, select: { id: true } })).map((e) => e.id);
+    await db.outboxMessage.deleteMany({ where: { OR: [{ eventId: { in: events } }, { recipient: { in: users.map((u) => `user:${u.id}`) } }] } });
     await db.drApplication.deleteMany({ where: { eventId: { in: events } } });
     await db.drCounter.deleteMany({ where: { eventId: { in: events } } });
     await db.file.deleteMany({ where: { eventId: { in: events } } });
@@ -203,6 +205,15 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     const ok = OrganiserView.parse((await call("POST", `/v1/admin/organisers/${organiserId}/kyc`, "admin", { verdict: "Verified" })).json);
     expect(ok.kycStatus).toBe("Verified");
     expect(ok.history.map((h) => h.what).join(" / ")).toMatch(/returned .* verified/i);
+    // each step is an email, queued with the change: Algotech hears of KYC to check, the owner of each decision
+    const owner = await db.user.findUniqueOrThrow({ where: { email: at("owner") } });
+    const admin = await db.user.findUniqueOrThrow({ where: { email: at("admin") } });
+    const toOwner = (await db.outboxMessage.findMany({ where: { recipient: `user:${owner.id}` }, orderBy: { createdAt: "asc" } })).map((m) => [m.subject, m.status]);
+    expect(toOwner).toEqual([
+      ["Algotech returned your KYC: see what to fix", "queued"],
+      ["Your KYC is verified: you can send events for approval", "queued"],
+    ]);
+    expect(await db.outboxMessage.count({ where: { recipient: `user:${admin.id}`, subject: { startsWith: "KYC to check" } } })).toBe(2);
   });
 
   test("an event goes from draft to approved with the Deal Room add-on, then live", async () => {
@@ -244,7 +255,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     expect(approved.state).toBe("Approved");
     expect(approved.terms?.commissionPct).toBe(5);
     expect(approved.dealRoom?.gaps).toContain("Name at least one mission");
+    // not public until published
+    expect((await call("GET", `/v1/public/events/${slug}`)).status).toBe(404);
     expect(EventView.parse((await call("POST", `/v1/events/${eventId}/publish`, "owner", {})).json).state).toBe("Live");
+    const published = await call("GET", `/v1/public/events/${slug}`);
+    expect(published.status).toBe(200);
+    expect(PublicEvent.parse(published.json)).toMatchObject({ name: `Savanna Capital Summit ${run}`, organiser: { name: `Savanna Summits ${run}` }, dealRoom: null });
   });
 
   test("Algotech gives the Deal Room its lead and a reviewer; an applicant's email can't be staff", async () => {
@@ -259,6 +275,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
         ["Reviewer", false],
       ]),
     );
+    // their invitations are queued, to their staff records
+    const invites = await db.outboxMessage.findMany({ where: { eventId, subject: { startsWith: "You are on the Deal Room team" } } });
+    expect(invites.map((m) => m.subject).sort()).toEqual(["You are on the Deal Room team as Lead: set your password to sign in", "You are on the Deal Room team as Reviewer: set your password to sign in"]);
     const lead = await db.user.findUnique({ where: { email: at("lead") }, include: { memberships: true } });
     expect(lead?.kind).toBe("staff");
     expect(lead?.passwordHash).toBeNull();
@@ -288,6 +307,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     const after = DealRoomSettings.parse((await call("PUT", `/v1/dealroom/${eventId}/settings`, "lead", settings)).json);
     expect(after.gaps).toEqual([]);
     expect(after.log[0].what).toMatch(/1 mission, 1 track/);
+    // the public page shows the Deal Room now, and nothing about a person
+    const pub = await call("GET", `/v1/public/events/${slug}`);
+    expect(PublicEvent.parse(pub.json).dealRoom).toMatchObject({ open: true, missions: [{ code: "M1" }], rules: { appClose: "2027-02-20" } });
+    expect(JSON.stringify(pub.json)).not.toMatch(/@|PVT-|P051234567X/);
     const form = await call("GET", `/v1/apply/${slug}/form`);
     expect(form.status).toBe(200);
     expect(form.json.eventName).toBe(`Savanna Capital Summit ${run}`);

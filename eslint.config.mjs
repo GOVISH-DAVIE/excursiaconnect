@@ -19,7 +19,7 @@ function apiLayers() {
     rules: { "@typescript-eslint/no-restricted-imports": ["error", { patterns }] },
   });
   return [
-    layer(["apps/api/src/**/*.ts"], [db], ["apps/api/src/**/*.repo.ts", "apps/api/src/server.ts", "apps/api/src/cli/**", "apps/api/src/**/index.ts"]),
+    layer(["apps/api/src/**/*.ts"], [db], ["apps/api/src/**/*.repo.ts", "apps/api/src/server.ts", "apps/api/src/worker.ts", "apps/api/src/cli/**", "apps/api/src/**/index.ts"]),
     layer(["apps/api/src/**/*.controller.ts"], [db, repo]),
     layer(["apps/api/src/**/*.routes.ts"], [db, repo, service]),
   ];

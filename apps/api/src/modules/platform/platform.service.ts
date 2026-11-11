@@ -54,9 +54,15 @@ export function createPlatformService({ repo, organisers, commands, now }: Platf
 
     async decideKyc(session: Resolved, organiserId: string, input: KycDecision, ip: string | null): Promise<OrganiserView> {
       deciding(session);
+      const owners = await repo.ownerIds(organiserId);
       const out = await repo.withOrganiser(organiserId, async (o) => ({
         record: must(decideKyc(o, input.verdict, input.note ?? "", by(session), at())),
         audit: { actorKind: "admin", actorId: session.user.id, action: `organiser/kyc${input.verdict}`, detail: { note: input.note }, ip },
+        notify: owners.map((to) => ({
+          to,
+          subject: input.verdict === "Verified" ? "Your KYC is verified: you can send events for approval" : "Algotech returned your KYC: see what to fix",
+          link: "/team/organisation",
+        })),
       }));
       if (!out) throw new HttpError("not_found", "No such organiser.");
       return organisers.viewOf(organiserId, true);
@@ -67,11 +73,14 @@ export function createPlatformService({ repo, organisers, commands, now }: Platf
       deciding(session);
       const out = await repo.withEvent(eventId, async (e, o) => {
         const record = must(decideEvent(e, o, input, by(session), at()));
+        const owners = await repo.ownerIds(o.id);
+        const said = { Approved: `${record.name} is approved: publish it when you are ready`, "Changes requested": `Algotech asked for changes to ${record.name}`, Rejected: `${record.name} was not approved` } as const;
+        const notify = input.to === "Under review" ? [] : owners.map((to) => ({ to, subject: said[input.to], link: `/team/events/${record.id}`, eventId: record.id }));
         const enable = input.to === "Approved" && input.terms.dealRoom.enabled;
         const dealRoom: DrConfigRecord | undefined = enable
           ? { config: starterConfig(record, at().slice(0, 10), at(), "admin"), grants: [], adminLog: [{ at: at(), by: "admin", what: `Deal Room enabled for ${record.name}` }] }
           : undefined;
-        return { record, dealRoom, audit: { actorKind: "admin", actorId: session.user.id, action: `event/${input.to.toLowerCase().replace(/ /g, "_")}`, detail: input, ip } };
+        return { record, dealRoom, notify, audit: { actorKind: "admin", actorId: session.user.id, action: `event/${input.to.toLowerCase().replace(/ /g, "_")}`, detail: input, ip } };
       });
       if (!out) throw new HttpError("not_found", "No such event.");
       return organisers.eventViewOf(eventId);
@@ -100,6 +109,8 @@ export function createPlatformService({ repo, organisers, commands, now }: Platf
           return [{ type: "dr/staffAdd", staff }];
         },
         accounts: () => [{ staffId: id, eventId, email, name: input.name, role: input.role, canDecide: input.role === "Lead" ? true : !!input.canDecide }],
+        // their invitation: sign in on the site, setting a password first (the link opens the sign-in page)
+        notify: () => [{ to: id, subject: `You are on the Deal Room team as ${input.role}: set your password to sign in`, link: "/signin" }],
       });
       return organisers.eventViewOf(eventId);
     },

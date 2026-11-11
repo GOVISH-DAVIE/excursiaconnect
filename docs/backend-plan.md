@@ -470,7 +470,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | M1.1 | **Apply** (by Fri 11 Dec): seeker, provider and challenge forms; drafts on the server with merged autosaves; resume links; one "save and submit" command; reference numbers from a counter; the portal's status page | An applicant applies from a phone on staging and gets a reference; a second device resumes the draft **Done 11 Nov 2026**, with the core of M1.2's uploads. Notes below |
 | M1.2 | **Documents** (by Fri 11 Dec): presigned upload, quarantine, asynchronous virus scan, signed downloads after consent, retention dates | A pitch deck uploads, clears quarantine and opens only for those allowed, through a link that expires Uploads to storage, quarantine and the checks on arrival are done with M1.1; the virus scan, signed downloads after consent and retention remain |
 | M1.3 | **Review, first half** (by Fri 11 Dec): queue, assignment, rubric scoring with evidence, information requests with expiry | The review rules' tests pass on the server **Done 11 Nov 2026**. Notes below |
-| M1.4 | **Email** (by Fri 11 Dec): the outbox and worker, templates for every onboarding message, delivery status, the Notifications screen reading the outbox | Messages arrive in a real inbox with delivery status |
+| M1.4 | **Email** (by Fri 11 Dec): the outbox and worker, templates for every onboarding message, delivery status, the Notifications screen reading the outbox | Messages arrive in a real inbox with delivery status **Done 12 Nov 2026**, sending through Zoho; delivery reports and SMS remain. Notes below |
 | M1.5 | **Go-live** (Mon 14 Dec): production database with point-in-time recovery and a restore drill timed against the RTO, monitoring and alerts, privacy notice, load test of apply and upload | **Applications open Tue 15 Dec 2026** |
 | M1.6 | **Review, second half** (by Tue 22 Dec): recommendations, decisions, second decider, readiness, conditions; provider and challenge verification (KYC, NDA, sanctions, decision-maker) | The first decisions are recorded on production; no record is verified with a step missing |
 | M1.7 | **Fee and SMS** (by Fri 8 Jan): one payment method first (M-Pesa if Daraja is approved, otherwise card), then the second; webhooks as specified; the 3-day reminder job; the lead's waiver; badge on payment, with minimal tier and badge records; SMS through Africa's Talking once the sender ID is approved | A sandbox payment issues a badge; a repeated callback changes nothing; approvals made before 8 Jan get their payment link then |
@@ -526,6 +526,22 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - telling the lead when a request expires: the rules already know once the due date has passed, but nothing prompts the lead yet (Phase 2's jobs)
   - recommendations and decisions (M1.6)
 
+**Notes on M1.4, done 12 Nov 2026:**
+- **Sending:** Zoho over SMTP (D7), from `Events <noreply@algotech.co.ke>`. Sign-in codes go straight out from the API; every other message goes through the outbox and the worker. `npm run mail:check` logs in without sending.
+- **The outbox is the queue:** a message is written in the same transaction as the change that causes it, as "queued". The worker claims batches with `FOR UPDATE SKIP LOCKED`, sends, and records "sent" with Zoho's message id. A failure is retried after 1, 5, 15, 60 and 240 minutes, then "failed"; a message with no one to send to fails at once. Commands only ever add messages; they never rewrite one the worker has sent.
+- **What gets an email:**
+  - Every message the rules already send: application received, information requested, the answer to a reviewer, decisions, meetings and so on.
+  - New ones the walk-through showed were missing: Algotech when KYC or an event is sent for checking; the owner when KYC is returned or verified and when an event is approved, sent back or rejected; a new Deal Room staff member, as their invitation.
+- **The email:** the message names the action and its date only (PRD Notifications); around it, a greeting by first name and one link to where it is acted on, written for who gets it: an applicant's to their event's apply page (with their invitation, if any), staff's to the workspace (an application's own page when the message is about one), an organiser's or Algotech's to the page the message names.
+- **Messages screen:** `/team/messages`, for everyone on the Deal Room team: each email, who it went to, and whether it went, failed or is being retried.
+- **Fixed on the way:** the rules addressed some messages, and every new application's owner, to the demo's own staff (`st_lead`, `st_ops1`); they now name the event's own lead and operations staff.
+- **Local safety:** away from production, real mail goes only to `MAIL_ALLOW`; everyone else's is printed in the console, so test addresses never bounce off the real sender (bounces hurt its reputation).
+- **Tested:** 6 tests (links and wording; sent once with two workers at once; retried, then given up; no recipient; a stuck message requeued) and onboarding's checks that each step queues its email; then a real login and one test email through Zoho, and the worker sending a request for information from the walk-through.
+- **Not yet:**
+  - Delivery reports: "sent" means Zoho accepted it; bounces and complaints aren't read back yet.
+  - SPF, DKIM and DMARC for algotech.co.ke must be published before production, or mail lands in spam.
+  - SMS (M1.7), an HTML version of the email, and a way for the organiser's or Algotech's own messages to be listed (they show only in the Deal Room's list when they name its event).
+
 **Notes on a new summit from nothing (M2.3's core, brought forward), 11 Nov 2026.** Built so a summit can be set up on real screens instead of the demo seed, then walked end to end on an empty database (`excursia_fresh`) to find the gaps.
 - **The flow, and who does what:**
   1. The first Algotech admin is made from the command line (`db:admin`); no request can make one.
@@ -544,7 +560,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - The lead landed on an empty review queue with nothing saying the Deal Room wasn't set up; the queue now says what is missing and links to the settings.
   - The KYC form kept the PIN as typed rather than as saved; pages inside a Suspense boundary under `/team` rendered differently on the server and in the browser (a hydration error).
 - **Gaps still open:**
-  - **The public event pages** (`/e/[slug]`, and the Deal Room's About page) still read the prototype's local data: a real, live event shows "Event not found". Only the apply page is on the API. This is the biggest gap.
+  - ~~The public event pages read the prototype's local data, so a real, live event showed "Event not found".~~ **Fixed 12 Nov 2026:** a published event's page and its Deal Room page now come from the API (`GET /v1/public/events/:slug`, no session, no personal data, a minute's public caching), rendered on the web server so search engines and link previews see them, and kept a few minutes there. Drafts and events under review are not public. The demo's events keep the prototype's pages, with their tickets, programme and sponsors, until those move onto the API (Phase 2); a page with no API to ask falls back to the prototype's too. A real event's page shows what exists today: the dates, venue, organiser and the Deal Room (applying while it is open); "Registration opens soon" until tickets (M2.4). Its `register` and `exhibit` pages are still the prototype's.
   - **No email** tells anyone about these steps: a staff member added to a Deal Room, KYC returned or verified, an event approved. They wait for the outbox and its worker (M1.4); until then people learn by looking.
   - **Algotech's terms** are prefilled with the prototype's figures (5%, KES 120,000 licence, KES 450,000 add-on). The real price list is a decision to record.
   - The owner can't invite their own team yet (finance, accreditation, organiser staff); Algotech can't change a Deal Room staff member's role or revoke them from the screen (the rules have `dr/staffSet` and `dr/staffRevoke`).
@@ -614,7 +630,7 @@ The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only 
 | D4 | Card payments | **Paystack** or **Pesapal**, whichever Algotech already has an account with | Both take cards in Kenya |
 | D5 | M-Pesa | **Daraja directly**; file the production application in week one | Approval takes one to two weeks |
 | D6 | Files | S3-compatible private bucket with versioning; **choose the region with the DPA in mind** | Storage outside Kenya needs documented safeguards |
-| D7 | Email and SMS | **Africa's Talking** for SMS (register the sender ID in week one); **Amazon SES** or Resend for email | Sender ID approval takes one to two weeks |
+| D7 | Email and SMS | **Email decided 12 Nov 2026: Zoho, over SMTP**, from noreply@algotech.co.ke. SMS still to choose: **Africa's Talking** (register the sender ID now) | Sender ID approval takes one to two weeks |
 | D8 | Background jobs | **pg-boss** in a worker process | Jobs share the database's transactions; no extra infrastructure |
 | D9 | Exhibition timing | **Decided 11 Nov 2026: the Nairobi Brand & PR Summit is demo data only.** Exhibition follows the Deal Room, from 22 Mar 2027 | No real exhibition is due before February, so nothing moves ahead of 15 Dec |
 | D10 | The apps | Confirm whether the Flutter apps are needed for February, or the web on phones is enough | The web is now laid out for phones; the apps add store approval as a risk |

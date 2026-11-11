@@ -481,7 +481,7 @@ export interface DrMessage {
   channel: "Email" | "SMS" | "Email and SMS";
   subject: string; // the action and the date only; never private data
   link: string;
-  status: "Delivered" | "Sent" | "Failed";
+  status: "Queued" | "Delivered" | "Sent" | "Failed"; // Queued: waiting for the worker (on the server, every new message)
 }
 
 /** An outcome recorded on a device with no connection, waiting to sync. */

@@ -2,7 +2,7 @@
  * The Deal Room team's use cases. Deny by default: the signed-in person must be on this event's Deal Room team; the
  * rules then check their role. Every change goes through runCommand (dealroom.commands.ts).
  */
-import type { ApplicationSummary, AssignReviewerInput, StaffMember, TeamView } from "@excursia/contracts/dealroom";
+import type { ApplicationSummary, AssignReviewerInput, MessageRow, StaffMember, TeamView } from "@excursia/contracts/dealroom";
 import type { DocumentLink, RequestInfoInput, ReviewView, RfiExpiryInput, ScoreInput } from "@excursia/contracts/review";
 import type { Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor } from "@excursia/domain/ctx";
@@ -190,6 +190,21 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
         },
       });
       return this.settings(session, eventId);
+    },
+
+    /** What the Deal Room has sent, and whether it went (M1.4). Everyone on the team reads it. */
+    async messages(session: Resolved, eventId: string): Promise<MessageRow[]> {
+      await staffActor(session, eventId);
+      return (await repo.messages(eventId)).map((m) => ({
+        id: m.id,
+        to: m.toName,
+        kind: m.recipient.startsWith("st_") ? "staff" : m.recipient.startsWith("user:") ? "organiser" : "applicant",
+        subject: m.subject,
+        status: m.status,
+        attempts: m.attempts,
+        at: m.createdAt.toISOString(),
+        sentAt: m.sentAt?.toISOString() ?? null,
+      }));
     },
 
     async team(session: Resolved, eventId: string): Promise<TeamView> {

@@ -17,11 +17,12 @@ import type { Config } from "./config";
 import { errorHandler, notFound } from "./http/errors";
 import { originCheck } from "./http/origin";
 import { loadSession } from "./http/session";
-import { logMailer, type Mailer } from "./mail/mailer";
+import { mailerFor, type Mailer } from "./mail/mailer";
 import { applyModule } from "./modules/apply";
 import { authModule } from "./modules/auth";
 import { organisersModule } from "./modules/organisers";
 import { platformModule } from "./modules/platform";
+import { publicModule } from "./modules/public";
 import { dealRoomModule } from "./modules/dealroom";
 import { healthModule } from "./modules/health";
 import { uploadsModule } from "./modules/uploads";
@@ -75,7 +76,7 @@ export function createApp({ config, db, mailer, now, storage, logError = default
   app.use("/health", healthModule({ db }));
 
   // everything under /v1: writes must come from the web app (CSRF), and the session cookie is read once
-  const auth = authModule({ db, config, mailer: mailer ?? logMailer({ production: config.NODE_ENV === "production" }), now });
+  const auth = authModule({ db, config, mailer: mailer ?? mailerFor(config), now });
   app.use("/v1", originCheck(config), loadSession(config, auth.service));
   app.use("/v1", auth.routes);
   // the rules' clock: the test's clock, else RULES_CLOCK on local and staging, else the real one
@@ -91,6 +92,7 @@ export function createApp({ config, db, mailer, now, storage, logError = default
   const organisers = organisersModule({ db, config, auth: auth.service, storage: files, now: rulesNow, uploadMaxBytes, allowUnscanned });
   app.use("/v1", organisers.routes);
   app.use("/v1/admin", platformModule({ db, repo: organisers.repo, organisers: organisers.service, now: rulesNow }));
+  app.use("/v1/public", publicModule({ db, now: rulesNow }));
   const transfers = uploadsModule({ storage: files, maxBytes: uploadMaxBytes });
   app.use("/v1/uploads", transfers.uploads);
   app.use("/v1/files", transfers.files);

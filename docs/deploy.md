@@ -46,7 +46,7 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
   - `EnvironmentFile=/etc/excursia/web.env`, `TimeoutStopSec=30`
   - The web env holds no database URL and no provider keys. It has:
     - `NEXT_PUBLIC_API_URL=https://api.example.co.ke`
-    - `API_INTERNAL_URL=http://127.0.0.1:4001` (rewritten on each switch, below), which server components use to prefetch
+    - `API_INTERNAL_URL=http://127.0.0.1:4001` (rewritten on each switch, below), which server components use to prefetch. The public event pages (`/e/<slug>`, `/e/<slug>/deal-room`) are rendered from it and kept a few minutes in the web process, so a newly published event, or a change to it, shows within minutes
 - **`excursia-api@blue` and `excursia-api@green`:**
   - run `node dist/server.js` in `apps/api`
   - `EnvironmentFile=/etc/excursia/api.env`, `TimeoutStopSec=15`
@@ -60,9 +60,13 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
     - `STORAGE_DIR`: where uploads are kept until a bucket is chosen (D6), for example `/srv/excursia/uploads`. It must be on backed-up disk, writable by the API only, and outside every release folder
     - `AUTH_SECRET`: 32 random bytes, base64 (`openssl rand -base64 32`). It is different in each environment and never rotated casually, since changing it makes every enrolled authenticator unreadable. An offline copy goes in the vault with the other secrets.
     - the provider keys
+    - email (D7, Zoho over SMTP): `MAIL_TRANSPORT=smtp`, `SMTP_HOST=smtp.zoho.com`, `SMTP_PORT=465`, `SMTP_SECURE=true`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM="Events <noreply@algotech.co.ke>"`. The API sends sign-in codes itself; everything else goes through the worker. Away from production, `MAIL_ALLOW` (addresses or `@domains`) names the only recipients that get real mail; the rest is printed to the log
   - The API refuses to start in production without https origins and a cookie domain.
   - On SIGTERM it stops taking connections, finishes open requests and closes its pool, and exits after 10 s at most.
-- **`excursia-worker`** runs the pg-boss worker with `/etc/excursia/worker.env`. It stops gracefully (`boss.stop()`).
+- **`excursia-worker`** runs `node dist/worker.js` in `apps/api` with `/etc/excursia/worker.env`: `WORKER_DATABASE_URL` (the `worker` role), `AUTH_SECRET`, `WEB_ORIGINS` (the first is the site the emails link to) and the same email settings as the API.
+  - It sends the outbox every 3 seconds: a batch claimed with `FOR UPDATE SKIP LOCKED`, so a second worker never sends the same message. A failure is retried after 1, 5, 15, 60 and 240 minutes, then marked failed; a message stuck "sending" by a worker that died goes back in the queue after 10 minutes. pg-boss joins it for timed jobs (reminders, STK queries) when those are built.
+  - On SIGTERM it finishes the batch in hand and exits.
+  - **Before the first deploy that sends email:** publish SPF, DKIM and DMARC for the sending domain as Zoho gives them, or mail lands in spam. Then `node dist/cli/check-mail.js` logs in without sending; `--to <address>` sends one test.
 
 **Hardening on every unit:**
 - `NoNewPrivileges=yes`

@@ -6,6 +6,7 @@
  * pg_advisory_xact_lock for the event, so two writes to one Deal Room never interleave, while writes to different
  * events run side by side. Inside it, `load` reads the rows and `save` writes back only the rows that changed.
  */
+import { randomUUID } from "node:crypto";
 import type { Db, Prisma } from "@excursia/db";
 import type { CoreRows } from "../events/events.mapper";
 import type { DrStaff } from "@excursia/domain/dealroom/types";
@@ -99,7 +100,9 @@ async function saveWith(tx: Prisma.TransactionClient, eventId: string, ch: Chang
   await each(d.incidents.upsert, (r) => tx.drIncident.upsert({ where: { id: r.id }, create: r, update: r }));
   await each(d.consents.upsert, (r) => tx.drConsent.upsert({ where: { id: r.id }, create: r, update: r }));
   await each(d.access.upsert, (r) => tx.drAccess.upsert({ where: { id: r.id }, create: r, update: r }));
-  await each(d.outbox.upsert, (r) => tx.outboxMessage.upsert({ where: { id: r.id }, create: r, update: r }));
+  // the outbox is the worker's once a message is in it: a command only adds new messages, waiting to be sent
+  // (whatever the rules called them; the prototype marks its own "Delivered" at once), and never rewrites one
+  if (d.outbox.upsert.length) await tx.outboxMessage.createMany({ data: d.outbox.upsert.map((r) => ({ ...r, status: "queued" as const, sentAt: null })), skipDuplicates: true });
   for (const c of d.counters.upsert)
     await tx.drCounter.upsert({ where: { eventId_kind: { eventId, kind: c.kind } }, create: c, update: { n: c.n } });
 
@@ -133,7 +136,13 @@ export function createDealRoomRepo(db: Db) {
      */
     inEventLock<T>(
       eventId: string,
-      work: (unit: { stored: EventStored | null; save: (ch: Changes) => Promise<void>; audit: (rows: AuditRow[]) => Promise<void>; linkStaff: (links: StaffLink[]) => Promise<string[]> }) => Promise<T>,
+      work: (unit: {
+        stored: EventStored | null;
+        save: (ch: Changes) => Promise<void>;
+        audit: (rows: AuditRow[]) => Promise<void>;
+        linkStaff: (links: StaffLink[]) => Promise<string[]>;
+        queue: (notes: { to: string; subject: string; link: string; eventId: string }[]) => Promise<void>;
+      }) => Promise<T>,
     ): Promise<T> {
       return db.$transaction(
         async (tx) => {
@@ -146,6 +155,12 @@ export function createDealRoomRepo(db: Db) {
               if (rows.length) await tx.auditEntry.createMany({ data: rows });
             },
             linkStaff: (links) => linkStaffWith(tx, links),
+            queue: async (notes) => {
+              if (notes.length)
+                await tx.outboxMessage.createMany({
+                  data: notes.map((n) => ({ id: `msg_${randomUUID().replace(/-/g, "").slice(0, 16)}`, eventId: n.eventId, recipient: n.to, channel: "email" as const, subject: n.subject, link: n.link, status: "queued" as const })),
+                });
+            },
           });
         },
         { timeout: 15_000, maxWait: 5_000 },
@@ -168,6 +183,23 @@ export function createDealRoomRepo(db: Db) {
         take: 500,
         select: { id: true, ref: true, type: true, status: true, assigneeId: true, mission: true, decision: true, readiness: true, version: true, updatedAt: true, record: true },
       }),
+
+    /** The event's latest messages, with who each went to, for the messages screen. */
+    async messages(eventId: string, take = 200) {
+      const rows = await db.outboxMessage.findMany({ where: { eventId }, orderBy: { createdAt: "desc" }, take });
+      const ids = (prefix: string) => [...new Set(rows.map((r) => r.recipient).filter((x) => x.startsWith(prefix)))];
+      const [apps, staff, users] = await Promise.all([
+        db.drApplication.findMany({ where: { id: { in: ids("dr_") } }, select: { id: true, ref: true, record: true } }),
+        db.drStaff.findMany({ where: { id: { in: ids("st_") } }, select: { id: true, record: true } }),
+        db.user.findMany({ where: { id: { in: ids("user:").map((x) => x.slice(5)) } }, select: { id: true, name: true } }),
+      ]);
+      const names = new Map<string, string>([
+        ...apps.map((a): [string, string] => [a.id, `${(a.record as { org?: { name?: string } }).org?.name || "An applicant"}${a.ref ? ` (${a.ref})` : ""}`]),
+        ...staff.map((x): [string, string] => [x.id, (x.record as { name?: string }).name ?? x.id]),
+        ...users.map((u): [string, string] => [`user:${u.id}`, u.name]),
+      ]);
+      return rows.map((r) => ({ ...r, toName: names.get(r.recipient) ?? r.recipient }));
+    },
 
     /** The Deal Room's settings and its event, for the lead's settings screen. */
     settings: (eventId: string) =>

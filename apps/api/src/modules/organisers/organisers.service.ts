@@ -30,7 +30,7 @@ import { hashPassword } from "../../security/passwords";
 import { UPLOAD_TYPES, cleanFileName, type Storage } from "../../storage/storage";
 import type { AuthService, ClientMeta, Issued, Resolved } from "../auth/auth.service";
 import type { DrConfigRecord } from "../dealroom/dealroom.mapper";
-import type { OrganisersRepo } from "./organisers.repo";
+import type { Note, OrganisersRepo } from "./organisers.repo";
 import { eventView, organiserView } from "./organisers.views";
 
 const MAX_KYC_UPLOADS_PER_HOUR = 20;
@@ -94,20 +94,23 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
     return row;
   }
 
-  async function changeOrganiser(session: Resolved, organiserId: string, action: string, ip: string | null, change: (o: Organiser) => Organiser, detail?: object) {
+  async function changeOrganiser(session: Resolved, organiserId: string, action: string, ip: string | null, change: (o: Organiser) => Organiser, detail?: object, notify: (o: Organiser) => Promise<Note[]> = async () => []) {
     await mustOwn(session, organiserId);
-    const out = await repo.withOrganiser(organiserId, async (o) => ({
-      record: change(o),
-      audit: { actorKind: "owner", actorId: session.user.id, action, detail, ip },
-    }));
+    const out = await repo.withOrganiser(organiserId, async (o) => {
+      const record = change(o);
+      return { record, audit: { actorKind: "owner", actorId: session.user.id, action, detail, ip }, notify: await notify(record) };
+    });
     if (!out) throw new HttpError("not_found", "No such organiser.");
     return viewOf(organiserId);
   }
 
-  async function changeEvent(session: Resolved, eventId: string, action: string, ip: string | null, change: (e: EventRecord, o: Organiser) => EventRecord, detail?: object) {
+  async function changeEvent(session: Resolved, eventId: string, action: string, ip: string | null, change: (e: EventRecord, o: Organiser) => EventRecord, detail?: object, notify: (e: EventRecord) => Promise<Note[]> = async () => []) {
     const row = await eventFor(session, eventId);
     if (isAdmin(session) || !(await repo.isOwner(session.user.id, row.organiserId))) throw new HttpError("forbidden", "Only the organiser's owner can change its events.");
-    await repo.withEvent(eventId, async (e, o) => ({ record: change(e, o), audit: { actorKind: "owner", actorId: session.user.id, action, detail, ip } }));
+    await repo.withEvent(eventId, async (e, o) => {
+      const record = change(e, o);
+      return { record, audit: { actorKind: "owner", actorId: session.user.id, action, detail, ip }, notify: await notify(record) };
+    });
     return eventViewOf(eventId);
   }
 
@@ -171,7 +174,10 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
     signDpa: (session: Resolved, organiserId: string, by: string, ip: string | null) =>
       changeOrganiser(session, organiserId, "organiser/signDpa", ip, (o) => must(signDpa(o, by, at())), { by }),
 
-    submitKyc: (session: Resolved, organiserId: string, ip: string | null) => changeOrganiser(session, organiserId, "organiser/submitKyc", ip, (o) => must(submitKyc(o, at()))),
+    submitKyc: (session: Resolved, organiserId: string, ip: string | null) =>
+      changeOrganiser(session, organiserId, "organiser/submitKyc", ip, (o) => must(submitKyc(o, at())), undefined, async (o) =>
+        (await repo.adminIds()).map((to) => ({ to, subject: `KYC to check: ${o.name}`, link: `/team/admin/organisers/${o.id}` })),
+      ),
 
     /** Where to upload one KYC document; it is attached once it has arrived (`completeKycDoc`). */
     async startKycDoc(session: Resolved, organiserId: string, req: { kind: string; name: string; contentType: string; size: number }): Promise<UploadTarget> {
@@ -245,7 +251,9 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
       changeEvent(session, eventId, "event/edit", ip, (e) => must(editEvent(e, details(input)))),
 
     submitEvent: (session: Resolved, eventId: string, ip: string | null) =>
-      changeEvent(session, eventId, "event/submit", ip, (e, o) => must(submitEvent(e, o, at().slice(0, 10), at()))),
+      changeEvent(session, eventId, "event/submit", ip, (e, o) => must(submitEvent(e, o, at().slice(0, 10), at())), undefined, async (e) =>
+        (await repo.adminIds()).map((to) => ({ to, subject: `An event to approve: ${e.name}`, link: `/team/events/${e.id}`, eventId: e.id })),
+      ),
 
     publishEvent: (session: Resolved, eventId: string, ip: string | null) => changeEvent(session, eventId, "event/publish", ip, (e) => must(publishEvent(e, at()))),
   };

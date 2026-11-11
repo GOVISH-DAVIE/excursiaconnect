@@ -17,3 +17,7 @@ export const teamQuery = (eventId: string) =>
 
 export const applicationsQuery = (eventId: string, filter: QueueFilter) =>
   queryOptions({ queryKey: [...dealRoomKeys.applications(eventId), filter], queryFn: () => dealRoomApi.applications(eventId, filter), staleTime: 15_000 });
+
+/** What the Deal Room sent: asked again every 15 seconds while open, as the worker sends in the background. */
+export const messagesQuery = (eventId: string) =>
+  queryOptions({ queryKey: [...dealRoomKeys.event(eventId), "messages"], queryFn: () => dealRoomApi.messages(eventId), staleTime: 5_000, refetchInterval: 15_000 });

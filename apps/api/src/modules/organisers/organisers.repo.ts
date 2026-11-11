@@ -3,6 +3,7 @@
  * that row's lock (SELECT … FOR UPDATE), so two requests can't both read the old record and both write; the audit
  * row commits with it. The record is the rules' own shape (JSONB), with the indexed columns kept in step.
  */
+import { randomBytes } from "node:crypto";
 import type { Db, Prisma } from "@excursia/db";
 import type { EventRecord, Organiser } from "@excursia/domain/types";
 import { json } from "../events/events.mapper";
@@ -10,6 +11,11 @@ import type { DrConfigRecord } from "../dealroom/dealroom.mapper";
 import { toDay } from "../../persistence/time";
 
 export type Audit = { actorKind: string; actorId: string; action: string; detail?: object; ip: string | null };
+/** An email to queue with the change (M1.4): to "user:<id>", naming the action only, linking to where it is done. */
+export type Note = { to: string; subject: string; link: string; eventId?: string | null };
+
+const outboxRows = (notes: Note[]) =>
+  notes.map((n) => ({ id: `msg_${randomBytes(8).toString("hex")}`, eventId: n.eventId ?? null, recipient: n.to, channel: "email" as const, subject: n.subject, link: n.link, status: "queued" as const }));
 
 type Tx = Prisma.TransactionClient;
 
@@ -41,6 +47,11 @@ export function createOrganisersRepo(db: Db) {
       });
     },
 
+    /** Who hears about an organiser: its owners, and Algotech's admins. */
+    ownerIds: async (organiserId: string) =>
+      (await db.membership.findMany({ where: { organiserId, role: "owner", revokedAt: null }, select: { userId: true } })).map((m) => `user:${m.userId}`),
+    adminIds: async () => (await db.user.findMany({ where: { kind: "admin", disabledAt: null, demo: false }, select: { id: true } })).map((u) => `user:${u.id}`),
+
     /** The organisers this user owns. */
     ownedBy: async (userId: string) =>
       (await db.membership.findMany({ where: { userId, role: "owner", revokedAt: null, organiserId: { not: null } }, select: { organiserId: true } })).map((m) => m.organiserId!),
@@ -59,13 +70,14 @@ export function createOrganisersRepo(db: Db) {
     slugTaken: async (slug: string) => !!(await db.event.findUnique({ where: { slug }, select: { id: true } })),
 
     /** Changes one organiser under its row lock: `change` gets the record as it is now and returns the next one. */
-    withOrganiser<T>(id: string, change: (o: Organiser, tx: Tx) => Promise<{ record: Organiser; audit: Audit; result?: T }>) {
+    withOrganiser<T>(id: string, change: (o: Organiser, tx: Tx) => Promise<{ record: Organiser; audit: Audit; result?: T; notify?: Note[] }>) {
       return db.$transaction(async (tx) => {
         const [row] = await tx.$queryRaw<{ record: Organiser }[]>`SELECT record FROM organiser WHERE id = ${id} FOR UPDATE`;
         if (!row) return null;
         const out = await change(row.record, tx);
         await tx.organiser.update({ where: { id }, data: { name: out.record.name, record: json(out.record) } });
         await tx.auditEntry.create({ data: auditRow(out.audit, "organiser", id, null) });
+        if (out.notify?.length) await tx.outboxMessage.createMany({ data: outboxRows(out.notify) });
         return out;
       });
     },
@@ -74,7 +86,7 @@ export function createOrganisersRepo(db: Db) {
      * Changes one event under its row lock, its organiser read alongside. `dealRoom` is the Deal Room to create
      * with it (Algotech's approval with the add-on), in the same transaction.
      */
-    withEvent(id: string, change: (e: EventRecord, o: Organiser) => Promise<{ record: EventRecord; audit: Audit; dealRoom?: DrConfigRecord }>) {
+    withEvent(id: string, change: (e: EventRecord, o: Organiser) => Promise<{ record: EventRecord; audit: Audit; dealRoom?: DrConfigRecord; notify?: Note[] }>) {
       return db.$transaction(async (tx) => {
         const [row] = await tx.$queryRaw<{ record: EventRecord; organiser: Organiser }[]>`
           SELECT e.record, o.record AS organiser FROM event e JOIN organiser o ON o.id = e.organiser_id WHERE e.id = ${id} FOR UPDATE OF e`;
@@ -84,6 +96,7 @@ export function createOrganisersRepo(db: Db) {
         if (out.dealRoom && !(await tx.drConfig.findUnique({ where: { eventId: id }, select: { eventId: true } })))
           await tx.drConfig.create({ data: { eventId: id, record: json(out.dealRoom) } });
         await tx.auditEntry.create({ data: auditRow(out.audit, "event", id, id) });
+        if (out.notify?.length) await tx.outboxMessage.createMany({ data: outboxRows(out.notify) });
         return out;
       });
     },

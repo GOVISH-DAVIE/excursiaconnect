@@ -22,6 +22,11 @@ export function send(ctx: Ctx, dr: DealRoomState, eventId: string, to: string, s
 
 export const portal = (a: DrApplication) => `/dr/${a.id}`;
 
+/** The event's active lead: who gets the Deal Room's reports and unassigned work. The demo's is st_lead. */
+export const leadOf = (dr: DealRoomState, eventId: string) => dr.staff.find((s) => s.eventId === eventId && s.active && s.role === "Lead")?.id ?? "st_lead";
+/** The event's first active operations person, who schedules meetings; the lead when there is none. */
+export const opsOf = (dr: DealRoomState, eventId: string) => dr.staff.find((s) => s.eventId === eventId && s.active && s.role === "Operations")?.id ?? leadOf(dr, eventId);
+
 export function exception(ctx: Ctx, dr: DealRoomState, eventId: string, by: string, kind: DrException["kind"], reason: string, ref: string): DealRoomState {
   return { ...dr, exceptions: [{ id: ctx.newId("ex"), eventId, at: ctx.now, by, kind, reason, ref }, ...dr.exceptions] };
 }

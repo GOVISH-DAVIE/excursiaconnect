@@ -51,6 +51,11 @@ export function createDealRoomController(service: DealRoomService) {
       res.json(await service.saveSettings(sessionOf(res), eventId, DealRoomSettingsInput.parse(req.body), ip(req)));
     }) satisfies RequestHandler,
 
+    messages: (async (req, res) => {
+      const { eventId } = EventParams.parse(req.params);
+      res.set("Cache-Control", "private, no-store").json(await service.messages(sessionOf(res), eventId));
+    }) satisfies RequestHandler,
+
     team: (async (req, res) => {
       const { eventId } = EventParams.parse(req.params);
       res.set("Cache-Control", "private, no-store").json((await service.team(sessionOf(res), eventId)) satisfies TeamView);

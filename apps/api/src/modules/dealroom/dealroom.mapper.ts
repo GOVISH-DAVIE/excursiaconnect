@@ -78,8 +78,9 @@ export type DealRoomRows = {
 
 const CHANNEL = { Email: "email", SMS: "sms", "Email and SMS": "email_and_sms" } as const;
 const CHANNEL_BACK = { email: "Email", sms: "SMS", email_and_sms: "Email and SMS" } as const;
-const OUTBOX_STATUS = { Delivered: "delivered", Sent: "sent", Failed: "failed" } as const;
-const OUTBOX_STATUS_BACK = { delivered: "Delivered", sent: "Sent", failed: "Failed" } as const;
+const OUTBOX_STATUS = { Queued: "queued", Delivered: "delivered", Sent: "sent", Failed: "failed" } as const;
+// "sending" is the worker's own, while it holds the row; to the rules it is still waiting
+const OUTBOX_STATUS_BACK = { queued: "Queued", sending: "Queued", delivered: "Delivered", sent: "Sent", failed: "Failed" } as const;
 
 const feeState = (a: DrApplication) => (a.fee?.paid ? "paid" : a.fee?.waived ? "waived" : a.fee ? "owed" : null);
 
@@ -194,7 +195,7 @@ export function dealRoomToRows(dr: DealRoomState, eventId: string, now: string):
       link: o.link,
       status: OUTBOX_STATUS[o.status],
       createdAt: toInstant(o.at),
-      sentAt: o.status === "Failed" ? null : toInstant(o.at),
+      sentAt: o.status === "Failed" || o.status === "Queued" ? null : toInstant(o.at),
     })),
     counters: [
       { eventId, kind: "cs", n: dr.seq.cs },

@@ -15,6 +15,7 @@ import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, 
 import type { DrApplication, DrConfig } from "@excursia/domain/dealroom/types";
 import type { AppState } from "@excursia/domain/types";
 import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
+import { leadOf } from "@excursia/domain/dealroom/util";
 import type { EventRecord } from "@excursia/domain/types";
 import { HttpError } from "../../http/errors";
 import { UPLOAD_TYPES, cleanFileName, type Storage } from "../../storage/storage";
@@ -169,7 +170,8 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
           }
           const already = s.dealRoom.apps.filter((a) => a.contact.email.toLowerCase() === email).length;
           if (already >= MAX_PER_EMAIL) throw new HttpError("conflict", `You already have ${already} applications here. Continue one of those instead.`);
-          return [{ type: "dr/saveDraft", app: blankApplication({ id: appId, eventId: e.id, mode: input.mode, email, now: ctx.now }) }];
+          // the application's owner on the team is this event's lead (the demo's is st_lead)
+          return [{ type: "dr/saveDraft", app: { ...blankApplication({ id: appId, eventId: e.id, mode: input.mode, email, now: ctx.now }), owner: leadOf(s.dealRoom, e.id) } }];
         },
       });
       return after(state, appId, e.cfg);

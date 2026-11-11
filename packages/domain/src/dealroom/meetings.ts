@@ -25,7 +25,7 @@ import {
   type SlotRequest,
 } from "./logic";
 import type { DealRoomState, DrMatch, DrMeeting, DrOpportunity, DrOutcome } from "./types";
-import { exception, send, withDr } from "./util";
+import { exception, leadOf, opsOf, send, withDr } from "./util";
 
 export type DrMeetAction =
   | { type: "dr/matchDecide"; seekerId: string; providerId: string; decision: "Approved" | "Rejected" | "Deferred"; note: string; override?: string }
@@ -162,7 +162,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       const seeker = dr.apps.find((a) => a.id === action.seekerId)!;
       const f = fit(seeker, provider, dr.configs[seeker.eventId]);
       dr = { ...dr, matches: [...dr.matches, { id: ctx.newId("mx"), eventId: seeker.eventId, seekerId: seeker.id, providerId: provider.id, origin: "interest", ...f, decision: "Suggested", note: "", by: "applicant", at, history: [{ at, by: "applicant", what: `${provider.org.name} expressed interest` }] }] };
-      dr = send(ctx, dr, seeker.eventId, seeker.assignee ?? "st_lead", `Expression of interest in ${seeker.ref}`, "/dealroom/matching", "Email");
+      dr = send(ctx, dr, seeker.eventId, seeker.assignee ?? leadOf(dr, seeker.eventId), `Expression of interest in ${seeker.ref}`, "/dealroom/matching", "Email");
       return withDr(state, dr);
     }
 
@@ -200,7 +200,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       const other = action.side === "seeker" ? m.providerId : m.seekerId;
       dr = send(ctx, dr, m.eventId, other, `The other party ${action.response.toLowerCase()} your Deal Room introduction`, `/dr/${other}`);
       const fresh = dr.matches.find((x) => x.id === m.id)!;
-      if (bothAccepted(fresh)) dr = send(ctx, dr, m.eventId, "st_ops1", "A match is ready to schedule", "/dealroom/meetings", "Email");
+      if (bothAccepted(fresh)) dr = send(ctx, dr, m.eventId, opsOf(dr, m.eventId), "A match is ready to schedule", "/dealroom/meetings", "Email");
       return withDr(state, dr);
     }
 
@@ -211,7 +211,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       dr = { ...dr, consents: [...dr.consents, { id: ctx.newId("cs"), seekerId: action.seekerId, providerId: action.providerId, docId: action.docId, granted: action.granted, at, version: prev.length + 1 }] };
       if (!action.granted) {
         const seeker = dr.apps.find((a) => a.id === action.seekerId)!;
-        dr = send(ctx, dr, seeker.eventId, seeker.assignee ?? "st_lead", `${seeker.ref} withdrew consent for a document`, `/dealroom/applications/${seeker.id}`, "Email");
+        dr = send(ctx, dr, seeker.eventId, seeker.assignee ?? leadOf(dr, seeker.eventId), `${seeker.ref} withdrew consent for a document`, `/dealroom/applications/${seeker.id}`, "Email");
       }
       return withDr(state, dr);
     }
@@ -283,7 +283,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
       if (!mt || !["Proposed", "Confirmed"].includes(mt.status) || !action.reason.trim()) return state;
       dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: "Change requested", change: { by: action.side, reason: action.reason, at }, history: [...m.history, { at, by: action.side, what: `Asked to move: ${action.reason}` }] }));
-      dr = send(ctx, dr, mt.eventId, "st_ops1", "A participant asked to move a Deal Room meeting", "/dealroom/meetings", "Email");
+      dr = send(ctx, dr, mt.eventId, opsOf(dr, mt.eventId), "A participant asked to move a Deal Room meeting", "/dealroom/meetings", "Email");
       return withDr(state, dr);
     }
 
@@ -414,7 +414,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       }
       const inc = dr.incidents.find((i) => !i.endedAt);
       dr = { ...dr, queue: [], incidents: dr.incidents.map((i) => (i === inc ? { ...i, endedAt: at, synced, duplicates, conflicts } : i)) };
-      if (inc) dr = send(ctx, dr, Object.keys(dr.configs)[0], "st_lead", `Incident report: offline ${fmtStamp(inc.startedAt)} to ${at.slice(11)}; ${synced} record${synced === 1 ? "" : "s"} synced, ${duplicates} duplicate${duplicates === 1 ? "" : "s"} dropped, ${conflicts} conflict${conflicts === 1 ? "" : "s"} to resolve`, "/dealroom/live", "Email");
+      if (inc) dr = send(ctx, dr, Object.keys(dr.configs)[0], leadOf(dr, Object.keys(dr.configs)[0]), `Incident report: offline ${fmtStamp(inc.startedAt)} to ${at.slice(11)}; ${synced} record${synced === 1 ? "" : "s"} synced, ${duplicates} duplicate${duplicates === 1 ? "" : "s"} dropped, ${conflicts} conflict${conflicts === 1 ? "" : "s"} to resolve`, "/dealroom/live", "Email");
       return withDr(state, dr);
     }
 

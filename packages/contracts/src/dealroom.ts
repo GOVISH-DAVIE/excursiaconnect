@@ -50,3 +50,16 @@ export const AssignReviewerInput = z.object({
   staffId: z.string().min(1).max(60),
 });
 export type AssignReviewerInput = z.infer<typeof AssignReviewerInput>;
+
+/** The Deal Room's messages, as the outbox has them (M1.4): who, what, and whether it went. */
+export const MessageRow = z.object({
+  id: z.string(),
+  to: z.string(),
+  kind: z.enum(["applicant", "staff", "organiser"]),
+  subject: z.string(),
+  status: z.enum(["queued", "sending", "sent", "delivered", "failed"]),
+  attempts: z.number(),
+  at: z.string(),
+  sentAt: z.string().nullable(),
+});
+export type MessageRow = z.infer<typeof MessageRow>;

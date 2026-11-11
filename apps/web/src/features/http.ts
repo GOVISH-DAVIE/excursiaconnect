@@ -8,6 +8,8 @@ import { ErrorBody, type ErrorCode } from "@excursia/contracts/http";
 
 /** In the browser: the API's public address, written into the bundle at build time. */
 const PUBLIC_API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+/** On the web server (public pages rendered there): the API on its own network if set, else its public address. */
+const BASE = typeof window === "undefined" ? (process.env.API_INTERNAL_URL ?? PUBLIC_API) : PUBLIC_API;
 
 export class ApiError extends Error {
   constructor(
@@ -27,7 +29,7 @@ async function request<T>(method: string, path: string, { body, query, schema }:
   const qs = new URLSearchParams(Object.entries(query ?? {}).filter((e): e is [string, string] => !!e[1])).toString();
   let res: Response;
   try {
-    res = await fetch(`${PUBLIC_API}${path}${qs ? `?${qs}` : ""}`, {
+    res = await fetch(`${BASE}${path}${qs ? `?${qs}` : ""}`, {
       method,
       credentials: "include",
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },

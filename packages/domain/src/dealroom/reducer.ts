@@ -36,7 +36,7 @@ import type {
   Layer,
   Readiness,
 } from "./types";
-import { exception, note, patchApp, portal, send, withDr } from "./util";
+import { exception, leadOf, note, patchApp, portal, send, withDr } from "./util";
 import { drConvReducer, playForward, type DrConvAction } from "./conversion";
 import { drMeetReducer, type DrMeetAction } from "./meetings";
 import { drSessionReducer, type DrSessionAction } from "./sessions";
@@ -160,7 +160,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
         for (let d = ev.startDate; d <= ev.endDate; d = new Date(new Date(d + "T12:00:00Z").getTime() + 86400000).toISOString().slice(0, 10)) {
           const seven = `${d} 19:00`;
           // stamped at 19:00 that day, even when the clock jumps past several evenings at once
-          if (dr.clock < seven && action.clock >= seven) next = send({ ...ctx, now: seven }, next, c.eventId, "st_lead", `Daily Deal Room report, ${new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}`, `/dealroom/reports?day=${d}`, "Email");
+          if (dr.clock < seven && action.clock >= seven) next = send({ ...ctx, now: seven }, next, c.eventId, leadOf(next, c.eventId), `Daily Deal Room report, ${new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}`, `/dealroom/reports?day=${d}`, "Email");
         }
       }
       // an approved seeker who has not paid gets one reminder, the configured days after the link went out
@@ -180,7 +180,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       for (const c of Object.values(dr.configs))
         if (!next.archivedAt && action.clock.slice(0, 10) > c.rules.conversionEnd) {
           next = { ...next, archivedAt: `${c.rules.conversionEnd} 23:59` };
-          next = send({ ...ctx, now: next.archivedAt! }, next, c.eventId, "st_lead", "The Deal Room is archived: the post-summit pack is ready", "/dealroom/opportunities?tab=Export", "Email");
+          next = send({ ...ctx, now: next.archivedAt! }, next, c.eventId, leadOf(next, c.eventId), "The Deal Room is archived: the post-summit pack is ready", "/dealroom/opportunities?tab=Export", "Email");
         }
       return withDr(state, next);
     }

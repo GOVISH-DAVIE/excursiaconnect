@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "npm run dev -w @excursia/web",
     "dev:api": "npm run dev -w @excursia/api",
+    "dev:worker": "npm run worker -w @excursia/api",
     "build": "npm run build -w @excursia/web && npm run build -w @excursia/api",
     "lint": "eslint",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -22,6 +23,7 @@
     "db:check-demo": "npm run check-demo -w @excursia/api",
     "db:import": "npm run import -w @excursia/api --",
     "db:admin": "npm run admin -w @excursia/api --",
+    "mail:check": "npm run mail:check -w @excursia/api --",
     "postinstall": "npm run generate -w @excursia/db"
   },
   "devDependencies": {

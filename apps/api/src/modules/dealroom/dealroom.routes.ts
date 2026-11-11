@@ -10,6 +10,7 @@ export function dealRoomRoutes(c: DealRoomController): Router {
   const r = Router({ mergeParams: true });
   r.get("/:eventId/team", requireSession({ staff: true }), c.team);
   r.get("/:eventId/settings", requireSession({ staff: true }), c.settings);
+  r.get("/:eventId/messages", requireSession({ staff: true }), c.messages);
   r.put("/:eventId/settings", requireSession({ staff: true }), c.saveSettings);
   r.get("/:eventId/applications", requireSession({ staff: true }), c.applications);
   r.post("/:eventId/applications/assign", requireSession({ staff: true }), c.assignReviewer);

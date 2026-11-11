@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Wordmark, fmtDate } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { initials, numberWord, readableOn } from "@/lib/brand";
+import type { PublicDealRoom } from "@excursia/contracts/public";
 import type { Instrument, ProviderKind, Stage } from "@excursia/domain/dealroom/types";
 import { PATHWAYS, feeLabel, isChallenge } from "@excursia/domain/dealroom/logic";
 
@@ -17,6 +18,7 @@ import { PATHWAYS, feeLabel, isChallenge } from "@excursia/domain/dealroom/logic
 const INSTRUMENTS: Instrument[] = PATHWAYS;
 const STAGES: Stage[] = ["Bankable project", "Early revenue", "Growth", "Expansion"];
 
+/** The prototype's Deal Room page: the demo's data, from this browser's store, through the same view. */
 export function DealRoomPublic({ slug }: { slug: string }) {
   const { state } = useStore();
   const event = state.events.find((e) => e.slug === slug);
@@ -24,15 +26,42 @@ export function DealRoomPublic({ slug }: { slug: string }) {
   if (!event || !event.dealRoom?.enabled) return <div className="p-10">This event has no Deal Room.</div>;
   if (!cfg) return <div className="p-10">The Deal Room for {event.name} opens once its team has set it up.</div>;
   const organiser = state.organisers.find((o) => o.id === event.organiserId);
+  const r = cfg.rules;
+  const today = state.dealRoom.clock.slice(0, 10);
+  const dr: PublicDealRoom = {
+    open: event.state === "Live" && today >= r.appOpen && today <= r.appClose,
+    missions: cfg.missions,
+    tracks: cfg.tracks,
+    eligibility: cfg.rubric.eligibility,
+    seekerFee: cfg.seekerFee,
+    providerKinds: cfg.providerKinds,
+    sectors: cfg.sectors,
+    countries: cfg.countries,
+    rules: { appOpen: r.appOpen, appClose: r.appClose, meetingMin: r.meetingMin, bufferMin: r.bufferMin, seekerCap: r.seekerCap, profileDays: r.profileDays, introDays: r.introDays, conversionEnd: r.conversionEnd },
+    // verified challenges are published: their title and owner, so businesses that could solve one apply for it
+    challenges: state.dealRoom.apps
+      .filter((a) => a.eventId === event.id && isChallenge(a) && a.verification?.state === "Verified")
+      .map((a) => ({ id: a.id, title: a.challenge!.title, owner: a.providerKind === "Corporate buyer" ? "A corporate buyer" : a.org.name, route: a.challenge!.route, budget: a.challenge!.budget ?? "" })),
+  };
+  return <DealRoomView slug={slug} event={{ ...event, live: event.state === "Live" }} organiser={organiser?.name ?? ""} dr={dr} />;
+}
+
+type ViewEvent = { name: string; city: string; startDate: string; endDate: string; brand: { primary: string; logoText: string }; live: boolean };
+
+/**
+ * The Deal Room's public page, from its data: the prototype's store for the demo, the API for a real event
+ * (page.tsx decides which).
+ */
+export function DealRoomView({ slug, event, organiser, dr }: { slug: string; event: ViewEvent; organiser: string; dr: PublicDealRoom }) {
   const accent = event.brand.primary;
   const accentInk = readableOn(accent);
-  const mark = (event.brand.logoText || initials(organiser?.name ?? event.name)).slice(0, 4).toUpperCase();
-  const live = event.state === "Live";
-  const r = cfg.rules;
-  const open = live && state.dealRoom.clock.slice(0, 10) >= r.appOpen && state.dealRoom.clock.slice(0, 10) <= r.appClose;
+  const mark = (event.brand.logoText || initials(organiser || event.name)).slice(0, 4).toUpperCase();
+  const live = event.live;
+  const cfg = dr;
+  const r = dr.rules;
+  const open = dr.open;
   const apply = (type: "seeker" | "provider" | "challenge") => `/e/${slug}/deal-room/apply?type=${type}`;
-  // verified challenges are published: their title and owner, so businesses that could solve one apply for it
-  const challenges = state.dealRoom.apps.filter((a) => a.eventId === event.id && isChallenge(a) && a.verification?.state === "Verified");
+  const challenges = dr.challenges;
   const dates = `${fmtDate(event.startDate, { day: "numeric" })} to ${fmtDate(event.endDate, { day: "numeric", month: "long", year: "numeric" })}`;
 
   return (
@@ -131,7 +160,7 @@ export function DealRoomPublic({ slug }: { slug: string }) {
               <div className="span-6">
                 <h3 className="t-day">Businesses raising capital</h3>
                 <ul className="rows">
-                  {cfg.rubric.eligibility.map((c) => (
+                  {cfg.eligibility.map((c) => (
                     <li key={c.id}>
                       <span className="rows__name">{c.text}</span>
                     </li>
@@ -204,10 +233,10 @@ export function DealRoomPublic({ slug }: { slug: string }) {
                     {challenges.map((a) => (
                       <li key={a.id}>
                         <span className="rows__name">
-                          {a.challenge!.title}
+                          {a.title}
                           <span className="block text-[13px] text-slate">
-                            {a.providerKind === "Corporate buyer" ? "A corporate buyer" : a.org.name} · {a.challenge!.route}
-                            {a.challenge!.budget ? ` · ${a.challenge!.budget}` : ""}
+                            {a.owner} · {a.route}
+                            {a.budget ? ` · ${a.budget}` : ""}
                           </span>
                         </span>
                       </li>
@@ -230,7 +259,7 @@ export function DealRoomPublic({ slug }: { slug: string }) {
           </div>
         </section>
 
-        <EligibilityCheck slug={slug} sectors={cfg.sectors} countries={cfg.countries.slice(0, 9)} kinds={cfg.providerKinds} open={open} />
+        <EligibilityCheck slug={slug} sectors={cfg.sectors} countries={cfg.countries.slice(0, 9)} kinds={cfg.providerKinds as ProviderKind[]} open={open} />
 
         <section className="section" id="how" aria-labelledby="how-h">
           <div className="wrap">
@@ -321,7 +350,7 @@ export function DealRoomPublic({ slug }: { slug: string }) {
         <div className="wrap">
           <div className="footer__legal">
             <span>
-              {event.name} Deal Room, run by {organiser?.name}
+              {event.name} Deal Room, run by {organiser}
             </span>
             <span className="inline-flex items-center gap-2">
               Powered by <Wordmark size="sm" />
