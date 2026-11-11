@@ -1,0 +1,28 @@
+{
+  "name": "@excursia/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The API: Express on its own subdomain, the only process that talks to the database.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "node scripts/build.mjs",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@excursia/contracts": "*",
+    "@excursia/db": "*",
+    "@excursia/domain": "*",
+    "cors": "2.8.6",
+    "express": "5.3.0",
+    "helmet": "8.3.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/cors": "2.8.19",
+    "@types/express": "5.0.6",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15"
+  }
+}

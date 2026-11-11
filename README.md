@@ -4,21 +4,25 @@ Next.js 16 (App Router, Turbopack, Tailwind v4) prototype of the ExcursiaConnect
 
 ## Run
 
+The repository is an npm-workspaces monorepo. Run everything from the root:
+
 ```bash
 npm install
-npm run dev      # http://localhost:3000
-# or
-npm run build && npm start
+npm run dev      # the web app (the prototype): http://localhost:3000
 ```
 
 The prototype needs no environment variables, database or payment keys. The Rethink Sans font is bundled locally so it builds offline.
 
-The backend being built on branch `backend` (docs/backend-plan.md) uses PostgreSQL through Prisma. To work on it locally:
+The backend being built on branch `backend` ([docs/backend-plan.md](docs/backend-plan.md)) is an Express API, separate from Next.js, on PostgreSQL through Prisma. To work on it locally:
 
 ```bash
 npm run db:setup     # roles, databases and connection strings in .env.local (needs a local PostgreSQL superuser)
 npm run db:migrate   # apply migrations to the dev database and generate the Prisma client
-npm test             # the rule tests, and the database tests against the test database
+npm run dev:api      # the API: http://localhost:4000/health/ready
+npm test             # every suite: the rules, the database's guarantees, the API
+npm run typecheck    # each workspace
+npm run lint         # including the workspace boundaries
+npm run build        # the web app, then the API bundle (apps/api/dist/server.js)
 ```
 
 One design language covers every screen: tokens, type, buttons and the public site's page rhythm are in [docs/design-system.md](docs/design-system.md). What the prototype covers of the use cases, and what is still missing, is in [docs/coverage.md](docs/coverage.md); a click-through of every screen, with the dead controls and the gaps, is in [docs/qa-findings.md](docs/qa-findings.md).
@@ -67,7 +71,7 @@ An add-on switched on per event that qualifies opportunity owners (businesses ra
 
 **The demo clock.** The rail's clock starts at summit day 2 (Tue 16 February 2027), 10:40, and only moves forward: +25 minutes, 19:00 (daily report), 18 May (the seeded opportunities have moved on; weekly digests and monthly reports sent) and 22 August (archived, read-only). A fee reminder goes three days after the payment link. Expiries, lapses, late flags and overdue actions are worked out from it, never stored. Reset the demo data from the home page to start again.
 
-**Where the rules live.** Every rule (clashes, caps, both-accept, consent, roles, second decider, read-only archive) is enforced in `src/lib/dealroom/` reducers; screens call the same functions in `logic.ts` to explain a refusal before it happens. Settings, Checks runs three 50-request booking bursts and the invariant check.
+**Where the rules live.** Every rule (clashes, caps, both-accept, consent, roles, second decider, read-only archive) is enforced in `packages/domain/src/dealroom/` reducers; screens call the same functions in `logic.ts` to explain a refusal before it happens. Settings, Checks runs three 50-request booking bursts and the invariant check.
 
 ## Exhibition module
 
@@ -82,26 +86,34 @@ Halls, floor plans and booths; exhibitor applications and approval; booth holds,
 
 **The exhibition clock.** The rail's clock starts at show day 1, 10:30, and only moves forward: +15 minutes, +1 hour, day 2, day 3, dismantling, after the show. Hold expiries, overdue invoices, late surcharges, delivery slots, issue service times and the door rules are worked out from it; passing a later show day's opening plays that morning's arrivals. Reset the demo data from the home page to start again.
 
-**Where the rules live.** In `src/lib/expo/`: `logic.ts`, `onsite.ts` and `ops.ts` hold the rules as pure functions; `reducer.ts` and `onsite-reducer.ts` enforce them, and the store's `accredit` and `scanVerdict` apply the desk and door rules. Settings, Checks sends 50 hold requests through the real reducer and runs the invariant check.
+**Where the rules live.** In `packages/domain/src/expo/`: `logic.ts`, `onsite.ts` and `ops.ts` hold the rules as pure functions; `reducer.ts` and `onsite-reducer.ts` enforce them, and the store's `accredit` and `scanVerdict` apply the desk and door rules. Settings, Checks sends 50 hold requests through the real reducer and runs the invariant check.
 
 ## Structure
 
 ```
-src/lib/types.ts     domain types (Event, Tier, Delegate, Order, Zone, Room, Session, Message)
-src/lib/seed.ts      deterministic mock data: 3 events, 5 tiers, 5 zones, 15 sessions, 212 delegates, orders
-src/lib/store.tsx    client store (reducer + localStorage, versioned) and domain helpers: scanVerdict, makeOrder, money
-src/lib/dealroom/    Deal Room types, rules (logic.ts), reducers (reducer, meetings, sessions, conversion) and seed
-src/lib/expo/        Exhibition types, rules (logic, onsite, ops), reducers (reducer, onsite-reducer) and seed
-src/lib/clock.ts     which module clock an event runs on (Deal Room, Exhibition, or the wall clock)
-src/lib/time.ts      minute and date arithmetic; csv.ts for exports
-src/components/      ui primitives, programme view, floor plan, reset button
-src/app/             routes per persona
-public/brand/        ExcursiaConnect logo files
+apps/web/                      the Next.js app (@excursia/web): the prototype's screens
+  src/app/                     routes per persona
+  src/components/              ui primitives, programme view, floor plan, reset button
+  src/lib/store.tsx            client store (reducer + localStorage, versioned); re-exports scanVerdict, makeOrder, money
+  src/lib/download.ts          CSV and text downloads; brand.ts, media.ts, use-today.ts
+  public/brand/                ExcursiaConnect logo files
+apps/api/                      the Express API (@excursia/api): config, app, health, error contract; tests/
+packages/domain/               the rules (@excursia/domain), pure TypeScript; tests/ holds the rule suites
+  src/types.ts                 domain types (Event, Tier, Delegate, Order, Zone, Room, Session, Message)
+  src/seed.ts                  deterministic mock data: 3 events, 5 tiers, 5 zones, 15 sessions, 212 delegates, orders
+  src/core/                    the core reducer, scanning and orders; src/ctx.ts, proto-ctx.ts
+  src/dealroom/                Deal Room types, rules (logic.ts), reducers (reducer, meetings, sessions, conversion) and seed
+  src/expo/                    Exhibition types, rules (logic, onsite, ops), reducers (reducer, onsite-reducer) and seed
+  src/clock.ts                 which module clock an event runs on (Deal Room, Exhibition, or the wall clock)
+  src/time.ts                  minute and date arithmetic; csv.ts for CSV text
+packages/contracts/            Zod schemas shared by the web app and the API (@excursia/contracts)
+packages/db/                   Prisma schema, migrations and client (@excursia/db); tests/ holds the database checks
+scripts/db/setup-local.sh      local PostgreSQL: roles, databases, .env.local
 ```
 
 ## Where a real build diverges
 
-The backend is planned in [docs/backend-plan.md](docs/backend-plan.md): Node.js and TypeScript, Prisma on PostgreSQL, reached from server-side Next.js, in phases with milestones toward the Deal Room's onboarding launch (15 Dec 2026) and the summit (15 to 18 Feb 2027). How it runs behind nginx (processes, the nginx block, deploys, backups) is in [docs/deploy.md](docs/deploy.md).
+The backend is planned in [docs/backend-plan.md](docs/backend-plan.md): Node.js and TypeScript, an Express API separate from Next.js, Prisma on PostgreSQL, in phases with milestones toward the Deal Room's onboarding launch (15 Dec 2026) and the summit (15 to 18 Feb 2027). How the code is layered is in [docs/architecture.md](docs/architecture.md); how it runs behind nginx (processes, the two server blocks, deploys, backups) is in [docs/deploy.md](docs/deploy.md).
 
 - Store becomes PostgreSQL behind an API; the reducer actions map one-to-one onto endpoints.
 - M-Pesa (Daraja STK push + callback), Paystack and SMS/email are simulated with timeouts.

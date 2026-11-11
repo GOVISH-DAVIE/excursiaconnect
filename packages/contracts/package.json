@@ -1,0 +1,16 @@
+{
+  "name": "@excursia/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "What crosses the wire between the web app and the API: Zod schemas and the types inferred from them.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

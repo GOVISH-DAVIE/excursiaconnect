@@ -5,16 +5,22 @@ How ExcursiaConnect goes from a browser-only prototype to a real backend, in pha
 **The stack, decided:**
 - Node.js and TypeScript.
 - **Prisma** on **PostgreSQL**.
-- Reached from **server-side Next.js**: server components read, server actions write, and route handlers take webhooks and serve the apps' API.
-- Running with `next start` on loopback **behind nginx**.
-- No separate API server.
+- **An Express API, separate from Next.js** (revised 11 Nov 2026, D13). It runs as its own Node process on its own subdomain (`api.example.co.ke`), and is the only process that talks to the database, apart from the job worker. It takes every write and every read, the payment webhooks, and later the apps.
+- **Next.js serves the UI only** (`events.example.co.ke`). It has no database connection and no server actions that write.
+- **One repository, npm workspaces:**
+  - `apps/web` (Next.js)
+  - `apps/api` (Express)
+  - `packages/domain` (the rules)
+  - `packages/contracts` (Zod schemas shared by both apps)
+  - `packages/db` (Prisma)
+- Both processes run on loopback **behind nginx**.
 - **On the client: TanStack Query for server data, the Context API for app-wide facts, custom hooks as the only way screens get or change data.** No Redux and no Redux-style global store; API calls are kept apart from the UI.
 
 How the code is layered, with the clean-code rules and one feature worked end to end, is in [architecture.md](architecture.md). How it runs on the server (processes, nginx, deploys, backups) is in [deploy.md](deploy.md).
 
 ## Where we start
 
-The prototype keeps the whole app in one reducer in the browser (`src/lib/store.tsx`), saved to localStorage under a seed version. Nothing is on a server:
+The prototype keeps the whole app in one reducer in the browser (`src/lib/store.tsx`, now `apps/web/src/lib/store.tsx`), saved to localStorage under a seed version. Nothing is on a server:
 - no database
 - no sign-in
 - no payments, email or SMS
@@ -22,7 +28,9 @@ The prototype keeps the whole app in one reducer in the browser (`src/lib/store.
 
 The one exception is the visitor log on the unmerged `visitor-log` branch, which writes to SQLite.
 
-| Area | Where the rules live today | Size |
+Paths in the table are where things were on 11 November, before the monorepo: `src/lib` is now `packages/domain/src`, and `src/app` is now `apps/web/src/app`.
+
+| Area | Where the rules lived | Size |
 | --- | --- | --- |
 | Core platform (organisers, events, tiers, registration, delegates, zones, rooms, sessions, scanning, team, payouts) | `src/lib/store.tsx`, `src/lib/types.ts`, `src/lib/roles.ts` | 58 actions, 17 record types |
 | Exhibition (halls, booths, exhibitors, contracts, invoices, payments, on-site logistics) | `src/lib/expo/*` | 37 actions, 23 record types |
@@ -62,7 +70,7 @@ Four reviewers each read the plan and the code from one angle: build feasibility
 **Other findings:**
 - **Performance:** auto-propose tries about 1,440 slots per pair (480 ms in memory for 55 proposals), and the prototype ships 1.2 MB to every browser.
 - **Badge codes:** they come from a character sum of the id, so `dr_cs50` and `dr_cs05` collide.
-- **Security:** nginx must overwrite `X-Forwarded-For` and set `X-Forwarded-Host`, or server actions fail their origin check.
+- **Security:** nginx must overwrite `X-Forwarded-For` and set `X-Forwarded-Host`, or server actions fail their origin check. (With the Express API, no server action writes; the overwrite still matters, because the API reads the client's address from it.)
 - **CSP:** a nonce-based CSP is incompatible with the partial prerendering this app uses.
 
 ## Architecture
@@ -84,7 +92,7 @@ Before any database work:
 
 ### How a write runs on the server
 
-A screen calls a custom hook (`useAssignReviewer`). The hook calls the module's API client, and the API client calls a **server action for that one use case** (`assignReviewerAction`). The server action checks the session, validates its input with Zod, and calls the module's service. Screens never send action objects. The layers are set out in [architecture.md](architecture.md).
+A screen calls a custom hook (`useAssignReviewer`). The hook calls the module's API client, and the API client calls **the Express route for that one use case** (`POST /v1/dealroom/:eventId/applications/assign`) with the session cookie. The route checks the session, validates its body with the Zod contract from `@excursia/contracts`, and calls the module's service. Screens never send action objects. The layers are set out in [architecture.md](architecture.md).
 
 Inside the service, every write goes through one helper, `runCommand`, which builds the rule's action from the validated input and runs these steps:
 
@@ -98,10 +106,10 @@ session → actor
   → refused? return the reason, write nothing
   → save only the records whose object identity changed (immutable updates make this cheap)
   → write side tables in the same transaction: audit, outbox, busy slots, counters
-  → commit → return { ok: true, data } as a DTO, or { ok: false, refusal } with the rule's own reason
+  → commit → return the DTO, or refuse with HTTP 409 and the rule's own reason as the message
 ```
 
-The server action then calls `updateTag` for any cached read the write changed, and the hook invalidates or updates its TanStack Query keys.
+The hook then invalidates or updates its TanStack Query keys.
 
 **Two storage styles, chosen by volume:**
 - **Aggregate style:** the Deal Room's business records (applications, matches, meetings, sessions, opportunities, configuration) and the Exhibition's.
@@ -126,11 +134,17 @@ The server action then calls `updateTag` for any cached read the write changed, 
 ### How a read runs
 
 - **Services return only what the viewer may see.** Today the whole state goes to every browser (1.2 MB on the seed). Under the services, staff screens get a projection, an applicant gets their own record, and the badge page gets the badge, each as a DTO, never a Prisma model.
-- **TanStack Query holds the data in the browser.** Each module has query contracts (`queries.ts`): the key, the options and the server cache tag in one place, imported by both the server prefetch and the client hook.
-- **The first paint has data:** a page's server component prefetches through the service inside `<Suspense>` and passes the result down with `<HydrationBoundary>`. The client hook reads the same key with `useSuspenseQuery`. Later reads go through the API client to a GET route handler.
-- **Caching:** per-viewer data is dynamic and uses the standard `dehydrate`. Cached public data (an event page) uses `'use cache'` with `cacheTag`, and the Next guide's prerenderable hydration helper, because `dehydrate()` reads the clock during a prerender.
+- **TanStack Query holds the data in the browser.** Each module has query contracts (`queries.ts`): the key and the options in one place, imported by both the server prefetch and the client hook.
+- **The first paint has data:**
+  - A page's server component prefetches inside `<Suspense>`. It calls the API over loopback with the visitor's cookie, the same call the browser would make.
+  - It passes the result down with `<HydrationBoundary>`.
+  - The client hook reads the same key with `useSuspenseQuery`. Later reads go from the browser to the API directly.
+- **Caching:**
+  - Per-viewer data is dynamic and uses the standard `dehydrate`.
+  - Public data (an event page) is fetched without a cookie and cached in Next with `'use cache'` and a `cacheLife` of a minute, using the Next guide's prerenderable hydration helper, because `dehydrate()` reads the clock during a prerender.
+  - Edits show within that minute. That keeps the web app free of any invalidation secret.
 - **Sessions are read inside `<Suspense>`:** `cacheComponents` is on, so a cookie can't be read at the top of the root layout. `connection()` goes where a server component needs "now" with no request API (for example, whether applications are open).
-- **Writes from one tab queue one at a time** (Next runs server actions in order per client). Autosaves merge, "save and submit" is one mutation, and screens wait for the result before navigating. Phase 1 shows a pending state. Optimistic updates (`onMutate`) come where a screen needs them, such as the live board.
+- **Writes to one record queue one at a time:** mutations on the same record share a TanStack Query `scope`, so they run in order. Autosaves merge, "save and submit" is one mutation, and screens wait for the result before navigating. Phase 1 shows a pending state. Optimistic updates (`onMutate`) come where a screen needs them, such as the live board.
 - **Context holds no records:** only the session, the current event and toasts (architecture.md, "Where state lives").
 
 ### Concurrency and correctness
@@ -198,16 +212,17 @@ One Prisma schema, keyed by `eventId` everywhere, even where the code is single-
   - MFA is a property of the role, enforced by the server; it is not an editable flag.
   - Staff accounts are managed by Algotech admins only.
 - **Sessions:**
-  - The cookie is `__Host-sid` (Secure, HttpOnly, SameSite Lax, or Strict for staff), holding a 256-bit random id stored hashed.
+  - The cookie is `__Secure-sid`, set by the API with `Domain=.example.co.ke` so the web app's server components see it too. It is Secure, HttpOnly, and SameSite Lax (Strict for staff), and holds a 256-bit random id stored hashed. (`__Host-` can't carry a domain, so it can't be shared across the two subdomains.)
   - The id rotates on sign-in and on step-up.
   - Sessions are revoked when a role changes.
   - Staff time out after 30 minutes idle and 12 hours absolute.
   - TOTP secrets are encrypted, with reuse blocked and recovery codes.
 - **One-time codes:** hashed, 10-minute expiry, single use, 5 attempts. SMS sends are capped per number and per day. Responses never reveal whether an account exists.
 - **Scanner PINs:** hashed, with per-staff and per-device lockout and device binding. The demo seed's plaintext PINs never reach production; production staff get fresh PINs.
-- **CSRF:**
-  - Server actions rely on Next's origin check, which needs nginx to forward the public host, and on SameSite cookies.
-  - Cookie-authenticated `/api/*` writes get an Origin check in `proxy.ts`.
+- **CSRF and CORS** (architecture.md, "Sessions and cookies across the two subdomains"):
+  - CORS on the API allows only the web app's origins (`WEB_ORIGINS`), with credentials.
+  - Every cookie-authenticated write must carry an `Origin` from that list and a JSON body, which forces a preflight.
+  - SameSite cookies are the third layer. They don't separate sibling subdomains, so no other subdomain of the parent domain may serve user content.
   - Webhooks are exempt and verified as below.
 - **Webhooks:**
   - **Daraja:** a random per-transaction token in the callback path; Safaricom IPs allow-listed in nginx as a second layer; never settled on the callback alone. The worker confirms with STK Push Query and matches amount, phone and reference. The KES amount is locked when the push starts. A sweeper handles pushes that never get a callback, and statements are reconciled daily.
@@ -241,16 +256,15 @@ These are measured in the load test before each gate:
 | Applicant portal | first payload 60 KB or less |
 | Auto-propose for 150 pairs | 10 s or less, as a background job with progress |
 | Payment webhook | acknowledged within 1 s |
-| Database connections | 20 or fewer in total: web 10, worker 3 for Prisma plus 3 for pg-boss |
+| Database connections | 20 or fewer in total in steady state: API 10, worker 3 for Prisma plus 3 for pg-boss; the web app none |
 
 **Also:**
 - The **live board polls every 3 seconds** with a version number that every relevant write bumps. It gets 204 when nothing changed, which survives offline and reconnects better than server-sent events behind nginx.
 - **Scanners** post each verdict and keep a badge list with an ETag for offline use.
 - **Auto-propose and refill** load the event's busy set into memory, plan there, and insert in one transaction as a job.
 - **Caching:**
-  - Public event pages cache with `'use cache'` and a tag per event.
-  - The Next cache is per process, so the worker invalidates it through an internal route handler.
-  - Nothing per-viewer is ever cached, and `/api` and portals send `Cache-Control: private, no-store`.
+  - Public event pages cache in Next with `'use cache'` for a minute.
+  - Nothing per-viewer is ever cached. The API sends `Cache-Control: private, no-store` on every per-viewer response.
 
 ## Phases and milestones
 
@@ -279,24 +293,28 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 | M0.0 | **Server-safe rules**: split `store.tsx` into `src/lib/core/*` and the client provider; `Ctx { now, newId, actor }` through every reducer and time-dependent rule; refusals with reasons; Vitest with seed-based tests | The prototype runs unchanged; `src/lib` has no `Date.now`, `Math.random` or React import; the Phase 1 actions have tests that pass. **Done 11 Nov 2026** on `backend`. Notes below |
 | M0.1 | **Decisions and applications to third parties**: D3 to D11 answered; the Daraja production application and the SMS sender ID filed (each takes one to two weeks); the ODPC registration started | Each decision has an answer in this file; both applications have reference numbers |
 | M0.2 | **Database and Prisma**: PostgreSQL with database roles, the first schema (identity, minimal event, tier and delegate, the Deal Room aggregate and its tables), migrations, connection limits and timeouts | `prisma migrate deploy` runs clean on an empty database, as the `migrator` role **Done 11 Nov 2026.** Notes below |
+| M0.2a | **The API as its own process**: npm workspaces; Express with checked settings, security headers, CORS for the web app's origins, the error contract, health checks and a clean shutdown; the lint rules for the workspace boundaries | The prototype runs unchanged from `apps/web`; the API answers `/health/ready` against PostgreSQL; lint fails the web app importing the database. **Done 11 Nov 2026.** Notes below |
 | M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record |
 | M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL |
-| M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the first server action and GET route handler; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` helpers, `ApiError`); the feature-folder pattern; Zod; the lint rules that enforce the layer boundaries (architecture.md) | Assigning a reviewer runs from a screen through a hook, the API client, a server action, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; lint fails a component that imports the server or Prisma |
-| M0.6 | **CI and staging**: type-check, lint, tests and build on every push; staging deployed behind nginx as in `deploy.md` | CI is green; staging is reachable over HTTPS with the security headers |
+| M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the module pattern in the API (`routes`, `service`, `repo`); the first POST and GET routes with their contracts; the Origin check on writes; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` client, `ApiError`); the feature-folder pattern in the web app | Assigning a reviewer runs from a screen through a hook, the API client, the Express route, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; a write from another origin is refused |
+| M0.6 | **CI and staging**: type-check, lint, tests and both builds on every push; staging deployed behind nginx as in `deploy.md`, with the web app and the API on their two names | CI is green; both names are reachable over HTTPS with the security headers; the deploy switches the API and then the web app with no failed request |
 
 **Notes on M0.0, done 11 Nov 2026:**
 - **The rules are importable on the server:** `src/lib/core/{reducer,scan,orders}.ts` plus `src/lib/ctx.ts`. The client store is a thin provider.
 - **The only clock and random reads left in `src/lib`** are in `proto-ctx.ts` (the prototype's Ctx), `use-today.ts` (a React hook) and the seeds.
 - **The actor decides:** `staffOf`, `memberOf`/`memberCan`, `actionExhibitor` and `scanOperatorOf`. Algotech-only actions and fee settlement (system only) are enforced in the rules.
 - **Refusals:** `apply()` returns `{ state, refusal }`. Every refusal in the Deal Room's onboarding and review reducer has its reason. Meetings, sessions, conversion, Exhibition and core refusals still return a generic reason; theirs come with their milestones (M3.x, M5.0, Phase 2).
-- **Tests:** 174 Vitest tests in `tests/` (`npm test`): the seven earlier rule suites, the actor checks and the refusal reasons.
+- **Tests:** 174 Vitest tests in `tests/` (`npm test`), now `packages/domain/tests`: the seven earlier rule suites, the actor checks and the refusal reasons.
 - **Still trusted from the client, to fix in the module's milestone:** registration's price and status, a scan's verdict and time (M2.2, M2.4), and the applicant's ownership of an application (`runCommand`, M0.5).
 
 **Notes on M0.2, done 11 Nov 2026:**
-- **Prisma 7.10.1** with the `pg` driver adapter. `prisma.config.ts` points migrations at the migrator role; `src/server/db.ts` is the app's client (pool of 10, no query logging); the generated client is in `src/generated/prisma` and not committed.
+- **Prisma 7.10.1** with the `pg` driver adapter, now in `packages/db`.
+  - `prisma.config.ts` points migrations at the migrator role.
+  - `src/client.ts` exports `createDb()`, which the API calls once at startup (pool of 10, no query logging).
+  - The generated client is in `packages/db/src/generated/prisma` and is not committed.
 - **Roles and databases:** `scripts/db/setup-local.sh` (`npm run db:setup`) creates the four roles (`excursia_migrator`, `excursia_app`, `excursia_worker`, `excursia_reporting`), the dev, test and shadow databases, the timeouts and the default grants. It writes the connection strings to `.env.local`. Servers are provisioned the same way.
 - **The first migration** (`prisma/migrations/…_init`) holds the schema in `prisma/schema.prisma` plus SQL Prisma can't express: the exclusion constraint against double-booking, case-insensitive unique badge codes, partial indexes, time-order checks, and the audit log made append-only for the app and worker. Prisma sees no drift from it.
-- **Proved on the test database, as the app role** (`tests/db`, 9 tests):
+- **Proved on the test database, as the app role** (`packages/db/tests`, 9 tests):
   - 50 simultaneous bookings of one slot: exactly one wins
   - overlap is refused per room and table and per person; a lapsed proposal frees its slot
   - badge codes are unique whatever their case
@@ -305,9 +323,26 @@ What applicants and reviewers need on day one comes first. Anything that can fol
   - a counter hands out each number once under concurrency
 - **Locally this runs on PostgreSQL 15,** the server already on this machine; production's version is chosen with the rest of D2. One `Payment` table carries both Deal Room fees and ticket orders, instead of a separate fee table.
 
+**Notes on M0.2a, done 11 Nov 2026:**
+- **The layout** is in architecture.md, "The repository".
+  - `src/lib`'s rules moved to `packages/domain`.
+  - The browser-only helpers stayed in the web app: the store, `use-today`, `media`, `brand` and the CSV download, now split from the CSV text helpers.
+  - Prisma moved to `packages/db`. The new `packages/contracts` holds the error envelope and the health shape.
+- **The API** (`apps/api`):
+  - Express 5 with settings checked by Zod at startup. Production refuses http origins or a missing cookie domain.
+  - helmet with a deny-everything CSP, since the API only returns JSON.
+  - CORS for `WEB_ORIGINS` only, with credentials.
+  - A 100 kB JSON limit, `trust proxy` for loopback only, and one `ErrorBody` shape for every failure.
+  - `/health/live` and `/health/ready`. Ready reports 503 within 2 s when PostgreSQL doesn't answer.
+  - SIGTERM drains open requests, then closes the pool.
+  - `npm run build` bundles it with the workspace packages into `dist/server.js`.
+- **Tests:** one Vitest run at the root covers all three suites, 198 tests: the rules, the database's guarantees, and 15 on the API (health, CORS, headers, error shapes, settings).
+- **Lint** fails if the web app imports the database, Prisma or Express, if the rules import React, Next.js, Express or the database, or if the contracts import anything of ours.
+- **Running it:** `npm run dev` (web, port 3010) and `npm run dev:api` (API, port 4000). The README has the rest.
+
 ### Phase 1: Deal Room onboarding (23 November 2026 to 8 January 2027)
 
-Each milestone from here on builds its feature the same way: contracts, query contracts, API client, hooks, server action, service and repository, as in [architecture.md](architecture.md). It also moves that feature's screens off the prototype store onto the hooks, so a screen is never half on each.
+Each milestone from here on builds its feature the same way, as in [architecture.md](architecture.md): contracts; then the Express route, service and repository; then the web app's query contracts, API client and hooks. It also moves that feature's screens off the prototype store onto the hooks, so a screen is never half on each.
 
 | # | Milestone | Done when |
 | --- | --- | --- |
@@ -367,7 +402,7 @@ The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only 
 
 | # | Milestone | Done when |
 | --- | --- | --- |
-| M6.1 | `/api/v1` route handlers over the same services, token auth for the apps, versioning, rate limits | An OpenAPI file lists every endpoint the apps use |
+| M6.1 | The apps call the same Express API as the web app: bearer tokens for the apps beside the cookie, rate limits per device, an OpenAPI file generated from the contracts | An OpenAPI file lists every endpoint the apps use, and a test app signs in and books a meeting |
 | M6.2 | Push notifications through the outbox | A test device receives a meeting reminder |
 
 ## Decisions
@@ -375,7 +410,7 @@ The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only 
 | # | Decision | Status or recommendation | Why |
 | --- | --- | --- | --- |
 | D1 | Database | **Decided 11 Nov 2026: PostgreSQL** | Exclusion constraints, point-in-time recovery, JSONB for the aggregates |
-| D2 | Where it runs | **Decided 11 Nov 2026: `next start` behind nginx.** Still open: **managed PostgreSQL with HA and 30-day PITR** (recommended), or self-managed with pgBackRest or WAL-G and a replica on a second server | The PRD asks for 99.95% in summit week, RTO 1 hour, RPO 5 minutes; one server alone can't meet that |
+| D2 | Where it runs | **Decided 11 Nov 2026: behind nginx; revised the same day to two processes,** `next start` for the web app and Node for the Express API, on two subdomains (deploy.md). Still open: **managed PostgreSQL with HA and 30-day PITR** (recommended), or self-managed with pgBackRest or WAL-G and a replica on a second server | The PRD asks for 99.95% in summit week, RTO 1 hour, RPO 5 minutes; one server alone can't meet that |
 | D3 | Sign-in | **Our own sessions** as specified under the security model | The flows are specific (codes, scanner PINs, per-event roles); a library hides the rules |
 | D4 | Card payments | **Paystack** or **Pesapal**, whichever Algotech already has an account with | Both take cards in Kenya |
 | D5 | M-Pesa | **Daraja directly**; file the production application in week one | Approval takes one to two weeks |
@@ -386,6 +421,7 @@ The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only 
 | D10 | The apps | Confirm whether the Flutter apps are needed for February, or the web on phones is enough | The web is now laid out for phones; the apps add store approval as a risk |
 | D11 | Team | Confirm the number of developers from Phase 1 | The phase windows assume at least two |
 | D12 | Content Security Policy | **Hash-based CSP with Next's experimental SRI**, or inline scripts allowed with strict other directives | A nonce-based CSP is incompatible with partial prerendering, which this app uses |
+| D13 | The backend process | **Decided 11 Nov 2026: Express, separate from Next.js, in an npm-workspaces monorepo**, with the API on its own subdomain | One API for the web app and the Flutter apps; the web app holds no database access or secrets; the rules and contracts stay shared |
 
 ## Risks
 
@@ -399,6 +435,7 @@ The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only 
 | One server fails in summit week | Managed PostgreSQL with HA, a warm standby server, a timed failover drill (M3.7) |
 | The aggregate becomes a bottleneck | Budgets are measured in the load tests; hot paths move to targeted commands |
 | Holidays (24 Dec to 1 Jan) | Nothing gated falls in that week |
+| Two processes deploy out of step | The API switches first, and its changes within a release are additive only; a web tab on the old bundle keeps working (deploy.md) |
 
 ## How we work on it
 

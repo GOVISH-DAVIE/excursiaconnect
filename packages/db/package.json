@@ -1,0 +1,25 @@
+{
+  "name": "@excursia/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The PostgreSQL schema, its migrations and the Prisma client. Only the API and the worker import it.",
+  "type": "module",
+  "exports": {
+    ".": "./src/client.ts"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "deploy": "prisma migrate deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "prisma": "7.10.1"
+  }
+}

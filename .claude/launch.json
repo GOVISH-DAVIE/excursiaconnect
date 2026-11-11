@@ -4,8 +4,14 @@
     {
       "name": "excursiaconnect-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "-p", "3010"],
+      "runtimeArgs": ["run", "dev", "-w", "@excursia/web", "--", "-p", "3010"],
       "port": 3010
+    },
+    {
+      "name": "excursiaconnect-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "@excursia/api"],
+      "port": 4000
     }
   ]
 }

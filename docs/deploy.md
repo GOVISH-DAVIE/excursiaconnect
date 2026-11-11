@@ -1,13 +1,25 @@
 # Running ExcursiaConnect behind nginx
 
-How the backend described in [backend-plan.md](backend-plan.md) runs in production: the processes, nginx, deploys, backups and the server itself. Written on 11 November 2026. Domain names and paths below are examples; adapt them, don't copy them blindly.
+How the backend described in [backend-plan.md](backend-plan.md) runs in production: the processes, nginx, deploys, backups and the server itself. Written on 11 November 2026, and revised the same day for the API as its own Express process on its own subdomain ([architecture.md](architecture.md)). Domain names and paths below are examples; adapt them, don't copy them blindly.
+
+**Two names, one site:**
+- `events.example.co.ke` serves the web app (Next.js).
+- `api.example.co.ke` serves the API (Express).
+
+They share the parent domain, so the session cookie is set for `.example.co.ke` and both see it.
 
 ## The shape of it
 
 ```
 Internet :443 ──> nginx (server A; firewall open for 80 and 443, 22 from admin addresses only; certbot timer)
-                   ├─> 127.0.0.1:3001 or :3002   excursia-web@blue / excursia-web@green  (next start)
-                   └─> /srv/excursia/static/_next/static   (kept across releases)
+                   │
+                   ├─ events.example.co.ke
+                   │    ├─> 127.0.0.1:3001 or :3002   excursia-web@blue / @green   (next start; UI only, no database)
+                   │    └─> /srv/excursia/static/_next/static                      (kept across releases)
+                   │
+                   └─ api.example.co.ke
+                        └─> 127.0.0.1:4001 or :4002   excursia-api@blue / @green   (node dist/server.js; Express)
+                                                       the only process with a database URL, besides the worker
 
 server A also runs:
   excursia-worker      pg-boss: outbox (email, SMS), reminders, STK queries and reconciliation,
@@ -27,9 +39,26 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
 
 ## Processes
 
-**One systemd unit per process, each with its own environment file:**
-- `excursia-web@blue` and `excursia-web@green` run `next start -H 127.0.0.1 -p 3001` (or `3002`) as user `excursia`, with `EnvironmentFile=/etc/excursia/web.env` and `TimeoutStopSec=30`. They drain on SIGTERM.
-- `excursia-worker` runs the pg-boss worker with `/etc/excursia/worker.env` and stops gracefully (`boss.stop()`).
+**One systemd unit per process, each with its own environment file.** All run as user `excursia`.
+
+- **`excursia-web@blue` and `excursia-web@green`:**
+  - run `next start -H 127.0.0.1 -p 3001` (or `3002`) in `apps/web`
+  - `EnvironmentFile=/etc/excursia/web.env`, `TimeoutStopSec=30`
+  - The web env holds no database URL and no provider keys. It has:
+    - `NEXT_PUBLIC_API_URL=https://api.example.co.ke`
+    - `API_INTERNAL_URL=http://127.0.0.1:4001` (rewritten on each switch, below), which server components use to prefetch
+- **`excursia-api@blue` and `excursia-api@green`:**
+  - run `node dist/server.js` in `apps/api`
+  - `EnvironmentFile=/etc/excursia/api.env`, `TimeoutStopSec=15`
+  - The API env sets:
+    - `API_PORT=4001` (or `4002`, from the instance name)
+    - `DATABASE_URL` (the app role)
+    - `WEB_ORIGINS=https://events.example.co.ke`
+    - `COOKIE_DOMAIN=.example.co.ke`
+    - the provider keys
+  - The API refuses to start in production without https origins and a cookie domain.
+  - On SIGTERM it stops taking connections, finishes open requests and closes its pool, and exits after 10 s at most.
+- **`excursia-worker`** runs the pg-boss worker with `/etc/excursia/worker.env`. It stops gracefully (`boss.stop()`).
 
 **Hardening on every unit:**
 - `NoNewPrivileges=yes`
@@ -39,28 +68,40 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
 - write access only where needed
 
 **Secrets:**
-- `/etc/excursia/{web,worker,migrate}.env`, mode `0640 root:excursia`, or `systemd-creds`, plus an offline copy in a vault.
+- `/etc/excursia/{web,api,worker,migrate}.env`, mode `0640 root:excursia`, or `systemd-creds`, plus an offline copy in a vault.
 - Nothing secret in `NEXT_PUBLIC_*`, which is written into the browser bundle at build time.
-- A **stable `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`** across releases.
+- **The web app has no secrets at all:** no server actions write, so it needs no server-actions key either.
 - **Sandbox and production provider credentials are separate**, with separate webhook URLs per environment.
 
 **Connections:**
-- Web: Prisma `connection_limit=10`.
-- Worker: Prisma 3, plus pg-boss `max: 3`.
-- No pgbouncer: there's one long-lived web process, and transaction pooling would break advisory locks.
+- API: a pool of 10 (`DATABASE_POOL_MAX`). During a switch both colours are up for 30 s, so the database must allow 20 from the app role.
+- Worker: 3 for Prisma, plus pg-boss `max: 3`.
+- Web: none.
+- No pgbouncer: there's one long-lived API process, and transaction pooling would break advisory locks.
 - `statement_timeout=5s` and `idle_in_transaction_session_timeout=10s` for the `app` and `worker` roles.
 
 ## Deploying a release
 
-1. **In CI:** tests, then `next build` with `deploymentId` set to the git commit.
-2. Copy the build to `/srv/excursia/releases/<commit>` and run `npm ci --omit=dev`.
-3. Copy `.next/static` into the shared static directory. Old hashed files stay for 14 days, so open tabs keep working.
-4. Run `prisma migrate deploy` as the `migrator` role. Migrations only **expand** in this step: add columns and tables, never drop.
-5. Start the idle colour, wait for `GET /api/health` to pass from localhost, then switch `upstream.conf` to it and run `nginx -t && nginx -s reload`.
-6. Stop the old colour after 30 seconds, then restart the worker.
-7. Drops and renames (**contract**) ship in the *next* release.
+1. **In CI:**
+   - `npm ci`, `npm run lint`, `npm run typecheck`, `npm test`
+   - `npm run build`: `next build` in `apps/web` with `deploymentId` set to the git commit, and the API bundle in `apps/api/dist`
+2. Copy the repository with both builds to `/srv/excursia/releases/<commit>` and run `npm ci --omit=dev`. That also generates the Prisma client.
+3. Copy `apps/web/.next/static` into the shared static directory. Old hashed files stay for 14 days, so open tabs keep working.
+4. Run `npm run db:deploy` (`prisma migrate deploy`) with `/etc/excursia/migrate.env`, as the `migrator` role. Migrations only **expand** in this step: add columns and tables, never drop.
+5. **Switch the API first:**
+   - Start the idle API colour.
+   - Wait for `GET http://127.0.0.1:400x/health/ready` to return 200.
+   - Point `upstream-api.conf` at it and run `nginx -t && nginx -s reload`.
 
-The stable encryption key and `deploymentId` stop the "Failed to find Server Action" error mid-deploy. The client also retries once if it sees it.
+   The old web app now talks to the new API, so API changes are additive within a release: new fields and new routes, never a removed or renamed one.
+6. **Then the web app:**
+   - Set `API_INTERNAL_URL` in `web.env` to the new API colour.
+   - Start the idle web colour and wait for `GET /` to return 200 from localhost.
+   - Point `upstream-web.conf` at it and reload nginx.
+7. Stop both old colours after 30 seconds, then restart the worker.
+8. Drops, renames and removed routes (**contract**) ship in the *next* release.
+
+`deploymentId` lets a tab still running the old bundle reload cleanly when it meets the new one.
 
 ## nginx
 
@@ -69,45 +110,42 @@ The stable encryption key and `deploymentId` stop the "Failed to find Server Act
 # logs keep no query strings: resume links and one-time codes travel in them
 log_format priv '$remote_addr [$time_iso8601] "$request_method $uri" $status $body_bytes_sent $request_time';
 
-# server actions POST to the page's own path, so sign-in, code and payment limits key on POST only
-map $request_method $post_ip { POST $binary_remote_addr; default ""; }
 # the summit venue's Wi-Fi puts hundreds of people behind one address: exempt it from per-IP limits
 geo $venue { default 0; include /etc/nginx/excursia/venue-ips.conf; }
-map $venue $lim_ip   { 1 ""; 0 $binary_remote_addr; }
-map $venue $lim_post { 1 ""; 0 $post_ip; }
+map $venue $lim_ip { 1 ""; 0 $binary_remote_addr; }
 
-limit_req_zone $lim_post zone=auth:10m rate=6r/m;
-limit_req_zone $lim_post zone=otp:10m  rate=4r/m;
-limit_req_zone $lim_post zone=pay:10m  rate=10r/m;
-limit_req_zone $lim_ip   zone=app:20m  rate=30r/s;
+# sign-in, codes and payments are API routes of their own, so their limits key on the path
+limit_req_zone $lim_ip zone=auth:10m rate=6r/m;
+limit_req_zone $lim_ip zone=otp:10m  rate=4r/m;
+limit_req_zone $lim_ip zone=pay:10m  rate=10r/m;
+limit_req_zone $lim_ip zone=app:20m  rate=30r/s;
+limit_req_zone $lim_ip zone=api:20m  rate=30r/s;
 limit_req_zone $binary_remote_addr zone=hooks:10m rate=20r/s;
 limit_conn_zone $binary_remote_addr zone=perip:10m;
 limit_req_status 429;
 
-include /etc/nginx/excursia/upstream.conf;   # upstream excursia_web { server 127.0.0.1:3001; keepalive 32; }
+include /etc/nginx/excursia/upstream-web.conf;   # upstream excursia_web { server 127.0.0.1:3001; keepalive 32; }
+include /etc/nginx/excursia/upstream-api.conf;   # upstream excursia_api { server 127.0.0.1:4001; keepalive 32; }
 
 # ---- refuse any host we don't serve ------------------------------------------------------------
 server { listen 80 default_server; listen [::]:80 default_server; return 444; }
 server { listen 443 ssl default_server; listen [::]:443 ssl default_server; ssl_reject_handshake on; }
 
 server {
-  listen 80; listen [::]:80; server_name app.example.co.ke;
+  listen 80; listen [::]:80; server_name events.example.co.ke api.example.co.ke;
   location /.well-known/acme-challenge/ { root /var/www/acme; }
   location / { return 301 https://$host$request_uri; }
 }
 
 server {
   listen 443 ssl; listen [::]:443 ssl; http2 on;
-  server_name app.example.co.ke;
-  ssl_certificate     /etc/letsencrypt/live/app.example.co.ke/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/app.example.co.ke/privkey.pem;
-  ssl_protocols TLSv1.2 TLSv1.3; ssl_prefer_server_ciphers off;
-  ssl_session_cache shared:SSL:10m; ssl_session_tickets off;
+  server_name events.example.co.ke;
+  include /etc/nginx/excursia/tls.conf;   # one certificate for both names (or a wildcard), protocols, session cache
   server_tokens off;
-  access_log /var/log/nginx/excursia.log priv;
+  access_log /var/log/nginx/excursia-web.log priv;
 
-  # documents and images go straight to object storage, never through here
-  client_max_body_size 1m; client_body_timeout 15s; client_header_timeout 15s;
+  # the web app takes no uploads and no form posts: everything that writes goes to the API
+  client_max_body_size 64k; client_body_timeout 15s; client_header_timeout 15s;
   send_timeout 30s; keepalive_timeout 30s; limit_conn perip 60;
 
   gzip on; gzip_proxied any; gzip_vary on; gzip_min_length 1024;
@@ -124,7 +162,7 @@ server {
   proxy_http_version 1.1;
   proxy_set_header Connection "";
   proxy_set_header Host              $host;
-  proxy_set_header X-Forwarded-Host  $host;        # server actions compare Origin with this
+  proxy_set_header X-Forwarded-Host  $host;
   proxy_set_header X-Real-IP         $remote_addr;
   proxy_set_header X-Forwarded-For   $remote_addr;
   proxy_set_header X-Forwarded-Proto https;
@@ -139,26 +177,6 @@ server {
     add_header Cache-Control "public, max-age=31536000, immutable" always;
   }
 
-  # adjust these paths to the real sign-in, code and payment pages
-  location ~ ^/(signin|staff/signin|scanner/signin) { limit_req zone=auth burst=5 nodelay; proxy_buffering off; proxy_pass http://excursia_web; }
-  location ~ ^/(apply/verify|code)                  { limit_req zone=otp  burst=3 nodelay; proxy_buffering off; proxy_pass http://excursia_web; }
-  location ~ ^/pay(/|$)                              { limit_req zone=pay  burst=5 nodelay; proxy_buffering off; proxy_pass http://excursia_web; }
-
-  # Daraja: the path carries a per-transaction token; Safaricom's addresses are a second layer
-  location /api/hooks/mm/ {
-    limit_except POST { deny all; }
-    include /etc/nginx/excursia/safaricom-allow.conf;   # allow <ip>; … deny all;
-    client_max_body_size 64k; limit_req zone=hooks burst=100 nodelay;
-    proxy_pass http://excursia_web;
-  }
-  # Paystack, Pesapal, Africa's Talking, email: each verified in the app
-  location /api/hooks/ {
-    limit_except POST { deny all; }
-    client_max_body_size 256k; limit_req zone=hooks burst=100 nodelay;
-    proxy_pass http://excursia_web;
-  }
-
-  location = /api/health { allow 127.0.0.1; deny all; proxy_pass http://excursia_web; }
   location ^~ /adminwatch { include /etc/nginx/excursia/admin-allow.conf; proxy_pass http://excursia_web; }
 
   location / {
@@ -167,13 +185,71 @@ server {
     proxy_pass http://excursia_web;
   }
 }
+
+# ---- the API: JSON only; CORS, the session cookie and the Origin check are Express's (architecture.md) --------
+server {
+  listen 443 ssl; listen [::]:443 ssl; http2 on;
+  server_name api.example.co.ke;
+  include /etc/nginx/excursia/tls.conf;
+  server_tokens off;
+  access_log /var/log/nginx/excursia-api.log priv;
+
+  # documents and images go straight to object storage with presigned URLs, never through here
+  client_max_body_size 128k; client_body_timeout 15s; client_header_timeout 15s;
+  send_timeout 30s; keepalive_timeout 30s; limit_conn perip 60;
+  gzip on; gzip_proxied any; gzip_vary on; gzip_min_length 1024; gzip_types application/json;
+
+  # HSTS only: the API sets its own deny-all Content-Security-Policy and CORS headers, and nginx must not add
+  # a second copy of either
+  add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+
+  proxy_http_version 1.1;
+  proxy_set_header Connection "";
+  proxy_set_header Host              $host;
+  proxy_set_header X-Real-IP         $remote_addr;
+  proxy_set_header X-Forwarded-For   $remote_addr;   # overwrite: Express trusts it from loopback only
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header Forwarded "";
+  proxy_hide_header X-Powered-By;
+  proxy_connect_timeout 5s; proxy_send_timeout 30s; proxy_read_timeout 30s;
+
+  # adjust these paths to the real sign-in, code and payment routes
+  location ~ ^/v1/auth/(signin|staff|scanner)  { limit_req zone=auth burst=5 nodelay; proxy_pass http://excursia_api; }
+  location ~ ^/v1/(apply/verify|auth/code)     { limit_req zone=otp  burst=3 nodelay; proxy_pass http://excursia_api; }
+  location ~ ^/v1/pay(/|$)                      { limit_req zone=pay  burst=5 nodelay; proxy_pass http://excursia_api; }
+
+  # Daraja: the path carries a per-transaction token; Safaricom's addresses are a second layer
+  location /v1/hooks/mm/ {
+    limit_except POST { deny all; }
+    include /etc/nginx/excursia/safaricom-allow.conf;   # allow <ip>; … deny all;
+    client_max_body_size 64k; limit_req zone=hooks burst=100 nodelay;
+    proxy_pass http://excursia_api;
+  }
+  # Paystack, Pesapal, Africa's Talking, email: each verified in the API
+  location /v1/hooks/ {
+    limit_except POST { deny all; }
+    client_max_body_size 256k; limit_req zone=hooks burst=100 nodelay;
+    proxy_pass http://excursia_api;
+  }
+
+  # the deploy script checks health on 127.0.0.1:400x directly; from outside there is nothing to see
+  location /health/ { allow 127.0.0.1; deny all; proxy_pass http://excursia_api; }
+
+  location / {
+    limit_req zone=api burst=60 nodelay;
+    proxy_pass http://excursia_api;
+  }
+}
 ```
 
 **Notes on it:**
-- **The live board polls**, so it needs no special location. If server-sent events are ever added, give their location `proxy_buffering off`, `proxy_cache off` and a long `proxy_read_timeout`, and send `X-Accel-Buffering: no` from the route handler.
+- **CORS lives in Express, not nginx.** The API answers preflights itself, from `WEB_ORIGINS`. nginx adds no `Access-Control-*` headers, so there is one source of truth.
+- **The live board polls**, so it needs no special location. If server-sent events are ever added, give their API location `proxy_buffering off`, `proxy_cache off` and a long `proxy_read_timeout`, and send `X-Accel-Buffering: no` from the route.
 - **Rate limits in nginx are coarse on purpose:** carrier-grade NAT and the venue's Wi-Fi share addresses. The real limits, per phone, email, account and device, live in PostgreSQL.
 - **Webhooks** carry no cookies and need no Origin check. Their limits are generous, so a provider's retries are never dropped.
-- **The app reads the client's IP only from `X-Real-IP`.** The `visitor-log` branch's fallback to the first `X-Forwarded-For` entry is removed (M2.6).
+- **The API reads the client's IP through Express's `req.ip`**, which trusts forwarded headers from loopback only (`trust proxy` = loopback). nginx overwrites `X-Forwarded-For` rather than appending, so a client cannot plant an address.
+- **When a server component prefetches,** it calls the API over loopback and forwards the visitor's address in `X-Forwarded-For`. The API trusts that because it comes from loopback.
+- **The visitor log** (the `visitor-log` branch) reads `X-Real-IP` only. Its fallback to the first `X-Forwarded-For` entry is removed (M2.6).
 
 ## Backups and recovery
 
@@ -189,5 +265,9 @@ server {
 
 - **Firewall:** open for 80 and 443, plus 22 from admin addresses only. SSH by key only.
 - `unattended-upgrades` on, and the clock kept with `chrony`.
-- Uptime and error alerts; structured logs with phone numbers masked; Prisma query logging off in production; error tracking scrubbed of personal data.
+- Uptime alerts on both names, plus `/health/ready` polled from the server itself.
+- Error alerts.
+- Structured logs with phone numbers masked.
+- Prisma query logging off in production.
+- Error tracking scrubbed of personal data.
 - `/adminwatch` is allow-listed by IP in nginx now, and moves behind staff sign-in with TOTP in M2.6.

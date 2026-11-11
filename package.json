@@ -2,40 +2,27 @@
   "name": "excursiaconnect",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "npm run dev -w @excursia/web",
+    "dev:api": "npm run dev -w @excursia/api",
+    "build": "npm run build -w @excursia/web && npm run build -w @excursia/api",
     "lint": "eslint",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "db:setup": "scripts/db/setup-local.sh",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
-    "db:generate": "prisma generate",
-    "postinstall": "prisma generate"
-  },
-  "dependencies": {
-    "@fontsource-variable/manrope": "^5.3.0",
-    "@fontsource-variable/rethink-sans": "^5.3.0",
-    "@prisma/adapter-pg": "7.10.1",
-    "@prisma/client": "7.10.1",
-    "next": "16.4.5",
-    "pg": "8.23.1",
-    "qrcode.react": "^4.2.0",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "server-only": "0.0.1"
+    "db:migrate": "npm run migrate -w @excursia/db",
+    "db:deploy": "npm run deploy -w @excursia/db",
+    "db:generate": "npm run generate -w @excursia/db",
+    "postinstall": "npm run generate -w @excursia/db"
   },
   "devDependencies": {
-    "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
-    "@types/pg": "8.23.1",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.5",
-    "prisma": "7.10.1",
-    "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^3.2.7"
   }

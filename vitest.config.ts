@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 // the database tests read TEST_DATABASE_URL from .env.local locally (scripts/db/setup-local.sh) or from CI's environment
@@ -8,16 +7,15 @@ try {
   // no .env.local: the database tests skip themselves
 }
 
-const src = (p: string) => fileURLToPath(new URL(p, import.meta.url));
-
-// the rule tests: pure modules in src/lib, run in Node against the demo seed; the database tests: src/server
-// against the test database, as the app role
+// One run for the whole repository:
+//   packages/domain/tests  the rules, pure, in Node against the demo seed
+//   packages/db/tests      what PostgreSQL itself guarantees, as the app role, against the test database
+//   apps/api/tests         the Express app on a random port
+// Workspace packages resolve through node_modules, as they do in the apps.
 export default defineConfig({
-  resolve: {
-    alias: {
-      "@": src("./src"),
-      "server-only": src("./tests/stubs/server-only.ts"),
-    },
+  test: {
+    include: ["packages/*/tests/**/*.test.ts", "apps/*/tests/**/*.test.ts"],
+    environment: "node",
+    env: { NODE_ENV: "test" },
   },
-  test: { include: ["tests/**/*.test.ts"], environment: "node" },
 });
