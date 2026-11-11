@@ -2,9 +2,33 @@
 
 import { useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
-import { EV_CA3, acting, decisionOf, drCan, publicStatus, type DrCap } from "@/lib/dealroom/logic";
-import type { DocKind, DrApplication, DrDocument } from "@/lib/dealroom/types";
+import { EV_CA3, acting, canSeeInternal, decisionOf, drCan, publicStatus, type DrCap } from "@/lib/dealroom/logic";
+import type { DealRoomState, DocKind, DrApplication, DrDocument, DrStaff } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
+
+/**
+ * Whether the signed-in staff member would get past the page a link points to. The same checks the pages make,
+ * so a dashboard or report never offers a link that ends in a refusal: for anyone else the number stays plain.
+ */
+export function canOpen(dr: DealRoomState, me: DrStaff | undefined, href: string) {
+  const path = href.split("?")[0];
+  if (path.startsWith("/dealroom/applications")) return drCan(me, "review") || drCan(me, "assign");
+  if (path.startsWith("/dealroom/matching")) return drCan(me, "match");
+  if (path.startsWith("/dealroom/matches/")) return drCan(me, "match") || drCan(me, "schedule");
+  if (path.startsWith("/dealroom/meetings")) return drCan(me, "schedule");
+  if (path.startsWith("/dealroom/live")) return drCan(me, "liveboard") || drCan(me, "outcome");
+  const opp = path.match(/^\/dealroom\/opportunities\/([^/]+)/);
+  if (opp) return canSeeInternal(me, dr.opportunities.find((o) => o.id === opp[1])?.owner);
+  if (path.startsWith("/dealroom/opportunities")) return !!me && ["Lead", "Reviewer", "Coordinator"].includes(me.role);
+  return true;
+}
+
+/** A link filter for the signed-in staff member: the href if they can open it, otherwise nothing. */
+export function useOpenable() {
+  const { state } = useStore();
+  const me = acting(state.dealRoom);
+  return (href?: string) => (href && canOpen(state.dealRoom, me, href) ? href : undefined);
+}
 
 /** The Deal Room slice, its config, the signed-in staff member and "now" from the demo clock. */
 export function useDr(eventId = EV_CA3) {
@@ -42,21 +66,21 @@ export function DecisionPill({ app }: { app: DrApplication }) {
   }
   const d = decisionOf(app)?.decision;
   if (!d) return null;
-  return <Pill tone={d === "Approved" ? "ok" : d === "Conditional" ? "warn" : d === "Declined" ? "bad" : "mute"}>{d}</Pill>;
+  return <Pill tone={d === "Qualified" ? "ok" : d === "Conditional" ? "warn" : d === "Declined" ? "bad" : "mute"}>{d}</Pill>;
 }
 
 export function ReadinessPill({ app }: { app: DrApplication }) {
-  if (app.type !== "seeker" || !decisionOf(app) || app.readiness === "Not ready") return app.type === "seeker" && decisionOf(app) && ["Approved", "Conditional"].includes(decisionOf(app)!.decision) ? <Pill>Not ready</Pill> : null;
+  if (app.type !== "seeker" || !decisionOf(app) || app.readiness === "Not ready") return app.type === "seeker" && decisionOf(app) && ["Qualified", "Conditional"].includes(decisionOf(app)!.decision) ? <Pill>Not ready</Pill> : null;
   return <Pill tone={app.readiness === "Deal Room Ready" ? "okSolid" : "warn"}>{app.readiness}</Pill>;
 }
 
 export function ApplicantStatus({ app }: { app: DrApplication }) {
   const s = publicStatus(app);
-  const tone = ["Approved", "Verified"].includes(s) ? "ok" : s === "Conditional" || s === "Information requested" ? "warn" : s === "Declined" ? "bad" : "coral";
+  const tone = ["Qualified", "Verified"].includes(s) ? "ok" : s === "Conditional" || s === "Information requested" ? "warn" : s === "Declined" ? "bad" : "coral";
   return <Pill tone={tone}>{s}</Pill>;
 }
 
-export const typeLabel = (a: DrApplication) => (a.type === "seeker" ? "Capital seeker" : a.providerKind ?? "Finance provider");
+export const typeLabel = (a: DrApplication) => (a.type === "seeker" ? "Capital seeker" : a.challenge ? `Challenge, ${(a.providerKind ?? "institution").toLowerCase()}` : a.providerKind ?? "Finance provider");
 
 export function When({ at, time = true }: { at?: string; time?: boolean }) {
   if (!at) return <span className="text-slate">–</span>;

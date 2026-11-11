@@ -82,7 +82,7 @@ function Missions({ cfg, lead }: { cfg: DrConfig; lead: boolean }) {
             </div>
           ))}
         </div>
-        <p className="mt-2 text-[12px] text-slate">The three mission names are stand-ins until Bouer confirms them.</p>
+        <p className="mt-2 text-[12px] text-slate">The three missions and six strategic tracks are the decision paper&apos;s, Deal Room Vis a Vis.</p>
         <Save cfg={cfg} lead={lead} patch={{ missions }} note="Missions edited" />
       </Section>
       <Section title="Sources">
@@ -203,6 +203,7 @@ function Rules({ cfg, lead }: { cfg: DrConfig; lead: boolean }) {
   const [r, setR] = useState(cfg.rules);
   const [freezeDate, setFreeze] = useState(cfg.freezeDate);
   const [second, setSecond] = useState(cfg.secondReview);
+  const [fee, setFee] = useState(cfg.seekerFee);
   const num = (k: keyof typeof r, label: string, help?: string) => (
     <Labeled label={label} help={help}>
       <input className="input" type="number" min={0} disabled={!lead} value={r[k] as number} onChange={(e) => setR({ ...r, [k]: Number(e.target.value) })} />
@@ -248,9 +249,26 @@ function Rules({ cfg, lead }: { cfg: DrConfig; lead: boolean }) {
             </label>
           </div>
         </Section>
+        <Section title="Participation fee">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Labeled label="Fee for an approved capital seeker" help="0 charges nothing">
+              <input className="input" type="number" min={0} disabled={!lead} value={fee.amount} onChange={(e) => setFee({ ...fee, amount: Math.max(0, Number(e.target.value) || 0) })} />
+            </Labeled>
+            <Labeled label="Currency" help="M-Pesa pays the shilling amount at 130 to the dollar">
+              <select className="input" disabled={!lead} value={fee.currency} onChange={(e) => setFee({ ...fee, currency: e.target.value as "USD" | "KES" })}>
+                <option>USD</option>
+                <option>KES</option>
+              </select>
+            </Labeled>
+            <Labeled label="Reminder, days after the link">
+              <input className="input" type="number" min={1} disabled={!lead} value={fee.reminderDays} onChange={(e) => setFee({ ...fee, reminderDays: Math.max(1, Number(e.target.value) || 1) })} />
+            </Labeled>
+          </div>
+          <p className="mt-2 text-[13px] text-slate">Approval sends the payment link. Until the fee is paid or waived, the seeker has no badge and is not matched or introduced. A change applies to approvals from now on.</p>
+        </Section>
       </div>
       <p className="mt-2 text-[13px] text-slate">The same rules apply on the web and in the apps. Operations can override a cap with a logged reason; every other exception is recorded under Exceptions.</p>
-      <Save cfg={cfg} lead={lead} patch={{ rules: r, freezeDate, secondReview: second }} note="Rules and deadlines edited" />
+      <Save cfg={cfg} lead={lead} patch={{ rules: r, freezeDate, secondReview: second, seekerFee: fee }} note="Rules and deadlines edited" />
     </>
   );
 }
@@ -366,7 +384,7 @@ function Concurrency() {
     const lead = state.dealRoom.staff.find((x) => x.role === "Lead" && x.active)!;
     const base: AppState = structuredClone(state);
     const acc = base.dealRoom.matches.filter(bothAccepted);
-    base.dealRoom = { ...base.dealRoom, clock: "2027-03-01 09:00", actingStaffId: lead.id, meetings: base.dealRoom.meetings.filter((m) => !acc.slice(0, 50).some((a) => a.id === m.matchId)) };
+    base.dealRoom = { ...base.dealRoom, clock: "2027-02-01 09:00", actingStaffId: lead.id, meetings: base.dealRoom.meetings.filter((m) => !acc.slice(0, 50).some((a) => a.id === m.matchId)) };
     const test = (name: string, reqs: { matchId: string; roomId: string; table: number; start: string }[]) => {
       let st = base;
       const before = st.dealRoom.meetings.length;
@@ -374,7 +392,7 @@ function Concurrency() {
       const booked = st.dealRoom.meetings.length - before;
       return { name, requests: reqs.length, booked, refused: reqs.length - booked, problems: validateDealRoom(st).filter((p) => /share|two meetings/i.test(p)).length };
     };
-    const day = "2027-03-17";
+    const day = "2027-02-17";
     const fifty = Array.from({ length: 50 }, (_, i) => acc[i % acc.length].id);
     setResult([
       test("Fifty requests for one room, one table, one time", fifty.map((matchId) => ({ matchId, roomId: "r_dr1", table: 1, start: `${day} 16:00` }))),
@@ -448,7 +466,7 @@ function Archive({ cfg, lead }: { cfg: DrConfig; lead: boolean }) {
         <Link href="/dealroom/opportunities?tab=Export" className="btn-secondary mt-4 inline-flex">
           The post-summit pack
         </Link>
-        <p className="mt-3 text-[13px] text-slate">Records stay readable and exportable after the archive; only documents are deleted. {dr.archivedAt ? "Nothing in the Deal Room can change now except retention." : "Move the demo clock to 19 Sep to see the archive."}</p>
+        <p className="mt-3 text-[13px] text-slate">Records stay readable and exportable after the archive; only documents are deleted. {dr.archivedAt ? "Nothing in the Deal Room can change now except retention." : "Move the demo clock to 22 Aug to see the archive."}</p>
       </Section>
       <Section title="Extend document retention">
         {lead ? (

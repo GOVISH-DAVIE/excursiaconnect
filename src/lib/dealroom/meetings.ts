@@ -15,6 +15,7 @@ import {
   introExpired,
   lapsed,
   matchable,
+  mustHaveMisses,
   occupies,
   readyToSchedule,
   slotProblems,
@@ -134,7 +135,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       const blocked = blockedPair(dr, seeker.id, provider.id, cfg);
       if (blocked && !(action.override?.trim() && me!.role === "Lead")) return state;
       const f = fit(seeker, provider, cfg);
-      const mandatoryMiss = f.missed.filter((x) => cfg.matching.find((y) => y.field === x)?.mandatory);
+      const mandatoryMiss = mustHaveMisses(cfg, provider, f.missed);
       // a ticket-size or exclusion miss needs a reviewer's note to approve (PRD Matching req. 2)
       if (action.decision === "Approved" && (mandatoryMiss.length || f.exclusionHit) && !action.note.trim()) return state;
       const existing = dr.matches.find((m) => m.seekerId === seeker.id && m.providerId === provider.id);
@@ -362,7 +363,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction): AppState {
       }
       // with no connection the record waits on the device, with the id it was given there (Flow 7)
       if (dr.offline) {
-        return withDr(state, { ...dr, queue: [...dr.queue, { device: action.device ?? "This device", meetingId: mt.id, attendance: action.attendance === "Cancelled" ? "No-show" : action.attendance, noShow: action.noShow, outcome: outcome ?? { category: "Not a fit", by: me!.id, at, clientId: uid("cl", at) } }] });
+        return withDr(state, { ...dr, queue: [...dr.queue, { device: action.device ?? "This device", meetingId: mt.id, attendance: action.attendance === "Cancelled" ? "No-show" : action.attendance, noShow: action.noShow, outcome: outcome ?? { category: "No fit", by: me!.id, at, clientId: uid("cl", at) } }] });
       }
       return withDr(state, applyOutcome(dr, mt, action.attendance, action.noShow, outcome, me!.id));
     }
@@ -465,7 +466,8 @@ function applyOutcome(dr: DealRoomState, mt: DrMeeting, attendance: "Held" | "No
       stageDates: { "Follow-up": at },
       nextAction: outcome.nextAction,
       due: outcome.due ?? addMinutes(at, 7 * 1440).slice(0, 10),
-      outcomes: outcome.category === "Positive" ? [{ id: uid("oo", at), kind: "Interest", date: at.slice(0, 10), evidence: "Meeting outcome", by, at }] : [],
+      // a meeting that ends in diligence, a proposal or a documented commitment records an expression of interest at once
+      outcomes: ["Due diligence", "Financing or partnership proposal", "Commitment documented"].includes(outcome.category) ? [{ id: uid("oo", at), kind: "Expression of interest", date: at.slice(0, 10), evidence: `Meeting outcome: ${outcome.category}`, by, at }] : [],
       updates: [],
       requests: [],
       reviews: [],

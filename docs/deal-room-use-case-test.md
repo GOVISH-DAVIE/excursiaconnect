@@ -2,6 +2,20 @@
 
 Run on 6 November 2026 against branch `deal-room` after all three cuts, from a reset of the demo data. The pass follows the seven flows in [03-Deal-Room-User-Flows.md](03-Deal-Room-User-Flows.md), each end to end in one browser, with the demo clock at its default (Tue 16 Mar 2027, 10:40, summit day 2) unless a step moves it. Screens were driven in the app's browser pane at 1440 and 375 wide. The rules each flow depends on were also run directly against the reducer, so a refusal is proved where it is enforced and not only where a button is greyed out.
 
+## Vis a Vis pass, 11 November 2026
+
+Run on branch `deal-room-vis-a-vis` after the move to 15 to 18 February 2027, so the default clock is now Tue 16 Feb 2027, 10:40. The flows below are the 6 November run, with dates and terms from before the move. This pass covers what the paper added, in Chrome at 1512 wide and in the app's browser pane at 375, with the rules run against the reducer.
+
+| Area | Result |
+| --- | --- |
+| Fee on approval | Approving sends the USD 250 link; paying by M-Pesa issues the badge and opens matching; paying twice is refused; one reminder after 3 days; the lead's waiver needs a reason; providers pay nothing; a zero fee issues the badge at once. 18 of 18 rules pass |
+| Challenge intake | The form asks for the problem, users, outcome, route and decision process, and refuses to submit without them; a submitted challenge goes to verification. Seeded: a ministry's identity checks and a county's smart metering (verified, matched with four businesses on sector, country and stage) and a bank's fraud pilot (in verification, not matched). 12 of 12 rules pass |
+| Pipeline | 91 owners across the 13 statuses on summit day 2; at 18 August, 12 of the 13 in use, including closed or deployed. Declined and referred sort last. A meeting whose date passed with no outcome says so. **Fixed in the pass:** rows linked to application records for the coordinator, who cannot open them |
+| Roles | The coordinator sees matching, meetings, the live board, the programme, the pipeline and opportunities, but not applications. Oversight sees the dashboard, pipeline, programme, reports and read-only settings. **Fixed in the pass:** oversight saw "your opportunities, 0" in reports and no conversion values on the dashboard |
+| Sessions | 16 sessions across the four days, all 11 formats; day 1 and this morning's held with attendance and outcomes, the 10:30 clinic in progress. Planning refuses a meeting room, a past time, a busy room or host; an unpaid seeker cannot be invited; an accepted session blocks a meeting over it and a meeting blocks accepting; oversight cannot plan; outcomes other than no fit need a next step; cancelling needs a reason and tells those who accepted. 25 of 25 rules pass |
+| Seed | Invariants hold; no accepted session crosses a meeting. **Fixed in the pass:** provider names did not match their kinds after the vocabulary change, for example a fund called a bank; each is now named for its kind, with matching email domains |
+| Earlier suites | Accreditation 26, exhibition 28, 19 and review 19: all pass on the new seed |
+
 Each flow ends in a verdict: **Pass** when every step works as the flow describes, **Pass with fixes** when the pass found a defect that was fixed and re-tested before this report.
 
 ## Flow 1 — Apply and get a decision

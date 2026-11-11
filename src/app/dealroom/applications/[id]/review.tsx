@@ -10,6 +10,9 @@ import {
   decisionOf,
   drCan,
   eligibility,
+  feeInKes,
+  feeLabel,
+  feeOwed,
   latestScore,
   missionName,
   openConditions,
@@ -22,6 +25,7 @@ import {
   rfiDue,
   rfiExpired,
   staffName,
+  trackName,
   verificationBlockers,
   weighted,
 } from "@/lib/dealroom/logic";
@@ -59,7 +63,7 @@ export function Review({ id }: { id: string }) {
             <ReadinessPill app={app} />
           </span>
         }
-        kicker={`${app.ref ?? "Not submitted"} · ${typeLabel(app)} · ${missionName(cfg, app.mission)} · source ${app.source} · owner ${staffName(dr, app.owner)} · reviewer ${app.assignee ? staffName(dr, app.assignee) : "not assigned"}`}
+        kicker={`${app.ref ?? "Not submitted"} · ${typeLabel(app)}${app.ownerKind ? `, ${app.ownerKind.toLowerCase()}` : ""} · ${missionName(cfg, app.mission)}${app.track ? `, ${trackName(cfg, app.track)}` : ""} · source ${app.source} · owner ${staffName(dr, app.owner)} · reviewer ${app.assignee ? staffName(dr, app.assignee) : "not assigned"}`}
         actions={
           <>
             {app.status === "Submitted" && can("review") && (
@@ -271,21 +275,39 @@ function ApplicationTab({ app }: { app: DrApplication }) {
       {app.type === "seeker" ? (
         <Section title="The ask">
           {app.ask ? (
-            <KV rows={[["Amount", compact(app.ask.amount, app.ask.currency)], ["Instrument", app.ask.instrument], ["Stage", app.ask.stage], ["Use of funds", app.ask.useOfFunds], ["Revenue", app.traction?.revenueBand ?? "–"], ["Customers", app.traction?.customers ?? "–"], ["Metrics", app.traction?.metrics ?? "–"]]} />
+            <KV rows={[["Amount", compact(app.ask.amount, app.ask.currency)], ["Pathway", app.ask.instrument], ["Stage", app.ask.stage], ["Use of funds", app.ask.useOfFunds], ["Revenue", app.traction?.revenueBand ?? "–"], ["Customers", app.traction?.customers ?? "–"], ["Metrics", app.traction?.metrics ?? "–"]]} />
           ) : (
             <Empty>Not filled in yet.</Empty>
           )}
         </Section>
       ) : (
-        <Section title="Mandate">
+        <>
+        {app.challenge && (
+          <Section title="The challenge">
+            <KV
+              rows={[
+                ["Title", app.challenge.title],
+                ["Problem", app.challenge.problem],
+                ["Who has it", app.challenge.users],
+                ["Success looks like", app.challenge.outcome],
+                ["Constraints", app.challenge.constraints || "–"],
+                ["Route", app.challenge.route || "–"],
+                ["Budget", app.challenge.budget || "–"],
+                ["Timeline", app.challenge.timeline || "–"],
+                ["Decision process", app.challenge.decisionProcess],
+              ]}
+            />
+          </Section>
+        )}
+        <Section title={app.challenge ? "Who could solve it" : "Mandate"}>
           {app.mandate ? (
             <KV
               rows={[
                 ["Sectors", app.mandate.sectors.join(", ")],
                 ["Countries", app.mandate.countries.join(", ")],
                 ["Stages", app.mandate.stages.join(", ")],
-                ["Ticket", `${compact(app.mandate.ticketMin, app.mandate.currency)} to ${compact(app.mandate.ticketMax, app.mandate.currency)}`],
-                ["Instruments", app.mandate.instruments.join(", ")],
+                [app.challenge ? "Contract size" : "Ticket", `${compact(app.mandate.ticketMin, app.mandate.currency)} to ${compact(app.mandate.ticketMax, app.mandate.currency)}`],
+                ["Pathways", app.mandate.instruments.join(", ")],
                 ["Exclusions", app.mandate.exclusions.join(", ") || "None"],
                 ["Decision timeline", app.mandate.timeline || "–"],
                 ["Meeting caps", app.caps ? `${app.caps.perDay} a day, ${app.caps.perEvent} in all` : "–"],
@@ -295,6 +317,7 @@ function ApplicationTab({ app }: { app: DrApplication }) {
             <Empty>Not filled in yet.</Empty>
           )}
         </Section>
+        </>
       )}
       <Section title={`Documents, ${app.documents.length}`}>
         {app.documents.length ? app.documents.map((d) => <DocLine key={d.id} doc={d} />) : <Empty>No documents yet.</Empty>}
@@ -393,13 +416,13 @@ function Requests({ app }: { app: DrApplication }) {
 
 function RfiExpiry({ app }: { app: DrApplication }) {
   const { dispatch } = useDr();
-  const [how, setHow] = useState<"Extended" | "Waitlisted" | "Declined" | "Withdrawn">("Extended");
+  const [how, setHow] = useState<"Extended" | "Referred" | "Declined" | "Withdrawn">("Extended");
   const [note, setNote] = useState("");
   return (
     <span className="mt-2 flex flex-wrap items-center gap-2">
       <select className="input h-8 w-auto text-[13px]" value={how} onChange={(e) => setHow(e.target.value as typeof how)}>
         <option value="Extended">Extend by a full period</option>
-        <option value="Waitlisted">Waitlist</option>
+        <option value="Referred">Refer elsewhere</option>
         <option value="Declined">Decline</option>
         <option value="Withdrawn">Treat as withdrawn</option>
       </select>
@@ -415,7 +438,7 @@ function RfiExpiry({ app }: { app: DrApplication }) {
 
 function DecisionTab({ app }: { app: DrApplication }) {
   const { dr, cfg, me, can, dispatch } = useDr();
-  const [decision, setDecision] = useState<Decision>("Approved");
+  const [decision, setDecision] = useState<Decision>("Qualified");
   const [reason, setReason] = useState("");
   const [conds, setConds] = useState([{ text: "", due: "" }]);
   if (!cfg) return null;
@@ -465,6 +488,8 @@ function DecisionTab({ app }: { app: DrApplication }) {
             <Empty>No decision yet.</Empty>
           )}
         </Section>
+
+        {qualified(app) && app.fee && <FeePanel app={app} />}
 
         {qualified(app) && (
           <Section title="Readiness" action={<ReadinessPill app={app} />}>
@@ -574,6 +599,36 @@ function DecisionTab({ app }: { app: DrApplication }) {
 }
 
 /* ---------- the teaser (tier 1) ---------- */
+
+/** The participation fee: owed since the decision, paid, or waived by the lead with a reason. Matching waits for it. */
+function FeePanel({ app }: { app: DrApplication }) {
+  const { dr, me, dispatch } = useDr();
+  const [reason, setReason] = useState("");
+  const f = app.fee!;
+  const owed = feeOwed(app);
+  return (
+    <Section title="Participation fee" action={<span className={`pill ${owed ? "bg-warn-50 text-warn" : "bg-ok-50 text-ok"}`}>{f.paid ? "Paid" : f.waived ? "Waived" : "Not paid"}</span>}>
+      <p className="text-[14px]">
+        {feeLabel(f)}, link sent {fmtStamp(f.sentAt)}
+        {f.reminderAt ? `, reminded ${fmtStamp(f.reminderAt)}` : ""}.{" "}
+        {f.paid
+          ? `Paid by ${f.paid.method}${f.paid.kes ? ` (KES ${f.paid.kes.toLocaleString("en")})` : ""} on ${fmtStamp(f.paid.at)}, reference ${f.paid.reference}.`
+          : f.waived
+            ? `Waived by ${staffName(dr, f.waived.by)} on ${fmtStamp(f.waived.at)}: ${f.waived.reason}`
+            : `Not paid yet: no badge, and no matching or introductions until it is. By M-Pesa it is KES ${feeInKes(f).toLocaleString("en")}.`}
+      </p>
+      {owed && me?.role === "Lead" && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <input className="input h-9 flex-1 min-w-56 text-[13px]" placeholder="Why it is waived, for example a sponsored place" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <button className="btn-secondary btn-sm" disabled={!reason.trim()} onClick={() => { dispatch({ type: "dr/waiveFee", appId: app.id, reason }); setReason(""); }}>
+            Waive the fee
+          </button>
+        </div>
+      )}
+      {owed && me?.role !== "Lead" && <p className="mt-2 text-[13px] text-slate">Only the lead can waive it.</p>}
+    </Section>
+  );
+}
 
 function TeaserTab({ app }: { app: DrApplication }) {
   const { dr, cfg, can, dispatch } = useDr();

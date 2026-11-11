@@ -4,7 +4,32 @@ What the prototype covers of the 63 use cases in [02-Deal-Room-Stakeholders-and-
 
 **Built** means the use case works end to end on mock data, with its rules enforced in the reducer. **Partial** means the screen exists but a step is simulated or missing. **Not built** means nothing on screen.
 
-The demo runs on Connected Africa 3.0 (Bouer, 15 to 18 March 2027) with a demo clock in the staff rail, set to summit day 2 at 10:40. Its steps are +25 minutes, 19:00, 15 June and 19 September. The clock only moves forward; expiries, lapses and overdue flags are worked out from it.
+The demo runs on Connected Africa 3.0 (Bouer, 15 to 18 February 2027; applications open 15 December 2026) with a demo clock in the staff rail, set to summit day 2 at 10:40. Its steps are +25 minutes, 19:00, 18 May and 22 August. The clock only moves forward; expiries, lapses and overdue flags are worked out from it.
+
+## Added for the Vis a Vis decision paper (11 November 2026)
+
+Branch `deal-room-vis-a-vis` brings the module into the paper's terms and scope. Item by item against the paper, in [deal-room-vis-a-vis-gaps.md](deal-room-vis-a-vis-gaps.md).
+
+| Area | What is built | Where |
+| --- | --- | --- |
+| Dates | Everything 28 days earlier, same weekdays: summit 15 to 18 February 2027, applications from 15 December 2026, design freeze 22 January, tracking to 21 August | Seed and settings |
+| Vocabulary | 3 missions and 6 strategic tracks; the 19-sector taxonomy; 10 participant kinds, from angel investor to public institution; 8 transaction pathways; Qualified, Conditional, Referred, Declined; the rubric's relevance, credibility, readiness, counterparty fit and consent | Every screen, the apply form and the public page |
+| Participation fee | Approval sends a USD 250 payment link; M-Pesa (KES at 130) or card; one reminder after 3 days; the lead may waive it with a reason. Paying or the waiver issues the badge and opens matching; an unpaid seeker is flagged and cannot be matched | Portal Status, review page, Settings, dashboard |
+| Challenge intake | A public institution or corporate buyer brings a challenge: problem, users, outcome, constraints, route (RFP, pilot, PPP, …), budget, timeline, decision process. Verified like a provider, then matched against businesses on sector, country and stage, with pathway and ticket as preferences. Verified challenges are listed on the public page | Apply `?type=challenge`, portal Challenge tab, review page, public page |
+| One pipeline | Every opportunity owner at the furthest of the paper's 13 statuses its records support, with the date, the owner and the evidence; counts per status as filters; the five commitment tiers reported apart; CSV | `/dealroom/pipeline` |
+| Roles | Excursia's coordinator matches, introduces, schedules and runs the programme; Momentum's oversight reads the dashboard, pipeline, programme and every report, with values, and changes nothing | Staff switcher, `/admin/deal-room` |
+| Meeting outcomes and tiers | The paper's seven outcomes; commitments as expression of interest, indicative, signed, approved not disbursed, deployed | Live board, opportunities, reports |
+| Sessions | The paper's 11 formats beyond one-to-ones, planned by day in the presentation area and the roundtable room; each day's emphasis and close-out checks; invitations to qualified or verified participants, accepted or declined from the portal; attendance and an outcome per attendee. An accepted session holds the participant's time against meetings, and a meeting holds it against sessions | `/dealroom/programme`, portal Programme tab |
+
+**Phones, for the summit days.** Checked at 375 wide:
+- **Menus:** a menu of more than four pages becomes a drawer behind an icon-only bar, for staff (every persona's rail) and for the participant portal.
+- **Live board:** a meeting opens in a sheet from the bottom, and each room's row opens on the meeting happening now or next.
+- **Sessions:** cards with a large attendance tick, and a saved outcome reads as saved, with Change.
+- **Dashboard:** cards and counts sit two to a row.
+
+Each role's attention list holds only its own work, and no dashboard or report link leads to a page the role cannot open.
+
+Not done from the paper: post-summit tracking as an add-on that is off unless contracted (it still runs six months), the four movements as a reporting tag, the 19:00 report carrying the day's close-out checks, and the zones beyond the two session rooms.
 
 ## Algotech admin (DA)
 
@@ -127,4 +152,5 @@ The demo runs on Connected Africa 3.0 (Bouer, 15 to 18 March 2027) with a demo c
 - **Files.** Documents keep their metadata only; previews and downloads are stand-ins.
 - **Sign-in.** A fixed one-time code for participants and a staff switcher in the rail; no MFA in practice.
 - **Infrastructure.** No backup, recovery, capacity test, alerting or handover.
-- **Time.** The demo clock replaces the wall clock; the seeded opportunities play a fixed timeline as it passes June and September.
+- **Time.** The demo clock replaces the wall clock; the seeded opportunities play a fixed timeline as it passes May and August.
+- **Payments.** The participation fee is simulated: no M-Pesa or card gateway is called, and the reference is made up.

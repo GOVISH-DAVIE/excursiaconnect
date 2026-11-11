@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import { initials, readableOn } from "@/lib/brand";
-import { askBand, compact, decisionOf, matchStage, missionName, openConditions, openRfi, profileDeadline, publicStatus, qualified, rfiDue } from "@/lib/dealroom/logic";
+import { PATHWAYS, formatInfo, askBand, compact, decisionOf, feeInKes, feeLabel, feeOwed, feeSettled, matchStage, missionName, openConditions, openRfi, profileDeadline, publicStatus, qualified, rfiDue } from "@/lib/dealroom/logic";
 import type { DrApplication, DrDocument, Instrument, KycItem } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
 import { ApplicantStatus, DocLine, UploadDoc } from "@/app/dealroom/bits";
-import { MandateFields } from "@/app/e/[slug]/deal-room/apply/apply";
+import { ChallengeFields, MandateFields } from "@/app/e/[slug]/deal-room/apply/apply";
 import { AccessLog, Deals, Directory, Introductions, Meetings } from "./deals";
+import { acceptProblems } from "@/lib/dealroom/sessions";
 
 /*
   The participant's own page: what they applied with, where it stands, what is asked of them.
@@ -17,14 +19,15 @@ import { AccessLog, Deals, Directory, Introductions, Meetings } from "./deals";
   introductions open from this page once the participant is verified or Deal Room Ready.
 */
 
-type Tab = "Status" | "Profile" | "Directory" | "Introductions" | "Meetings" | "Deals" | "Documents" | "Access log" | "Verification" | "Mandate" | "Messages";
-const INSTRUMENTS: Instrument[] = ["Equity", "Debt", "Mezzanine", "Grant", "Trade finance", "Other"];
+type Tab = "Status" | "Profile" | "Directory" | "Introductions" | "Meetings" | "Programme" | "Deals" | "Documents" | "Access log" | "Verification" | "Challenge" | "Mandate" | "Messages";
+const INSTRUMENTS: Instrument[] = PATHWAYS;
 
 export function Portal({ id }: { id: string }) {
   const { state, hydrated } = useStore();
   const dr = state.dealRoom;
   const app = dr.apps.find((a) => a.id === id);
-  const [tab, setTab] = useState<Tab>("Status");
+  const [picked, setTab] = useState<Tab | null>(null);
+  const q = useSearchParams();
   if (!app) return <div className="p-10 text-slate">{hydrated ? "No application here. Check the link in your email." : "Loading…"}</div>;
   const event = state.events.find((e) => e.id === app.eventId)!;
   const accent = event.brand.primary;
@@ -35,12 +38,19 @@ export function Portal({ id }: { id: string }) {
   const tabs: Tab[] =
     app.type === "seeker"
       ? ["Status", ...(qualified(app) ? (["Profile", "Introductions", "Meetings"] as Tab[]) : []), "Documents", ...(qualified(app) ? (["Access log"] as Tab[]) : []), "Messages"]
-      : ["Status", ...(verified ? (["Directory", "Introductions", "Meetings"] as Tab[]) : []), "Verification", "Mandate", "Messages"];
+      : ["Status", ...(verified ? (["Directory", "Introductions", "Meetings"] as Tab[]) : []), "Verification", ...(app.challenge ? (["Challenge"] as Tab[]) : []), "Mandate", "Messages"];
   const waiting = mine.filter((m) => !m.intro![app.type] && matchStage(m, dr.configs[app.eventId], dr.clock) === "Introduced").length;
   const deals = dr.opportunities.filter((o) => mine.some((m) => m.id === o.matchId));
   const asked = deals.filter((o) => o.requests.some((r) => r.to === app.type && !r.answeredAt)).length;
-  if (deals.length) tabs.splice(tabs.indexOf("Meetings") + 1, 0, "Deals");
+  // sessions they host or are invited to, in the paper's formats beyond one-to-ones
+  const programme = dr.sessions.filter((x) => x.host === app.id || x.invitees.includes(app.id));
+  const unanswered = programme.filter((x) => !x.cancelled && x.host !== app.id && !x.responses[app.id] && x.start > dr.clock).length;
+  if (programme.length) tabs.splice(tabs.includes("Meetings") ? tabs.indexOf("Meetings") + 1 : 1, 0, "Programme");
+  if (deals.length) tabs.splice(tabs.indexOf(tabs.includes("Programme") ? "Programme" : "Meetings") + 1, 0, "Deals");
   const messages = dr.outbox.filter((m) => m.to === app.id).length;
+  const count: Partial<Record<Tab, number>> = { Messages: messages, Introductions: waiting, Deals: asked, Programme: unanswered };
+  // a link in an email can open a tab: /dr/{id}?tab=Programme
+  const tab: Tab = picked ?? (tabs.find((t) => t === q.get("tab")) || "Status");
 
   return (
     <div className="min-h-screen bg-paper brand" style={{ "--accent": accent, "--accent-ink": accentInk } as React.CSSProperties}>
@@ -57,13 +67,13 @@ export function Portal({ id }: { id: string }) {
           </div>
           <ApplicantStatus app={app} />
         </div>
-        <nav className="mx-auto max-w-3xl px-3 flex gap-1 overflow-x-auto" aria-label="Sections">
+        {/* more than four sections: a Menu button and a drawer on a phone; tabs from 640px */}
+        {tabs.length > 4 && <SectionMenu tabs={tabs} tab={tab} onPick={setTab} count={(t) => count[t] ?? 0} accent={accent} accentInk={accentInk} />}
+        <nav className={`mx-auto max-w-3xl px-3 gap-1 overflow-x-auto ${tabs.length > 4 ? "hidden sm:flex" : "flex"}`} aria-label="Sections">
           {tabs.map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={`px-3 py-2.5 text-[14px] whitespace-nowrap border-b-2 ${tab === t ? "border-current font-medium" : "border-transparent opacity-75"}`}>
+            <button key={t} onClick={() => setTab(t)} aria-current={tab === t ? "page" : undefined} className={`px-3 py-2.5 text-[14px] whitespace-nowrap border-b-2 ${tab === t ? "border-current font-medium" : "border-transparent opacity-75"}`}>
               {t}
-              {t === "Messages" && messages > 0 && <span className="ml-1 opacity-70">{messages}</span>}
-              {t === "Introductions" && waiting > 0 && <span className="ml-1 opacity-70">{waiting}</span>}
-              {t === "Deals" && asked > 0 && <span className="ml-1 opacity-70">{asked}</span>}
+              {(count[t] ?? 0) > 0 && <span className="ml-1 opacity-70">{count[t]}</span>}
             </button>
           ))}
         </nav>
@@ -82,13 +92,64 @@ export function Portal({ id }: { id: string }) {
         {tab === "Directory" && <Directory app={app} />}
         {tab === "Introductions" && <Introductions app={app} />}
         {tab === "Meetings" && <Meetings app={app} />}
+        {tab === "Programme" && <Programme app={app} />}
         {tab === "Deals" && <Deals app={app} />}
         {tab === "Documents" && <Documents app={app} />}
         {tab === "Access log" && <AccessLog app={app} />}
         {tab === "Verification" && <Verification app={app} />}
+        {tab === "Challenge" && <Challenge app={app} />}
         {tab === "Mandate" && <Mandate app={app} />}
         {tab === "Messages" && <Messages app={app} />}
       </main>
+    </div>
+  );
+}
+
+/** The portal's sections on a phone: the current one named in the header, all of them in a drawer. */
+function SectionMenu({ tabs, tab, onPick, count, accent, accentInk }: { tabs: Tab[]; tab: Tab; onPick: (t: Tab) => void; count: (t: Tab) => number; accent: string; accentInk: string }) {
+  const [open, setOpen] = useState(false);
+  const waiting = tabs.reduce((n, t) => n + (t === "Messages" ? 0 : count(t)), 0);
+  return (
+    <div className="mx-auto max-w-3xl px-5 pb-3 sm:hidden">
+      <button className="flex h-11 w-full items-center justify-between rounded-md px-3 text-[15px] font-medium" style={{ background: "rgba(255,255,255,0.14)" }} aria-expanded={open} aria-controls="section-menu" onClick={() => setOpen(true)}>
+        <span>
+          {tab}
+          {count(tab) > 0 && <span className="ml-1.5 opacity-70">{count(tab)}</span>}
+        </span>
+        <span className="flex items-center gap-2 text-[14px]">
+          {waiting > 0 && <span className="rounded-full px-2 text-[12px]" style={{ background: accentInk, color: accent }}>{waiting} waiting</span>}
+          Menu
+        </span>
+      </button>
+      {open && (
+        <>
+          <button className="fixed inset-0 z-50 bg-black/45" aria-label="Close the menu" onClick={() => setOpen(false)} />
+          <div id="section-menu" role="dialog" aria-modal="true" aria-label="Sections" className="fixed inset-y-0 left-0 z-50 flex w-[84vw] max-w-[320px] flex-col overflow-y-auto bg-white text-ink shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4" style={{ background: accent, color: accentInk }}>
+              <span className="font-medium">Sections</span>
+              <button className="h-10 rounded-md px-3 text-[14px]" style={{ background: "rgba(255,255,255,0.18)" }} onClick={() => setOpen(false)} autoFocus>
+                Close
+              </button>
+            </div>
+            <nav className="flex flex-col p-2" aria-label="Sections">
+              {tabs.map((t) => (
+                <button
+                  key={t}
+                  aria-current={tab === t ? "page" : undefined}
+                  onClick={() => {
+                    onPick(t);
+                    setOpen(false);
+                  }}
+                  className={`flex min-h-12 items-center justify-between rounded-md px-3 text-left text-[15px] ${tab === t ? "bg-paper-200 font-medium" : "hover:bg-paper"}`}
+                >
+                  {t}
+                  {count(t) > 0 && <span className="pill bg-coral-50 text-coral-600">{count(t)}</span>}
+                </button>
+              ))}
+            </nav>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -123,6 +184,7 @@ function Status({ app }: { app: DrApplication }) {
           ["Submitted", !!app.ref],
           ["In review", !!app.firstReviewAt],
           ["Decided", app.status === "Decided"],
+          ...(app.fee ? ([["Fee paid", feeSettled(app)]] as [string, boolean][]) : []),
           ["Profile completed", !!app.profileCompletedAt],
           ["Deal Room Ready", app.readiness === "Deal Room Ready" && qualified(app)],
         ]
@@ -144,7 +206,7 @@ function Status({ app }: { app: DrApplication }) {
           <div className="text-[13px] text-slate text-right">
             Last change {fmtStamp(app.statusAt)}
             <div>
-              {app.type === "seeker" ? "Capital seeker" : app.providerKind} · {missionName(cfg, app.mission) || "no mission yet"}
+              {app.type === "seeker" ? "Capital seeker" : app.challenge ? `Challenge, ${app.providerKind?.toLowerCase() ?? "institution"}` : app.providerKind} · {missionName(cfg, app.mission) || "no mission yet"}
             </div>
           </div>
         </div>
@@ -168,6 +230,8 @@ function Status({ app }: { app: DrApplication }) {
         </Card>
       )}
 
+      {app.type === "seeker" && app.fee && qualified(app) && <FeeCard app={app} />}
+
       {rfi && <RfiResponse app={app} due={rfiDue(rfi, cfg)} />}
 
       {app.reReview && <Card title="Your change is being reviewed">You changed {app.reReview.fields.map((f) => f.split(".")[1]).join(", ")} on {fmtStamp(app.reReview.at)}. Your {app.type === "seeker" ? "approval" : "verification"} stands meanwhile; no introductions are made until the review is done.</Card>}
@@ -177,7 +241,7 @@ function Status({ app }: { app: DrApplication }) {
           <p className="text-[15px]">
             <b className="font-medium">{d.decision}.</b> {d.reason}
           </p>
-          {d.decision === "Waitlisted" && <p className="mt-2 text-[14px] text-slate">The Deal Room team can reopen your application if a place is released. You will hear by email and SMS.</p>}
+          {d.decision === "Referred" && <p className="mt-2 text-[14px] text-slate">The Deal Room team has referred your opportunity on, as the reason says. You can apply again once it is ready.</p>}
           {d.conditions.length > 0 && (
             <ul className="mt-3 space-y-2">
               {d.conditions.map((c) => (
@@ -205,13 +269,86 @@ function Status({ app }: { app: DrApplication }) {
 
       {badge && (
         <Card title="Your summit badge">
-          <p className="text-[14px] text-slate">Issued with your {app.type === "seeker" ? "approval" : "verification"}. Show it at the Deal Room desk to check in for your meetings.</p>
+          <p className="text-[14px] text-slate">Issued with your {app.type === "seeker" ? (app.fee ? "approval, once the fee was settled" : "approval") : "verification"}. Show it at the Deal Room desk to check in for your meetings.</p>
           <Link className="btn-secondary mt-3 inline-flex" href={`/badge/${badge.id}`}>
             Open my badge, {badge.badgeCode}
           </Link>
         </Card>
       )}
     </>
+  );
+}
+
+/** The participation fee an approved seeker pays to be matched and get the badge. Payments are simulated. */
+function FeeCard({ app }: { app: DrApplication }) {
+  const { dispatch } = useStore();
+  const f = app.fee!;
+  const [method, setMethod] = useState<"M-Pesa" | "Card">("M-Pesa");
+  const [phone, setPhone] = useState(app.contact.phone);
+  const [pushed, setPushed] = useState(false);
+  if (f.paid)
+    return (
+      <Card title="Participation fee paid">
+        <p className="text-[14px] text-slate">
+          {feeLabel(f)} by {f.paid.method}
+          {f.paid.kes ? ` (KES ${f.paid.kes.toLocaleString("en")})` : ""} on {fmtStamp(f.paid.at)}, reference {f.paid.reference}.
+        </p>
+      </Card>
+    );
+  if (f.waived)
+    return (
+      <Card title="Participation fee waived">
+        <p className="text-[14px] text-slate">The Deal Room team waived the fee: {f.waived.reason}</p>
+      </Card>
+    );
+  const pay = (m: "M-Pesa" | "Card") => {
+    // the prototype stands in for the M-Pesa callback or the card processor's confirmation
+    const ref = m === "M-Pesa" ? `R${Date.now().toString(36).toUpperCase().slice(-8)}` : `PSK_${Date.now().toString(16).slice(-8)}`;
+    dispatch({ type: "dr/payFee", appId: app.id, method: m, reference: ref });
+    setPushed(false);
+  };
+  return (
+    <Card title="Pay the participation fee" aside={<span className="pill bg-warn-50 text-warn">{feeLabel(f)} due</span>}>
+      <p className="text-[15px]">
+        You are approved. Pay the {feeLabel(f)} participation fee to be matched with investors and partners and to get your Deal Room badge. The link was sent {fmtStamp(f.sentAt)}
+        {f.reminderAt ? `, with a reminder ${fmtStamp(f.reminderAt)}` : ""}.
+      </p>
+      <div className="mt-3 flex gap-2" role="radiogroup" aria-label="Pay by">
+        {(["M-Pesa", "Card"] as const).map((m) => (
+          <button key={m} role="radio" aria-checked={method === m} className={`min-h-11 rounded-full px-4 text-[14px] font-medium ${method === m ? "bg-ink text-white" : "bg-paper-200 text-slate"}`} onClick={() => { setMethod(m); setPushed(false); }}>
+            {m === "M-Pesa" ? `M-Pesa, KES ${feeInKes(f).toLocaleString("en")}` : `Card, ${feeLabel(f)}`}
+          </button>
+        ))}
+      </div>
+      {method === "M-Pesa" ? (
+        pushed ? (
+          <div className="mt-3 rounded-md bg-paper px-3 py-3 text-[14px]">
+            A prompt for KES {feeInKes(f).toLocaleString("en")} is on {phone}. Enter your M-Pesa PIN on the phone.
+            <button className="btn-primary btn-sm ml-3" onClick={() => pay("M-Pesa")}>
+              Prototype: confirm on the phone
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="block">
+              <span className="label">M-Pesa number</span>
+              <input className="input h-10 w-56" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </label>
+            <button className="btn-primary h-10" disabled={phone.replace(/\D/g, "").length < 9} onClick={() => setPushed(true)}>
+              Send the M-Pesa prompt
+            </button>
+          </div>
+        )
+      ) : (
+        <div className="mt-3">
+          <button className="btn-primary" onClick={() => pay("Card")}>
+            Pay {feeLabel(f)} by card
+          </button>
+          <p className="mt-1 text-[13px] text-slate">Visa or Mastercard, on the payment processor&apos;s secure page.</p>
+        </div>
+      )}
+      {feeOwed(app) && <p className="mt-3 text-[13px] text-slate">Until it is paid you are not matched or introduced, and the Deal Room desk cannot check you in.</p>}
+    </Card>
   );
 }
 
@@ -302,7 +439,7 @@ function Profile({ app }: { app: DrApplication }) {
             </select>
           </label>
           <label className="block">
-            <span className="label">Instrument</span>
+            <span className="label">Transaction pathway</span>
             <select className="input" value={ask.instrument} onChange={(e) => setAsk({ ...ask, instrument: e.target.value as Instrument })}>
               {INSTRUMENTS.map((x) => (
                 <option key={x}>{x}</option>
@@ -436,6 +573,84 @@ function Mandate({ app }: { app: DrApplication }) {
         {saved && <span className="text-[13px] text-slate">Saved.</span>}
       </div>
     </>
+  );
+}
+
+/** The challenge an institution or buyer brought; editable until and after verification, with the change on record. */
+function Challenge({ app }: { app: DrApplication }) {
+  const { dispatch } = useStore();
+  const [draft, setDraft] = useState(app.challenge!);
+  const [saved, setSaved] = useState(false);
+  return (
+    <>
+      <ChallengeFields c={draft} onChange={(c) => { setDraft(c); setSaved(false); }} />
+      <div className="flex items-center gap-3">
+        <button className="btn-primary" onClick={() => { dispatch({ type: "dr/updateProfile", appId: app.id, patch: { challenge: draft } }); setSaved(true); }}>
+          Save the challenge
+        </button>
+        {saved && <span className="text-[13px] text-slate">Saved.</span>}
+      </div>
+    </>
+  );
+}
+
+/** The sessions this participant hosts or is invited to; an invitation is accepted or declined here. */
+function Programme({ app }: { app: DrApplication }) {
+  const { state, dispatch } = useStore();
+  const dr = state.dealRoom;
+  const now = dr.clock;
+  const list = dr.sessions.filter((x) => x.host === app.id || x.invitees.includes(app.id)).sort((a, b) => a.start.localeCompare(b.start));
+  return (
+    <Card title="Your programme">
+      <p className="-mt-1 mb-3 text-[13px] text-slate">Sessions beyond your one-to-one meetings. Accepting holds the time, so no meeting is booked over it.</p>
+      <ul className="divide-y divide-line">
+        {list.map((x) => {
+          const host = x.host === app.id;
+          const r = x.responses[app.id];
+          const problems = acceptProblems(dr, x, app.id);
+          const past = x.start <= now;
+          const room = state.rooms.find((rm) => rm.id === x.roomId)?.name ?? x.roomId;
+          return (
+            <li key={x.id} className="py-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[12px] text-slate">{formatInfo(x.format).short}</div>
+                  <div className="font-medium">{x.title}</div>
+                  <div className="text-[13px] text-slate">
+                    {fmtStamp(x.start)} to {x.end.slice(11)} · {room}
+                    {x.host && !host ? ` · hosted by ${dr.apps.find((a) => a.id === x.host)?.org.name}` : ""}
+                  </div>
+                </div>
+                <span className="text-[13px]">
+                  {x.cancelled ? <span className="text-bad">Cancelled</span> : host ? "You are hosting" : r ? (r.answer === "Accepted" ? "You accepted" : "You declined") : past ? "Not answered" : "Invited"}
+                </span>
+              </div>
+              {x.cancelled && <p className="mt-1 text-[13px] text-slate">{x.cancelled.reason}</p>}
+              {!x.cancelled && !host && !past && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {r?.answer !== "Accepted" && (
+                    <button className="btn-primary btn-sm" disabled={problems.length > 0} onClick={() => dispatch({ type: "dr/sessionRespond", sessionId: x.id, appId: app.id, answer: "Accepted" })}>
+                      Accept
+                    </button>
+                  )}
+                  {r?.answer !== "Declined" && (
+                    <button className="btn-secondary btn-sm" onClick={() => dispatch({ type: "dr/sessionRespond", sessionId: x.id, appId: app.id, answer: "Declined" })}>
+                      {r?.answer === "Accepted" ? "I can no longer come" : "Decline"}
+                    </button>
+                  )}
+                  {r?.answer !== "Accepted" && problems.length > 0 && <span className="text-[13px] text-warn">{problems[0]}</span>}
+                </div>
+              )}
+              {past && !x.cancelled && x.attended.includes(app.id) && (
+                <p className="mt-1 text-[13px] text-slate">
+                  Attended{x.outcomes.find((o) => o.appId === app.id) ? `. Next: ${x.outcomes.find((o) => o.appId === app.id)!.category.toLowerCase()}` : ""}
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
   );
 }
 

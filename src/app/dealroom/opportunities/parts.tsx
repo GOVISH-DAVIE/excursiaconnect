@@ -8,13 +8,14 @@ import { Pill } from "../bits";
 const tone: Record<OppStage, "ok" | "okSolid" | "warn" | "bad" | "mute" | "coral"> = { "Follow-up": "coral", Diligence: "warn", Negotiation: "warn", "Closed – won": "okSolid", "Closed – lost": "mute" };
 export const OppStagePill = ({ stage }: { stage: OppStage }) => <Pill tone={tone[stage]}>{stage}</Pill>;
 
-/** The furthest evidenced value: received, then committed, then promised. Never added together. */
+/** The furthest evidenced tier: deployed, approved, signed, then indicative. Never added together (the paper's reporting rule). */
 export function headline(o: DrOpportunity) {
-  for (const k of ["Funds received", "Commitment", "Promise"] as OutcomeKind[]) {
+  const words: Partial<Record<OutcomeKind, string>> = { Deployed: "Deployed", "Approved, not disbursed": "Approved, not disbursed", "Signed commitment": "Signed", "Indicative commitment": "Indicative" };
+  for (const k of ["Deployed", "Approved, not disbursed", "Signed commitment", "Indicative commitment"] as OutcomeKind[]) {
     const xs = o.outcomes.filter((x) => x.kind === k && x.amount);
-    if (xs.length) return `${k === "Commitment" ? "Committed" : k === "Promise" ? "Promised" : "Received"} ${compact(xs.reduce((n, x) => n + (x.amount ?? 0), 0), xs[0].currency)}`;
+    if (xs.length) return `${words[k]} ${compact(xs.reduce((n, x) => n + (x.amount ?? 0), 0), xs[0].currency)}`;
   }
-  return o.outcomes.some((x) => x.kind === "Interest") ? "Interest" : "–";
+  return o.outcomes.some((x) => x.kind === "Expression of interest") ? "Expression of interest" : "–";
 }
 
 export const oppTitle = (dr: DealRoomState, o: DrOpportunity) => {
@@ -26,11 +27,11 @@ export const oppTitle = (dr: DealRoomState, o: DrOpportunity) => {
 export function exportPack(dr: DealRoomState, cfg: DrConfig, opps: DrOpportunity[]) {
   const sum = (o: DrOpportunity, k: OutcomeKind) => o.outcomes.filter((x) => x.kind === k).reduce((n, x) => n + (x.amount ?? 0), 0) || "";
   const first = (o: DrOpportunity, k: OutcomeKind) => o.outcomes.find((x) => x.kind === k)?.date ?? "";
-  const head = ["Seeker ref", "Seeker", "Provider ref", "Provider", "Mission", "Sector", "Instrument", "Ask", "Currency", "Owner", "Stage", "Follow-up", "Diligence", "Negotiation", "Closed won", "Closed lost", "Close reason", "Next action", "Due", "Interest date", "Promised", "Promise date", "Committed", "Commitment date", "Received", "Received date", "Last activity", "Evidence date", "Reviews"];
+  const head = ["Seeker ref", "Seeker", "Provider ref", "Provider", "Mission", "Sector", "Pathway", "Ask", "Currency", "Owner", "Stage", "Follow-up", "Diligence", "Negotiation", "Closed won", "Closed lost", "Close reason", "Next action", "Due", "Expression of interest date", "Indicative", "Indicative date", "Signed", "Signed date", "Approved not disbursed", "Approved date", "Deployed", "Deployed date", "Last activity", "Evidence date", "Reviews"];
   const lines = opps.map((o) => {
     const { seeker: s, provider: p } = oppParties(dr, o);
     const d = (st: OppStage) => o.stageDates[st]?.slice(0, 10) ?? "";
-    return row([s?.ref, s?.org.name, p?.ref, p?.org.name, missionName(cfg, s?.mission ?? ""), s?.org.sector, s?.ask?.instrument, s?.ask?.amount, s?.ask?.currency, staffName(dr, o.owner), o.stage, d("Follow-up"), d("Diligence"), d("Negotiation"), d("Closed – won"), d("Closed – lost"), o.closed?.reason ?? "", o.nextAction, o.due, first(o, "Interest"), sum(o, "Promise"), first(o, "Promise"), sum(o, "Commitment"), first(o, "Commitment"), sum(o, "Funds received"), first(o, "Funds received"), lastActivity(o).slice(0, 10), evidenceDate(o) ?? "", o.reviews.map((r) => r.month).join(" ")]);
+    return row([s?.ref, s?.org.name, p?.ref, p?.org.name, missionName(cfg, s?.mission ?? ""), s?.org.sector, s?.ask?.instrument, s?.ask?.amount, s?.ask?.currency, staffName(dr, o.owner), o.stage, d("Follow-up"), d("Diligence"), d("Negotiation"), d("Closed – won"), d("Closed – lost"), o.closed?.reason ?? "", o.nextAction, o.due, first(o, "Expression of interest"), sum(o, "Indicative commitment"), first(o, "Indicative commitment"), sum(o, "Signed commitment"), first(o, "Signed commitment"), sum(o, "Approved, not disbursed"), first(o, "Approved, not disbursed"), sum(o, "Deployed"), first(o, "Deployed"), lastActivity(o).slice(0, 10), evidenceDate(o) ?? "", o.reviews.map((r) => r.month).join(" ")]);
   });
   downloadCsv(`deal-room-post-summit-pack-${dr.clock.slice(0, 10)}.csv`, [row(head), ...lines]);
 }

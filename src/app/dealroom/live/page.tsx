@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Empty, PageHeader, Section } from "@/components/ui";
 import { useStore } from "@/lib/store";
-import { DR_ZONE, boardFlag, bothAccepted, drCan, occupies, staffName } from "@/lib/dealroom/logic";
+import { DR_ZONE, MEETING_OUTCOMES, MEETING_OUTCOME_HELP, boardFlag, bothAccepted, drCan, occupies, staffName } from "@/lib/dealroom/logic";
 import type { DrMeeting, DrOutcome } from "@/lib/dealroom/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
 import { Refusal, useDr } from "../bits";
@@ -88,14 +88,14 @@ export default function LiveBoard() {
               The meeting of {fmtStamp(dr.meetings.find((m) => m.id === c.meetingId)?.start ?? "")} was recorded twice. Kept: <b className="font-medium">{c.kept.category}</b> ({staffName(dr, c.kept.by)}). From {c.incoming.device}: <b className="font-medium">{c.incoming.category}</b>
               {c.incoming.notes ? <>, &ldquo;{c.incoming.notes.replace(/\.+$/, "")}&rdquo;.</> : "."}
               {me?.role === "Lead" ? (
-                <span className="ml-2 inline-flex gap-2">
+                <div className="mt-2 flex flex-wrap gap-2">
                   <button className="btn-secondary btn-sm" onClick={() => dispatch({ type: "dr/resolveConflict", conflictId: c.id, chose: "kept" })}>
                     Keep the recorded one
                   </button>
                   <button className="btn-secondary btn-sm" onClick={() => dispatch({ type: "dr/resolveConflict", conflictId: c.id, chose: "incoming" })}>
                     Use the device&apos;s
                   </button>
-                </span>
+                </div>
               ) : (
                 <span className="ml-2 text-slate">The lead resolves it; nothing is overwritten silently.</span>
               )}
@@ -131,11 +131,11 @@ export default function LiveBoard() {
                     {r.name}
                     {cfg.rooms[r.id].tables > 1 ? `, table ${table}` : ""}
                   </div>
-                  <div className="flex gap-2 overflow-x-auto pb-1">
+                  <Row focus={list.find((m) => m.end > now)?.id}>
                     {list.map((m) => (
                       <Tile key={m.id} m={m} on={pick === m.id} onPick={() => setPick(m.id)} />
                     ))}
-                  </div>
+                  </Row>
                 </section>
               );
             }),
@@ -143,19 +143,54 @@ export default function LiveBoard() {
           {todays.some((m) => m.link) && (
             <section className="surface p-3">
               <div className="mb-2 text-[13px] font-medium">Online</div>
-              <div className="flex gap-2 overflow-x-auto">
+              <Row focus={todays.find((m) => m.link && m.end > now)?.id}>
                 {todays
                   .filter((m) => m.link)
                   .map((m) => (
                     <Tile key={m.id} m={m} on={pick === m.id} onPick={() => setPick(m.id)} />
                   ))}
-              </div>
+              </Row>
             </section>
           )}
         </div>
-        <div className="lg:sticky lg:top-4 self-start">{picked ? <Actions key={picked.id} m={picked} /> : <Empty>Tap a meeting to mark it in progress, record its outcome or refill a no-show.</Empty>}</div>
+        {/* beside the board on a wide screen; on a phone, a sheet from the bottom, so a tap is answered where the thumb is */}
+        {picked && <button className="fixed inset-0 z-30 bg-black/25 lg:hidden" aria-label="Close the meeting" onClick={() => setPick(null)} />}
+        <div
+          className={
+            picked
+              ? "fixed inset-x-0 bottom-0 z-40 max-h-[78vh] overflow-y-auto rounded-t-2xl bg-paper p-3 pb-6 shadow-[0_-8px_30px_rgba(0,0,0,0.15)] lg:sticky lg:bottom-auto lg:left-auto lg:right-auto lg:top-4 lg:z-auto lg:max-h-none lg:overflow-visible lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none self-start"
+              : "hidden lg:block lg:sticky lg:top-4 self-start"
+          }
+          role={picked ? "dialog" : undefined}
+          aria-label={picked ? `Meeting at ${picked.start.slice(11)}` : undefined}
+        >
+          {picked && (
+            <div className="relative mb-2 flex h-11 items-center justify-center lg:hidden">
+              <span className="h-1 w-10 rounded-full bg-line" aria-hidden="true" />
+              <button className="btn-secondary btn-sm absolute right-0 top-0" onClick={() => setPick(null)}>
+                Close
+              </button>
+            </div>
+          )}
+          {picked ? <Actions key={picked.id} m={picked} /> : <Empty>Tap a meeting to mark it in progress, record its outcome or refill a no-show.</Empty>}
+        </div>
       </div>
     </>
+  );
+}
+
+/** A room's day as a row of meetings; it opens scrolled to the one happening now or next, not to 09:00. */
+function Row({ focus, children }: { focus?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const row = ref.current;
+    const tile = focus ? row?.querySelector<HTMLElement>(`[data-meeting="${focus}"]`) : null;
+    if (row && tile) row.scrollLeft = tile.offsetLeft - row.offsetLeft - 4;
+  }, [focus]);
+  return (
+    <div ref={ref} className="flex snap-x gap-2 overflow-x-auto pb-1">
+      {children}
+    </div>
   );
 }
 
@@ -165,7 +200,7 @@ function Tile({ m, on, onPick }: { m: DrMeeting; on: boolean; onPick: () => void
   const flag = boardFlag(m, cfg!, now);
   const nowish = m.start <= now && now < m.end;
   return (
-    <button onClick={onPick} className={`shrink-0 w-44 text-left rounded-md border px-2.5 py-2 text-[12px] ${on ? "border-ink" : flag?.kind === "no-show" ? "border-bad" : flag ? "border-warn" : nowish ? "border-ok" : "border-line"} ${m.status === "Held" ? "bg-paper" : "bg-white"}`}>
+    <button data-meeting={m.id} onClick={onPick} className={`shrink-0 snap-start w-44 text-left rounded-md border px-2.5 py-2 text-[12px] ${on ? "border-ink" : flag?.kind === "no-show" ? "border-bad" : flag ? "border-warn" : nowish ? "border-ok" : "border-line"} ${m.status === "Held" ? "bg-paper" : "bg-white"}`}>
       <div className="flex items-center justify-between gap-1">
         <span className="font-medium tabular-nums">{m.start.slice(11)}</span>
         <MeetingPill m={m} />
@@ -186,7 +221,7 @@ function Actions({ m }: { m: DrMeeting }) {
   const p = dr.apps.find((a) => a.id === mm.providerId)!;
   const [attendance, setAttendance] = useState<"Held" | "No-show">("Held");
   const [noShow, setNoShow] = useState<"seeker" | "provider" | "both">(m.arrivals.seeker ? "provider" : m.arrivals.provider ? "seeker" : "both");
-  const [o, setO] = useState<Omit<DrOutcome, "by" | "at" | "clientId">>({ category: "Positive", nextAction: "", owner: s.assignee ?? "st_lead", due: addMinutes(now, 7 * 1440).slice(0, 10), notes: "", sensitive: false });
+  const [o, setO] = useState<Omit<DrOutcome, "by" | "at" | "clientId">>({ category: "Follow-up meeting", nextAction: "", owner: s.assignee ?? "st_lead", due: addMinutes(now, 7 * 1440).slice(0, 10), notes: "", sensitive: false });
   const owners = dr.staff.filter((x) => x.active && x.role !== "Operations");
   const present = m.status === "No-show" ? (m.noShow === "seeker" ? p : m.noShow === "provider" ? s : undefined) : undefined;
   const refill = present ? dr.matches.filter((x) => bothAccepted(x) && (x.seekerId === present.id || x.providerId === present.id) && x.id !== mm.id && !dr.meetings.some((y) => y.matchId === x.id && (occupies(y, cfg!, now) || y.status === "Held"))) : [];
@@ -244,9 +279,11 @@ function Actions({ m }: { m: DrMeeting }) {
           ) : (
             <>
               <select className="input h-9 text-[13px]" value={o.category} onChange={(e) => setO({ ...o, category: e.target.value as DrOutcome["category"] })}>
-                <option>Positive</option>
-                <option>Follow-up needed</option>
-                <option>Not a fit</option>
+                {MEETING_OUTCOMES.map((c) => (
+                  <option key={c} title={MEETING_OUTCOME_HELP[c]}>
+                    {c}
+                  </option>
+                ))}
               </select>
               <input className="input h-9 text-[13px]" placeholder="Next action, for example send the data room link" value={o.nextAction} onChange={(e) => setO({ ...o, nextAction: e.target.value })} />
               <div className="grid grid-cols-2 gap-2">

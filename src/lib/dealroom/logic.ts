@@ -21,6 +21,13 @@ import type {
   DrOpportunity,
   OppStage,
   OutcomeKind,
+  Instrument,
+  MeetingOutcome,
+  OwnerKind,
+  ProviderKind,
+  ChallengeRoute,
+  DrSession,
+  SessionFormat,
 } from "./types";
 
 export const EV_CA3 = "ev_ca3";
@@ -51,6 +58,10 @@ const CAN: Record<DrStaff["role"], DrCap[]> = {
   Lead: ["configure", "assign", "import", "review", "decide", "readiness", "match", "introduce", "schedule", "overrideCap", "liveboard", "outcome", "conversion", "grantSupport", "export"],
   Reviewer: ["import", "review", "decide", "readiness", "match", "introduce", "outcome"],
   Operations: ["schedule", "overrideCap", "liveboard", "outcome"],
+  // Excursia's matchmaking and meeting coordination, on-site delivery and reporting; no qualification decisions
+  Coordinator: ["match", "introduce", "schedule", "overrideCap", "liveboard", "outcome", "conversion", "export"],
+  // Momentum's governance view: the dashboard, pipeline and reports, read-only; no files, no actions
+  Oversight: ["export"],
 };
 
 export function drCan(staff: DrStaff | undefined, cap: DrCap) {
@@ -87,14 +98,140 @@ export const openConditions = (app: DrApplication) => (decisionOf(app)?.conditio
 export function qualified(app: DrApplication) {
   if (app.type === "provider") return app.verification?.state === "Verified";
   const d = decisionOf(app)?.decision;
-  return d === "Approved" || d === "Conditional";
+  return d === "Qualified" || d === "Conditional";
 }
 
-/** Only these enter the match search (PRD Matching req. 1). */
+/* ---------- the decision paper's vocabulary ---------- */
+
+export const PATHWAYS: Instrument[] = ["Equity", "Debt and credit", "Development and blended finance", "Procurement and contracts", "Strategic partnerships", "Project development", "Market access", "Pilots and deployment"];
+export const CHALLENGE_KINDS: ProviderKind[] = ["Public institution", "Corporate buyer"];
+export const CHALLENGE_ROUTES: ChallengeRoute[] = ["Request for proposals", "Pilot", "Public-private partnership", "Direct procurement", "Innovation challenge", "Co-development"];
+/** A provider-side application that brings a problem to solve rather than capital. */
+export const isChallenge = (a: DrApplication) => a.type === "provider" && !!a.challenge;
+/* ---------- sessions: the paper's activity formats and four-day programme ---------- */
+
+export const SESSION_FORMATS: { format: SessionFormat; short: string; what: string; hostKind: "seeker" | "provider" | "challenge" | "none" }[] = [
+  { format: "Investment opportunity presentation", short: "Presentation", what: "Curated investment cases for relevant funders, timed with moderated questions. Record investor interest, information requests and diligence steps.", hostKind: "seeker" },
+  { format: "Reverse pitch or mandate briefing", short: "Reverse pitch", what: "A capital provider or buyer explains sectors, geography, ticket or contract range, pathways, criteria, exclusions and decision process.", hostKind: "provider" },
+  { format: "Corporate procurement and supplier discovery", short: "Supplier discovery", what: "Buyer-led discovery around a defined need: specifications, vendor eligibility, vetted suppliers and the pilot or RFP route. No award is promised.", hostKind: "challenge" },
+  { format: "Government challenge session", short: "Challenge session", what: "An institution presents a service-delivery challenge: users, constraints, outcome and approval context. Capture a solution shortlist and the procurement, PPP or feasibility route.", hostKind: "challenge" },
+  { format: "Project finance presentation", short: "Project finance", what: "Project sponsors present structure and bankability: stage, capital need, repayment, risk allocation and approvals. Record diligence gaps and preparation actions.", hostKind: "seeker" },
+  { format: "VC, PE and growth-capital clinic", short: "Capital clinic", what: "Focused investor consultations matched to stage and mandate. Capture fit, information requests, diligence pathway and readiness gaps; no funding guarantee.", hostKind: "provider" },
+  { format: "DFI and blended-finance roundtable", short: "DFI roundtable", what: "Closed-door discussion of bankability, risk mitigation, additionality, eligibility and safeguards. Does not imply funding is available.", hostKind: "provider" },
+  { format: "Technology deployment and pilot meeting", short: "Pilot scoping", what: "From interest to a testable scope: use case, integration and security, success measures, indicative cost, sponsor, technical owner and decision date.", hostKind: "challenge" },
+  { format: "Market-entry and cross-border partnership", short: "Market entry", what: "Expanding businesses meet distributors, local partners, trade agencies and logistics or payment providers; capture partner diligence and market-entry actions.", hostKind: "none" },
+  { format: "Deal advisory and readiness clinic", short: "Readiness clinic", what: "Diagnose gaps in governance, financial information, data rooms, project preparation or pitch materials; leave a written action list.", hostKind: "none" },
+  { format: "Negotiation and deal progression", short: "Negotiation", what: "Authorised parties progress terms, diligence, pilot scope and commercial structure. Record agreed points and open issues; no commitment claimed without evidence.", hostKind: "none" },
+];
+export const formatInfo = (f: SessionFormat) => SESSION_FORMATS.find((x) => x.format === f)!;
+
+/** The paper's four-day programme: each day's emphasis and what its close-out must confirm. */
+export const PROGRAMME_DAYS: { day: number; emphasis: string; closeOut: string[] }[] = [
+  { day: 1, emphasis: "Open the market; activate business engagement from day one", closeOut: ["Attendance confirmed", "Outcomes captured", "Urgent follow-ups and pipeline gaps identified"] },
+  { day: 2, emphasis: "Startup and enterprise pitching linked to capital and commercial counterparties", closeOut: ["Investor feedback captured", "Information requests logged", "Follow-ups and readiness gaps recorded"] },
+  { day: 3, emphasis: "Deepen sector, financing and market-access engagements", closeOut: ["Financing pathways recorded", "Project-preparation actions owned", "Pilot owners and partner diligence named"] },
+  { day: 4, emphasis: "Progress viable opportunities and formalise next steps", closeOut: ["Evidence validated", "Post-summit owners and dates confirmed", "30, 60 and 90-day follow-up set"] },
+];
+
+/** A session holds its accepted participants' time; one invited and not yet answering is not yet held. */
+export const sessionHolds = (s: DrSession, appId: string) => !s.cancelled && (s.host === appId || s.responses[appId]?.answer === "Accepted");
+/** The sessions a participant is in that cross a time window. */
+export const sessionClash = (dr: DealRoomState, appId: string, start: string, end: string, buf = 0) => dr.sessions.find((s) => sessionHolds(s, appId) && crosses(s.start, s.end, start, end, buf));
+/** Whether a session's outcomes are all recorded: every attendee but the host has one. */
+export const sessionOpenOutcomes = (s: DrSession) => s.attended.filter((id) => id !== s.host && !s.outcomes.some((o) => o.appId === id));
+
+export const OWNER_KINDS: OwnerKind[] = ["Startup or scale-up", "Established enterprise", "Technology provider", "Project sponsor"];
+export const MEETING_OUTCOMES: MeetingOutcome[] = ["No fit", "Information requested", "Follow-up meeting", "Due diligence", "Pilot or procurement", "Financing or partnership proposal", "Commitment documented"];
+export const MEETING_OUTCOME_HELP: Record<MeetingOutcome, string> = {
+  "No fit": "Both agree there is no fit now; the reason where given",
+  "Information requested": "A party asked for named information or documents",
+  "Follow-up meeting": "A further meeting, technical review or management discussion agreed",
+  "Due diligence": "Formal commercial, financial, technical, legal or procurement evaluation begins",
+  "Pilot or procurement": "A pilot, vendor assessment, RFP or procurement step identified",
+  "Financing or partnership proposal": "A financing structure, term sheet or partnership proposal to be developed",
+  "Commitment documented": "A commitment evidenced by an authorised written record",
+};
+/** An outcome other than no fit opens an opportunity for the owner to follow up. */
+export const opensOpportunity = (c: MeetingOutcome) => c !== "No fit";
+export const COMMITMENT_TIERS: OutcomeKind[] = ["Expression of interest", "Indicative commitment", "Signed commitment", "Approved, not disbursed", "Deployed"];
+export const trackName = (cfg: DrConfig | undefined, id?: string) => cfg?.tracks.find((t) => t.id === id)?.name ?? "";
+
+/* ---------- one pipeline in the paper's 13 statuses ---------- */
+
+export type PipelineStatus =
+  | "Sourced"
+  | "Registered"
+  | "Under review"
+  | "Qualified"
+  | "Match proposed"
+  | "Meeting confirmed"
+  | "Meeting completed"
+  | "Follow-up active"
+  | "Due diligence / evaluation"
+  | "Terms / proposal"
+  | "Committed"
+  | "Closed / deployed"
+  | "On hold / inactive / declined";
+export const PIPELINE: PipelineStatus[] = ["Sourced", "Registered", "Under review", "Qualified", "Match proposed", "Meeting confirmed", "Meeting completed", "Follow-up active", "Due diligence / evaluation", "Terms / proposal", "Committed", "Closed / deployed", "On hold / inactive / declined"];
+
+/**
+ * Where an opportunity owner stands, worked out from what is on record: the application, its matches,
+ * meetings and opportunities. Every row carries the date it got there, who owns it and the evidence for it.
+ */
+export function pipelineOf(dr: DealRoomState, app: DrApplication, now: string): { status: PipelineStatus; since: string; owner?: string; evidence: string } {
+  const owner = app.assignee ?? app.owner;
+  const last = (what: RegExp) => [...app.history].reverse().find((h) => what.test(h.what));
+  if (app.status === "Lead") return { status: "Sourced", since: app.statusAt, owner: app.owner, evidence: `Source: ${app.source || "not recorded"}` };
+  if (["Invited", "Draft", "Submitted"].includes(app.status)) return { status: "Registered", since: app.submittedAt ?? app.statusAt, owner, evidence: app.submittedAt ? `Submitted, reference ${app.ref}` : app.invite?.sentAt ? "Invited to apply" : "Application started" };
+  const d = decisionOf(app);
+  if (app.status === "In review" || app.status === "Information requested" || pendingSecond(app) || (!d && app.type === "seeker")) return { status: "Under review", since: app.firstReviewAt ?? app.statusAt, owner, evidence: app.status === "Information requested" ? "Information requested" : pendingSecond(app) ? "Waiting for a second decider" : app.type === "provider" ? "Verification: KYC, NDA and sanctions screening" : "Being scored against the rubric" };
+  if (app.type === "seeker" && d && (d.decision === "Declined" || d.decision === "Referred")) return { status: "On hold / inactive / declined", since: d.second?.at ?? d.at, owner: d.by, evidence: `${d.decision}: ${d.reason}` };
+  if (app.type === "provider" && app.verification?.state === "Declined") return { status: "On hold / inactive / declined", since: app.statusAt, owner, evidence: "Verification declined" };
+  const mine = dr.matches.filter((m) => m.seekerId === app.id || m.providerId === app.id);
+  const opps = dr.opportunities.filter((o) => mine.some((m) => m.id === o.matchId));
+  const signed = (o: DrOpportunity) => o.outcomes.find((x) => x.kind === "Signed commitment" || x.kind === "Approved, not disbursed");
+  const deployed = opps.find((o) => o.outcomes.some((x) => x.kind === "Deployed"));
+  if (deployed) {
+    const x = deployed.outcomes.find((y) => y.kind === "Deployed")!;
+    return { status: "Closed / deployed", since: x.at, owner: deployed.owner, evidence: x.evidence };
+  }
+  const committed = opps.find(signed);
+  if (committed) return { status: "Committed", since: signed(committed)!.at, owner: committed.owner, evidence: signed(committed)!.evidence };
+  const open = opps.filter((o) => !o.closed);
+  for (const [stage, status] of [["Negotiation", "Terms / proposal"], ["Diligence", "Due diligence / evaluation"], ["Follow-up", "Follow-up active"]] as const) {
+    const o = open.find((x) => x.stage === stage);
+    if (o) return { status, since: o.stageDates[stage] ?? o.history[0]?.at ?? now, owner: o.owner, evidence: o.stageEvidence?.[stage] ?? `Next: ${o.nextAction}` };
+  }
+  if (opps.length && !open.length) {
+    const o = opps[opps.length - 1];
+    return { status: "On hold / inactive / declined", since: o.closed?.at ?? now, owner: o.owner, evidence: o.closed ? `Closed: ${o.closed.reason}. ${o.closed.note}` : "Closed" };
+  }
+  const meets = dr.meetings.filter((m) => mine.some((x) => x.id === m.matchId));
+  const held = meets.filter((m) => m.status === "Held").sort((a, b) => b.start.localeCompare(a.start))[0];
+  if (held) return { status: "Meeting completed", since: held.end, owner, evidence: held.outcome ? `${held.outcome.category}${held.outcome.notes ? `: ${held.outcome.notes}` : ""}` : "Held; outcome to record" };
+  const booked = meets.filter((m) => m.status === "Confirmed" || m.status === "In progress").sort((a, b) => a.start.localeCompare(b.start))[0];
+  if (booked) return { status: "Meeting confirmed", since: booked.proposedAt, owner, evidence: booked.end < now ? `Meeting ${booked.start} has passed; attendance and outcome not recorded` : `Meeting ${booked.start}` };
+  const proposed = mine.filter((m) => m.decision === "Approved").sort((a, b) => b.at.localeCompare(a.at))[0];
+  if (proposed) return { status: "Match proposed", since: proposed.at, owner: proposed.by, evidence: proposed.note || `Match on ${proposed.met.join(", ")}` };
+  const q = last(/^Decided|^Verification|Second decider confirmed/);
+  return { status: "Qualified", since: q?.at ?? app.statusAt, owner, evidence: d ? `${d.decision}: ${d.reason}` : app.verification?.state === "Verified" ? "Verified" : "Qualified" };
+}
+
+/* ---------- the participation fee ---------- */
+
+export const KES_PER_USD = 130;
+/** Settled once paid or waived; a seeker approved before any fee was set has nothing to settle. */
+export const feeSettled = (app: DrApplication) => app.type !== "seeker" || !app.fee || !!app.fee.paid || !!app.fee.waived;
+export const feeOwed = (app: DrApplication) => app.type === "seeker" && !!app.fee && !app.fee.paid && !app.fee.waived;
+export const feeLabel = (f: { amount: number; currency: "USD" | "KES" }) => (f.currency === "USD" ? `USD ${f.amount.toLocaleString("en")}` : `KES ${f.amount.toLocaleString("en")}`);
+/** What the fee comes to in shillings, for an M-Pesa payment. */
+export const feeInKes = (f: { amount: number; currency: "USD" | "KES" }) => (f.currency === "KES" ? f.amount : Math.round(f.amount * KES_PER_USD));
+
+/** Only these enter the match search (PRD Matching req. 1); a seeker also needs the fee settled. */
 export function matchable(app: DrApplication) {
   if (app.reReview) return false;
   if (app.type === "provider") return app.verification?.state === "Verified";
-  return qualified(app) && openConditions(app).length === 0 && app.readiness === "Deal Room Ready";
+  return qualified(app) && openConditions(app).length === 0 && app.readiness === "Deal Room Ready" && feeSettled(app);
 }
 
 /** Why a seeker cannot be Deal Room Ready yet; empty when it can (PRD Qualification req. 6). */
@@ -160,7 +297,7 @@ export const SEEKER_FIELDS: { key: string; label: string; get: (a: DrApplication
   { key: "org.sector", label: "Sector", get: (a) => a.org.sector },
   { key: "org.website", label: "Website", get: (a) => a.org.website },
   { key: "ask.amount", label: "Amount sought", get: (a) => a.ask?.amount },
-  { key: "ask.instrument", label: "Instrument", get: (a) => a.ask?.instrument },
+  { key: "ask.instrument", label: "Transaction pathway", get: (a) => a.ask?.instrument },
   { key: "ask.useOfFunds", label: "Use of funds", get: (a) => a.ask?.useOfFunds },
   { key: "ask.stage", label: "Stage", get: (a) => a.ask?.stage },
   { key: "traction.revenueBand", label: "Revenue band", get: (a) => a.traction?.revenueBand },
@@ -178,7 +315,7 @@ export const PROVIDER_FIELDS: { key: string; label: string; get: (a: DrApplicati
   { key: "mandate.countries", label: "Countries", get: (a) => a.mandate?.countries.length },
   { key: "mandate.stages", label: "Stages", get: (a) => a.mandate?.stages.length },
   { key: "mandate.ticket", label: "Ticket range", get: (a) => a.mandate && a.mandate.ticketMax > 0 && a.mandate.ticketMax >= a.mandate.ticketMin },
-  { key: "mandate.instruments", label: "Instruments", get: (a) => a.mandate?.instruments.length },
+  { key: "mandate.instruments", label: "Transaction pathways", get: (a) => a.mandate?.instruments.length },
   { key: "mandate.exclusions", label: "Exclusions", get: (a) => a.mandate?.exclusions.length },
   { key: "mandate.timeline", label: "Decision timeline", get: (a) => a.mandate?.timeline },
   { key: "decisionMaker", label: "Decision-maker", get: (a) => a.decisionMaker.name && a.decisionMaker.email && a.decisionMaker.phone && a.decisionMaker.title },
@@ -200,10 +337,16 @@ export function formGaps(app: DrApplication, cfg: DrConfig) {
   const missing: string[] = [];
   const advisory: string[] = [];
   for (const f of fields) {
+    if (app.challenge && f.key === "mandate.timeline") continue; // the challenge carries its own timeline
     const v = f.get(app);
     const empty = v === undefined || v === "" || v === 0 || v === false;
     if (!empty) continue;
     (cfg.fields[f.key] === "advisory" ? advisory : missing).push(f.label);
+  }
+  if (app.challenge) {
+    const c = app.challenge;
+    for (const [v, label] of [[c.title, "Challenge title"], [c.problem, "The problem"], [c.users, "Who has it"], [c.outcome, "What success looks like"], [c.route, "Procurement route"], [c.decisionProcess, "How the decision is made"]] as const) if (!v.trim()) missing.push(label);
+    for (const [v, label] of [[c.constraints, "Constraints"], [c.budget, "Budget range"], [c.timeline, "Timeline"]] as const) if (!v.trim()) advisory.push(label);
   }
   if (app.type === "seeker") {
     for (const d of SEEKER_DOCS) {
@@ -302,7 +445,7 @@ export function consentGranted(dr: DealRoomState, seekerId: string, providerId: 
 
 /* ---------- matching (Cut 2) ---------- */
 
-export const MATCH_LABEL: Record<MatchField, string> = { sector: "Sector", country: "Country", stage: "Stage", ticket: "Ticket size", instrument: "Instrument", exclusions: "Exclusions" };
+export const MATCH_LABEL: Record<MatchField, string> = { sector: "Sector", country: "Country", stage: "Stage", ticket: "Ticket size", instrument: "Pathway", exclusions: "Exclusions" };
 
 /** Which matching fields a pair meets and misses; an exclusion hit is named, not hidden (PRD Matching req. 2). */
 export function fit(seeker: DrApplication, provider: DrApplication, cfg: DrConfig) {
@@ -334,11 +477,11 @@ export function sameSlot(aStart: string, aEnd: string, bStart: string, bEnd: str
   return crosses(aStart, aEnd, bStart, bEnd, buffer);
 }
 
-export const DECISIONS: Decision[] = ["Approved", "Conditional", "Waitlisted", "Declined"];
+export const DECISIONS: Decision[] = ["Qualified", "Conditional", "Referred", "Declined"];
 
 /* ---------- queue filters shared by the dashboard and the queue ---------- */
 
-export type FlagKey = "unassigned" | "second" | "expired" | "rereview" | "teaser" | "kyc" | "profile" | "leads" | "qualified" | "ready" | "submitted" | "decided";
+export type FlagKey = "unassigned" | "second" | "expired" | "rereview" | "teaser" | "kyc" | "profile" | "leads" | "qualified" | "ready" | "submitted" | "decided" | "unpaid";
 
 /** Named slices of the applications, each a drill-down from a dashboard number. */
 export const FLAGS: Record<FlagKey, { label: string; test: (a: DrApplication, cfg: DrConfig, now: string) => boolean }> = {
@@ -347,6 +490,7 @@ export const FLAGS: Record<FlagKey, { label: string; test: (a: DrApplication, cf
   decided: { label: "Decided", test: (a) => a.status === "Decided" },
   qualified: { label: "Qualified", test: (a) => qualified(a) },
   ready: { label: "Deal Room Ready", test: (a) => a.type === "seeker" && a.readiness === "Deal Room Ready" && qualified(a) },
+  unpaid: { label: "Approved, fee not paid", test: (a) => qualified(a) && feeOwed(a) },
   unassigned: { label: "Not assigned", test: (a) => !a.assignee && ["Submitted", "In review", "Information requested"].includes(a.status) },
   second: { label: "Waiting for a second decider", test: (a) => !!pendingSecond(a) },
   expired: { label: "Information request expired", test: (a, cfg, now) => a.rfis.some((r) => rfiExpired(r, cfg, now)) },
@@ -371,9 +515,9 @@ export function funnel(dr: DealRoomState, eventId: string) {
     inReview: count(apps, (a) => a.status === "Submitted" || a.status === "In review"),
     infoRequested: count(apps, (a) => a.status === "Information requested"),
     decided: count(apps, (a) => a.status === "Decided"),
-    approved: count(seekers, (a) => decisionOf(a)?.decision === "Approved"),
+    approved: count(seekers, (a) => decisionOf(a)?.decision === "Qualified"),
     conditional: count(seekers, (a) => decisionOf(a)?.decision === "Conditional"),
-    waitlisted: count(seekers, (a) => decisionOf(a)?.decision === "Waitlisted"),
+    referred: count(seekers, (a) => decisionOf(a)?.decision === "Referred"),
     declined: count(seekers, (a) => decisionOf(a)?.decision === "Declined") + count(providers, (a) => a.verification?.state === "Declined"),
     verified: count(providers, (a) => a.verification?.state === "Verified"),
     ndaSigned: count(providers, (a) => !!a.verification?.nda),
@@ -405,7 +549,11 @@ export function validateDealRoom(state: { dealRoom: DealRoomState; delegates: { 
     const cfg = dr.configs[a.eventId];
     if (qualified(a)) {
       const d = state.delegates.find((x) => x.id === a.delegateId);
-      if (!d || d.cancelled) problems.push(`${a.ref ?? a.id} is qualified but has no live badge`);
+      const live = !!d && !d.cancelled;
+      // a seeker's badge waits for the participation fee; until then there is no badge and no match
+      if (feeSettled(a) && !live) problems.push(`${a.ref ?? a.id} is qualified but has no live badge`);
+      if (feeOwed(a) && live) problems.push(`${a.ref ?? a.id} has a badge but has not paid the fee`);
+      if (feeOwed(a) && dr.matches.some((m) => m.seekerId === a.id && m.decision !== "Rejected")) problems.push(`${a.ref ?? a.id} is in a match but has not paid the fee`);
     }
     if (a.type === "seeker" && a.readiness === "Deal Room Ready" && qualified(a) && cfg) {
       const b = readinessBlockers(a, cfg).filter((x) => x !== "Under re-review");
@@ -434,7 +582,7 @@ export function validateDealRoom(state: { dealRoom: DealRoomState; delegates: { 
   }
   // conversion: won rests on a signed commitment, lost on a reason and a note, every one of them in the pack
   for (const o of dr.opportunities) {
-    if (o.stage === "Closed – won" && !o.outcomes.some((x) => x.kind === "Commitment")) problems.push(`Opportunity ${o.id} is won without a signed commitment`);
+    if (o.stage === "Closed – won" && !o.outcomes.some((x) => ["Signed commitment", "Approved, not disbursed", "Deployed"].includes(x.kind))) problems.push(`Opportunity ${o.id} is won without a signed commitment`);
     if (o.stage === "Closed – lost" && (!o.closed?.reason || !o.closed.note)) problems.push(`Opportunity ${o.id} is lost without a reason and a note`);
   }
   return problems;
@@ -469,6 +617,10 @@ export function blockedPair(dr: DealRoomState, seekerId: string, providerId: str
 }
 
 /** Candidates for one participant, with the fit and the ordering rule applied (PRD Matching req. 3). */
+/** Whether a match field is a must-have for this provider. A challenge buys a solution, so the business's own financing ask and its size are preferences, not gates. */
+export const mustHave = (cfg: DrConfig, provider: DrApplication, field: MatchField) => !!cfg.matching.find((y) => y.field === field)?.mandatory && !(provider.challenge && (field === "instrument" || field === "ticket"));
+export const mustHaveMisses = (cfg: DrConfig, provider: DrApplication, missed: MatchField[]) => missed.filter((x) => mustHave(cfg, provider, x));
+
 export function candidates(dr: DealRoomState, cfg: DrConfig, who: DrApplication) {
   const others = dr.apps.filter((a) => a.eventId === who.eventId && a.type !== who.type && matchable(a));
   return others
@@ -476,7 +628,7 @@ export function candidates(dr: DealRoomState, cfg: DrConfig, who: DrApplication)
       const seeker = who.type === "seeker" ? who : o;
       const provider = who.type === "seeker" ? o : who;
       const f = fit(seeker, provider, cfg);
-      const mandatoryMiss = f.missed.filter((x) => cfg.matching.find((y) => y.field === x)?.mandatory);
+      const mandatoryMiss = mustHaveMisses(cfg, provider, f.missed);
       return { other: o, seeker, provider, ...f, mandatoryMiss, readiness: readinessScore(seeker, cfg) ?? 0, existing: dr.matches.find((m) => m.seekerId === seeker.id && m.providerId === provider.id) };
     })
     .sort((a, b) => (cfg.ordering === "criteria" ? b.met.length - a.met.length || b.readiness - a.readiness : b.readiness - a.readiness || b.met.length - a.met.length));
@@ -557,6 +709,8 @@ export function slotProblems(
     const n = eventDay(event.startDate, req.start);
     const sess = d ? state.sessions.find((s) => d.sessions.includes(s.id) && s.eventId === event.id && s.day === n && s.start < t1 && t0 < s.end) : undefined;
     if (sess) clashes.push(`${app.org.name} is enrolled in "${sess.title}" ${sess.start} to ${sess.end}`);
+    const drs = sessionClash(dr, appId, req.start, end, buf);
+    if (drs) clashes.push(`${app.org.name} is in the session "${drs.title}" ${drs.start.slice(11)} to ${drs.end.slice(11)}`);
     if (side === "seeker" && theirs.length >= cfg.rules.seekerCap) caps.push(`${app.org.name} has reached its cap of ${cfg.rules.seekerCap} meetings`);
     if (side === "provider") {
       const perDay = app.caps?.perDay ?? cfg.rules.providerCapDay;
@@ -613,10 +767,11 @@ export const STAGE_EVIDENCE: Record<OppStage, string> = {
   "Closed – lost": "A close reason and a note",
 };
 export const OUTCOME_NEEDS: Record<OutcomeKind, string> = {
-  Interest: "Date and how it was expressed",
-  Promise: "Date and what was said or written; an amount if one was named",
-  Commitment: "Amount, currency, instrument, date and the signed document",
-  "Funds received": "Amount, currency, date and the disbursement evidence",
+  "Expression of interest": "Date and how it was expressed",
+  "Indicative commitment": "Date and what was said or written; an amount if one was named; not binding",
+  "Signed commitment": "Amount, currency, pathway, date and the signed document",
+  "Approved, not disbursed": "Amount, currency, date and the approval, with no disbursement yet",
+  Deployed: "Amount, currency, date and evidence the capital was disbursed or the contract implemented",
 };
 
 export const oppOpen = (o: DrOpportunity) => !o.closed && o.stage !== "Closed – won";
@@ -649,7 +804,8 @@ export function conversionValues(dr: DealRoomState, opps: DrOpportunity[]) {
     const { seeker } = oppParties(dr, o);
     if (seeker?.ask && !o.closed) add(seeker.ask.currency, "sought", seeker.ask.amount);
     for (const x of o.outcomes) {
-      const k = x.kind === "Promise" ? "promised" : x.kind === "Commitment" ? "committed" : x.kind === "Funds received" ? "received" : undefined;
+      // reported apart, as the paper asks: indicative, signed (with approved but not disbursed), deployed
+      const k = x.kind === "Indicative commitment" ? "promised" : x.kind === "Signed commitment" || x.kind === "Approved, not disbursed" ? "committed" : x.kind === "Deployed" ? "received" : undefined;
       if (k && x.amount) add(x.currency ?? seeker?.ask?.currency ?? "USD", k, x.amount);
     }
   }
@@ -694,7 +850,8 @@ export function fitDetail(seeker: DrApplication, provider: DrApplication, cfg: D
   const a = seeker.ask;
   const f = fit(seeker, provider, cfg);
   const list = (xs?: string[]) => (xs && xs.length ? xs.join(", ") : "none set");
-  return cfg.matching.map(({ field, mandatory }) => {
+  return cfg.matching.map(({ field }) => {
+    const mandatory = mustHave(cfg, provider, field);
     const [has, wants] =
       field === "sector" ? [seeker.org.sector, list(m?.sectors)]
       : field === "country" ? [seeker.org.country, list(m?.countries)]

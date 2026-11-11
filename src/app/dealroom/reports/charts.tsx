@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRef, useState, type ReactNode } from "react";
+import { useOpenable } from "../bits";
 
 /*
   The Deal Room's charts. Every mark is a link to the records it counts, so a graph is a drill-down too.
@@ -13,6 +14,8 @@ import { useRef, useState, type ReactNode } from "react";
 export const SERIES = ["var(--viz-1)", "var(--viz-2)", "var(--viz-3)"] as const;
 
 export function ChartCard({ title, sub, table, children }: { title: string; sub?: ReactNode; table?: { href: string; label: string }; children: ReactNode }) {
+  const open = useOpenable();
+  if (table && !open(table.href)) table = undefined;
   return (
     <section className="surface p-5 min-w-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -32,7 +35,10 @@ export function ChartCard({ title, sub, table, children }: { title: string; sub?
 export type BarRow = { label: string; value: number; shown?: string; href?: string };
 
 /** Ranked or ordered horizontal bars, one series: the label, the bar from one baseline, the value at its tip. */
-export function HBars({ rows }: { rows: BarRow[] }) {
+export function HBars({ rows: given }: { rows: BarRow[] }) {
+  // a bar links only where the viewer can open the list behind it
+  const open = useOpenable();
+  const rows = given.map((r) => ({ ...r, href: open(r.href) }));
   const max = Math.max(1, ...rows.map((r) => r.value));
   return (
     <ul className="grid gap-1">
@@ -66,7 +72,9 @@ export function HBars({ rows }: { rows: BarRow[] }) {
 export type Column = { label: string; segments: { key: string; value: number; href?: string }[] };
 
 /** Stacked columns over time: a legend above, each segment a link, the total on the cap, a tooltip on hover and focus. */
-export function StackedColumns({ series, columns, height = 180 }: { series: { key: string; label: string }[]; columns: Column[]; height?: number }) {
+export function StackedColumns({ series, columns: given, height = 180 }: { series: { key: string; label: string }[]; columns: Column[]; height?: number }) {
+  const open = useOpenable();
+  const columns = given.map((c) => ({ ...c, segments: c.segments.map((s) => ({ ...s, href: open(s.href) })) }));
   const box = useRef<HTMLDivElement>(null);
   const [tip, setTip] = useState<{ x: number; y: number; value: number; what: string } | null>(null);
   const totals = columns.map((c) => c.segments.reduce((n, s) => n + s.value, 0));
@@ -138,7 +146,7 @@ export function StackedColumns({ series, columns, height = 180 }: { series: { ke
           <div className="mt-1.5 flex justify-around text-[12px] text-slate">
             {columns.map((c) => (
               <span key={c.label} className="flex w-6 flex-col items-center whitespace-nowrap leading-tight">
-                {/* "Mon 15 Mar" on two lines, so four days fit a phone */}
+                {/* "Mon 15 Feb" on two lines, so four days fit a phone */}
                 <span>{c.label.split(" ")[0]}</span>
                 <span>{c.label.split(" ").slice(1).join(" ")}</span>
               </span>

@@ -327,7 +327,8 @@ function Caps() {
 function Rooms() {
   const { state, dispatch } = useStore();
   const { cfg, can } = useDr();
-  const rooms = state.rooms.filter((r) => r.zoneId === DR_ZONE);
+  // meeting rooms only: the presentation area and roundtable room hold sessions, not tables
+  const rooms = state.rooms.filter((r) => r.zoneId === DR_ZONE && !cfg!.sessionRooms.includes(r.id));
   const [name, setName] = useState("");
   return (
     <Section title="Deal Room rooms and tables" flush>

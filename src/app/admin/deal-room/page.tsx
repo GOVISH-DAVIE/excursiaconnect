@@ -58,6 +58,8 @@ export default function AdminDealRoom() {
                       <option>Lead</option>
                       <option>Reviewer</option>
                       <option>Operations</option>
+                      <option>Coordinator</option>
+                      <option>Oversight</option>
                     </select>
                   </td>
                   <td className="td">
@@ -101,6 +103,8 @@ export default function AdminDealRoom() {
               <option>Lead</option>
               <option>Reviewer</option>
               <option>Operations</option>
+              <option>Coordinator</option>
+              <option>Oversight</option>
             </select>
             {draft.role === "Reviewer" && (
               <label className="flex items-center gap-2 text-[14px]">
@@ -162,7 +166,7 @@ export default function AdminDealRoom() {
         <Section title="Summit live window">
           {dr.liveWindow ? (
             <p className="text-[14px]">
-              Declared {fmtStamp(dr.liveWindow.declaredAt)} for 15 to 18 March: 99.95% availability target, changes frozen. On call: {dr.liveWindow.rota.join("; ")}.
+              Declared {fmtStamp(dr.liveWindow.declaredAt)} for 15 to 18 February: 99.95% availability target, changes frozen. On call: {dr.liveWindow.rota.join("; ")}.
             </p>
           ) : (
             <p className="text-[14px] text-slate">Not declared. Declare it before the summit opens: it freezes releases and names who is on call.</p>
