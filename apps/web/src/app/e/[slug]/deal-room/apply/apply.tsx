@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { ApplyForm, ApplyMode, MyApplications } from "@excursia/contracts/apply";
+import type { ApplyForm, ApplyMode, MyApplication, MyApplications } from "@excursia/contracts/apply";
 import { fmtStamp } from "@excursia/domain/time";
 import { initials, readableOn } from "@/lib/brand";
 import { useSession } from "@/features/auth/hooks/use-session";
@@ -94,7 +94,7 @@ function Page({ slug, form, initialMode, invite }: { slug: string; form: ApplyFo
   else if (current && loaded.data && !OPEN.includes(loaded.data.status))
     body = (
       <>
-        <Answer slug={slug} app={loaded.data} maxBytes={form.upload.maxBytes} />
+        <Answer slug={slug} app={loaded.data} maxBytes={form.upload.maxBytes} onSent={() => setChosen(current)} />
         <Submitted app={loaded.data} />
       </>
     );
@@ -205,7 +205,8 @@ function Earlier({ apps, onOpen }: { apps: MyApplications; onOpen: (id: string) 
   );
 }
 
-function Submitted({ app }: { app: { ref: string | null; submittedAt: string | null; status: string; form: { org: { name: string } } } }) {
+function Submitted({ app }: { app: Pick<MyApplication, "ref" | "submittedAt" | "status" | "form" | "requests"> }) {
+  const answered = app.requests.filter((r) => r.answeredAt).at(-1);
   return (
     <Card title="Application received">
       <p className="text-[15px]">
@@ -213,6 +214,7 @@ function Submitted({ app }: { app: { ref: string | null; submittedAt: string | n
         {app.submittedAt ? `, submitted ${fmtStamp(app.submittedAt)}` : ""}.
       </p>
       <p className="mt-2 text-[14px] text-slate">Status: {app.status}. The Deal Room team reviews applications in the order they arrive and writes to you by email; keep the reference for any question.</p>
+      {answered?.answeredAt && <p className="mt-2 text-[14px] text-slate">You answered the review team&rsquo;s request on {fmtStamp(answered.answeredAt)}.</p>}
     </Card>
   );
 }

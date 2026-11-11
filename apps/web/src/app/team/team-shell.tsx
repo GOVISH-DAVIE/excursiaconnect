@@ -8,7 +8,7 @@
  */
 import Link from "next/link";
 import { useEffect, type ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Rail, type NavItem } from "@/components/ui";
 import { useSession } from "@/features/auth/hooks/use-session";
 import { useSignOut } from "@/features/auth/hooks/use-sign-in";
@@ -23,16 +23,16 @@ export function TeamShell({ children }: { children: ReactNode }) {
   const session = useSession();
   const signOut = useSignOut();
   const router = useRouter();
-  const path = usePathname();
   const s = session.data;
   const allowed = !!s && s.mfa !== "pending" && s.user.kind !== "participant";
   const eventId = useDealRoomEvent();
   const team = useTeam(allowed && eventId ? eventId : "");
 
   // not signed in (or an applicant, or half signed in): to the sign-in page, and back here afterwards
+  // (the path is read in the browser, here, so the shell doesn't hold up prerendering on dynamic pages)
   useEffect(() => {
-    if (session.isSuccess && !allowed) router.replace(`/signin?next=${encodeURIComponent(path)}`);
-  }, [session.isSuccess, allowed, path, router]);
+    if (session.isSuccess && !allowed) router.replace(`/signin?next=${encodeURIComponent(window.location.pathname)}`);
+  }, [session.isSuccess, allowed, router]);
 
   const me = team.data?.me;
   const context = allowed ? (

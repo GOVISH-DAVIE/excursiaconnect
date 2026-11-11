@@ -469,7 +469,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | --- | --- | --- |
 | M1.1 | **Apply** (by Fri 11 Dec): seeker, provider and challenge forms; drafts on the server with merged autosaves; resume links; one "save and submit" command; reference numbers from a counter; the portal's status page | An applicant applies from a phone on staging and gets a reference; a second device resumes the draft **Done 11 Nov 2026**, with the core of M1.2's uploads. Notes below |
 | M1.2 | **Documents** (by Fri 11 Dec): presigned upload, quarantine, asynchronous virus scan, signed downloads after consent, retention dates | A pitch deck uploads, clears quarantine and opens only for those allowed, through a link that expires Uploads to storage, quarantine and the checks on arrival are done with M1.1; the virus scan, signed downloads after consent and retention remain |
-| M1.3 | **Review, first half** (by Fri 11 Dec): queue, assignment, rubric scoring with evidence, information requests with expiry | The review rules' tests pass on the server |
+| M1.3 | **Review, first half** (by Fri 11 Dec): queue, assignment, rubric scoring with evidence, information requests with expiry | The review rules' tests pass on the server **Done 11 Nov 2026**. Notes below |
 | M1.4 | **Email** (by Fri 11 Dec): the outbox and worker, templates for every onboarding message, delivery status, the Notifications screen reading the outbox | Messages arrive in a real inbox with delivery status |
 | M1.5 | **Go-live** (Mon 14 Dec): production database with point-in-time recovery and a restore drill timed against the RTO, monitoring and alerts, privacy notice, load test of apply and upload | **Applications open Tue 15 Dec 2026** |
 | M1.6 | **Review, second half** (by Tue 22 Dec): recommendations, decisions, second decider, readiness, conditions; provider and challenge verification (KYC, NDA, sanctions, decision-maker) | The first decisions are recorded on production; no record is verified with a step missing |
@@ -502,6 +502,29 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - providers' and challenges' KYC uploads (M1.6)
   - the applicant's full portal: RFIs, fee, matching
   - email delivery (M1.4)
+
+**Notes on M1.3, done 11 Nov 2026:**
+- **The reviewer's screen** is `/team/applications/[id]`, on the API, in four tabs: Assessment, Application, Requests and History. The queue (M0.5) links to it.
+- **Who may do what:**
+  - Reviewers and the lead see the whole application with the rubric. Operations staff and applicants don't.
+  - Starting the review takes the application if nobody had it.
+  - Scoring, requesting information and opening documents are the assigned reviewer's or the lead's.
+  - A request that expired unanswered is the lead's alone to settle: extend, refer, decline or withdraw, with a reason.
+- **A score rests on evidence:** it names a criterion of the event's rubric and either a document on the application or a written note. A new score supersedes the last, which stays in History.
+- **Information requests:**
+  - questions, the document kinds asked for, and a due date `rfiDays` ahead
+  - The applicant sees them on their status page, uploads what was asked and answers.
+  - Uploads made while a request is open are held for the answer, which attaches them and puts the review back in progress.
+  - After answering, the status page keeps the application on screen and says when it was answered.
+- **Documents open through a short link:** a signed `GET /v1/files/:token`, valid 2 minutes, for one file. It is served as an attachment with `Content-Security-Policy: default-src 'none'; sandbox` and `no-store`, and each opening is audited as `file/open`. Consent before circulating outside the team is still M1.2.
+- **Every change runs through `runCommand`**, under the event lock, with the rules' refusals as 409s and audit rows per changed record.
+- **Tested:**
+  - 7 API tests: who can see, taking the review, evidence on scores, the document link and its audit, a request answered with its document, the lead's call on an expired request, another event's application refused.
+  - Walked through in two browsers: the reviewer started CA3-CS-00078, scored Relevance 74 resting on the pitch deck and asked for the 2025 management accounts. The applicant, in Chrome, uploaded the statements and answered. The reviewer saw the answer and opened the PDF.
+- **Not yet:**
+  - the applicant is told about a request only on the status page; the email is M1.4
+  - telling the lead when a request expires: the rules already know once the due date has passed, but nothing prompts the lead yet (Phase 2's jobs)
+  - recommendations and decisions (M1.6)
 
 ### Phase 2: Core platform and scanning (4 to 29 January 2027)
 

@@ -12,7 +12,7 @@ import { Card } from "./fields";
 
 const TYPES = "application/pdf,image/png,image/jpeg,.docx,.xlsx,.pptx";
 
-export function Answer({ slug, app, maxBytes }: { slug: string; app: MyApplication; maxBytes: number }) {
+export function Answer({ slug, app, maxBytes, onSent }: { slug: string; app: MyApplication; maxBytes: number; onSent: () => void }) {
   const request = app.requests.find((r) => r.open);
   const upload = useUploadDocument(slug, app.id);
   const respond = useRespond(slug, app.id);
@@ -73,7 +73,7 @@ export function Answer({ slug, app, maxBytes }: { slug: string; app: MyApplicati
         className="mt-4 space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
-          respond.mutate({ text, fileIds: files.map((f) => f.fileId) });
+          respond.mutate({ text, fileIds: files.map((f) => f.fileId) }, { onSuccess: onSent });
         }}
       >
         <label className="block">

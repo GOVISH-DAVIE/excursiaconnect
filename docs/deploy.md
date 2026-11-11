@@ -247,6 +247,13 @@ server {
     proxy_pass http://excursia_api;
   }
 
+  # documents opened by staff: short signed links, read-only, never cached by nginx
+  location /v1/files/ {
+    limit_except GET { deny all; }
+    proxy_buffering off; limit_req zone=api burst=20 nodelay;
+    proxy_pass http://excursia_api;
+  }
+
   # the deploy script checks health on 127.0.0.1:400x directly; from outside there is nothing to see
   location /health/ { allow 127.0.0.1; deny all; proxy_pass http://excursia_api; }
 
