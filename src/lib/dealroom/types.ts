@@ -16,7 +16,9 @@ export type ProviderKind =
   | "Corporate buyer"
   | "Distributor or channel partner"
   | "Public institution"
-  | "Ecosystem partner";
+  | "Ecosystem partner"
+  | "Technology partner"
+  | "Regional operator";
 /** Who brings an opportunity: the paper's opportunity owners. */
 export type OwnerKind = "Startup or scale-up" | "Established enterprise" | "Technology provider" | "Project sponsor";
 /** The paper's eight transaction pathways; the field keeps its old name, instrument, throughout. */
@@ -51,6 +53,8 @@ export type DocKind =
   | "Term sheet"
   | "Commitment letter"
   | "Disbursement evidence"
+  | "Purchase order or contract"
+  | "Pilot or partnership agreement"
   | "Other";
 
 export interface DrDocument {
@@ -308,7 +312,12 @@ export interface DrMeeting {
   status: MeetingStatus;
   proposedAt: string;
   confirm: { seeker?: string; provider?: string };
-  change?: { by: "seeker" | "provider"; reason: string; at: string };
+  /**
+   * A participant's request to move the meeting: the time they propose and why. The other side agrees or declines;
+   * once they agree the Deal Room team books it. Until then the meeting keeps its slot, and `was` is the status it
+   * returns to if the move is turned down. Older requests carry no time; the team picks one.
+   */
+  change?: { by: "seeker" | "provider"; reason: string; at: string; start?: string; was?: MeetingStatus; agreed?: string };
   arrivals: { seeker?: string; provider?: string };
   noShow?: "seeker" | "provider" | "both";
   outcome?: DrOutcome;

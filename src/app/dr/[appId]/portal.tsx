@@ -8,7 +8,7 @@ import { initials, readableOn } from "@/lib/brand";
 import { PATHWAYS, formatInfo, askBand, compact, decisionOf, feeInKes, feeLabel, feeOwed, feeSettled, matchStage, missionName, openConditions, openRfi, profileDeadline, publicStatus, qualified, rfiDue } from "@/lib/dealroom/logic";
 import type { DrApplication, DrDocument, Instrument, KycItem } from "@/lib/dealroom/types";
 import { fmtStamp } from "@/lib/time";
-import { ApplicantStatus, DocLine, UploadDoc } from "@/app/dealroom/bits";
+import { ApplicantStatus, DocLine, UploadDoc, typeLabel } from "@/app/dealroom/bits";
 import { ChallengeFields, MandateFields } from "@/app/e/[slug]/deal-room/apply/apply";
 import { AccessLog, Deals, Directory, Introductions, Meetings } from "./deals";
 import { acceptProblems } from "@/lib/dealroom/sessions";
@@ -206,7 +206,7 @@ function Status({ app }: { app: DrApplication }) {
           <div className="text-[13px] text-slate text-right">
             Last change {fmtStamp(app.statusAt)}
             <div>
-              {app.type === "seeker" ? "Capital seeker" : app.challenge ? `Challenge, ${app.providerKind?.toLowerCase() ?? "institution"}` : app.providerKind} · {missionName(cfg, app.mission) || "no mission yet"}
+              {typeLabel(app)} · {missionName(cfg, app.mission) || "no mission yet"}
             </div>
           </div>
         </div>
@@ -262,7 +262,7 @@ function Status({ app }: { app: DrApplication }) {
         <Card title="Complete your matching profile">
           <p className="text-[14px]">
             Due {fmtStamp(dl, false)}
-            {dl < dr.clock.slice(0, 10) ? ", now overdue" : ""}. Investors see a short teaser first; write it on the Profile tab.
+            {dl < dr.clock.slice(0, 10) ? ", now overdue" : ""}. Investors and partners see a short teaser first; write it on the Profile tab.
           </p>
         </Card>
       )}
@@ -404,7 +404,7 @@ function Profile({ app }: { app: DrApplication }) {
   return (
     <>
       <Card title="Your teaser" aside={app.teaser?.approved ? <span className="pill bg-ok-50 text-ok">Approved</span> : app.teaser ? <span className="pill bg-warn-50 text-warn">Waiting for the team</span> : null}>
-        <p className="-mt-1 mb-3 text-[13px] text-slate">The only thing verified investors see before an introduction: a title, one paragraph, your sector, country, the size of the ask and the instrument.</p>
+        <p className="-mt-1 mb-3 text-[13px] text-slate">The only thing verified investors and partners see before an introduction: a title, one paragraph, your sector, country, the size of the ask and the transaction pathway.</p>
         <label className="block">
           <span className="label">Title</span>
           <input className="input" value={teaser.title} onChange={(e) => setTeaser({ ...teaser, title: e.target.value })} />

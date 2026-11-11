@@ -27,7 +27,7 @@ export const oppTitle = (dr: DealRoomState, o: DrOpportunity) => {
 export function exportPack(dr: DealRoomState, cfg: DrConfig, opps: DrOpportunity[]) {
   const sum = (o: DrOpportunity, k: OutcomeKind) => o.outcomes.filter((x) => x.kind === k).reduce((n, x) => n + (x.amount ?? 0), 0) || "";
   const first = (o: DrOpportunity, k: OutcomeKind) => o.outcomes.find((x) => x.kind === k)?.date ?? "";
-  const head = ["Seeker ref", "Seeker", "Provider ref", "Provider", "Mission", "Sector", "Pathway", "Ask", "Currency", "Owner", "Stage", "Follow-up", "Diligence", "Negotiation", "Closed won", "Closed lost", "Close reason", "Next action", "Due", "Expression of interest date", "Indicative", "Indicative date", "Signed", "Signed date", "Approved not disbursed", "Approved date", "Deployed", "Deployed date", "Last activity", "Evidence date", "Reviews"];
+  const head = ["Seeker ref", "Seeker", "Counterparty ref", "Counterparty", "Mission", "Sector", "Pathway", "Ask", "Currency", "Owner", "Stage", "Follow-up", "Diligence", "Negotiation", "Closed won", "Closed lost", "Close reason", "Next action", "Due", "Expression of interest date", "Indicative", "Indicative date", "Signed", "Signed date", "Approved not disbursed", "Approved date", "Deployed", "Deployed date", "Last activity", "Evidence date", "Reviews"];
   const lines = opps.map((o) => {
     const { seeker: s, provider: p } = oppParties(dr, o);
     const d = (st: OppStage) => o.stageDates[st]?.slice(0, 10) ?? "";

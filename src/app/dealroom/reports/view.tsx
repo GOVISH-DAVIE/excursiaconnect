@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { PageHeader, Section, Stat, Tabs } from "@/components/ui";
 import { useStore } from "@/lib/store";
-import { DR_ZONE, bothAccepted, funnel, ticketBand, compact, conversionValues, decisionOf, drCan, matchStage, medianDays, missionName, occupies, oppOpen, oppOverdue, oppParties, qualified, staffName, type MatchStage } from "@/lib/dealroom/logic";
+import { DR_ZONE, ROLE_LABEL, ROLES, bothAccepted, funnel, roleOf, ticketBand, compact, conversionValues, decisionOf, drCan, matchStage, medianDays, missionName, occupies, oppOpen, oppOverdue, oppParties, qualified, staffName, type MatchStage } from "@/lib/dealroom/logic";
 import type { DrApplication, DrMeeting, DrOpportunity } from "@/lib/dealroom/types";
 import { downloadCsv, row } from "@/lib/csv";
 import { addMinutes, fmtStamp } from "@/lib/time";
@@ -110,11 +110,11 @@ function groups(apps: DrApplication[], key: (a: DrApplication) => string) {
 function Mobilisation({ apps }: { apps: DrApplication[] }) {
   const { dr, cfg } = useDr();
   const [by, setBy] = useState<"mission" | "source" | "owner" | "type">("mission");
-  const label = (a: DrApplication) => (by === "mission" ? missionName(cfg!, a.mission) : by === "source" ? a.source : by === "owner" ? staffName(dr, a.owner) : a.type === "seeker" ? "Capital seeker" : "Finance provider");
+  const label = (a: DrApplication) => (by === "mission" ? missionName(cfg!, a.mission) : by === "source" ? a.source : by === "owner" ? staffName(dr, a.owner) : ROLE_LABEL[roleOf(a)]);
   const g = groups(apps, label);
   const scope = (x: { list: DrApplication[] }) => {
     const a = x.list[0];
-    return by === "mission" ? { mission: a.mission } : by === "source" ? { source: a.source } : by === "owner" ? { owner: a.owner } : { type: a.type };
+    return by === "mission" ? { mission: a.mission } : by === "source" ? { source: a.source } : by === "owner" ? { owner: a.owner } : { type: roleOf(a) };
   };
   const to = (x: { list: DrApplication[] }, more: Record<string, string>) => `/dealroom/applications?${qs({ ...scope(x), ...more })}`;
   return (
@@ -180,14 +180,28 @@ function Qualification({ apps }: { apps: DrApplication[] }) {
   );
 }
 
+const VERIFY_TITLE = { capital: "Capital providers by type", partner: "Commercial and strategic partners by type", challenge: "Institutional challenges by type" } as const;
+
+/** Verification by organisation type, one table per provider-side pathway: investors, partners, challenges. */
 function VerificationReport({ apps }: { apps: DrApplication[] }) {
   const providers = apps.filter((a) => a.type === "provider" && a.ref);
-  const g = groups(providers, (a) => a.providerKind ?? "Not set");
-  const to = (x: { list: DrApplication[] }, more: Record<string, string>) => `/dealroom/applications?${qs({ type: "provider", kind: x.list[0].providerKind, ...more })}`;
+  const roles = ROLES.filter((r): r is keyof typeof VERIFY_TITLE => r !== "seeker" && providers.some((a) => roleOf(a) === r));
+  return (
+    <div className="grid gap-4">
+      {roles.map((r) => (
+        <VerificationTable key={r} role={r} apps={providers.filter((a) => roleOf(a) === r)} />
+      ))}
+    </div>
+  );
+}
+
+function VerificationTable({ role, apps }: { role: keyof typeof VERIFY_TITLE; apps: DrApplication[] }) {
+  const g = groups(apps, (a) => a.providerKind ?? "Not set");
+  const to = (x: { list: DrApplication[] }, more: Record<string, string>) => `/dealroom/applications?${qs({ type: role, kind: x.list[0].providerKind, ...more })}`;
   return (
     <Table
-      title="Finance providers by type"
-      file="deal-room-verification"
+      title={VERIFY_TITLE[role]}
+      file={`deal-room-verification-${role}`}
       rows={g}
       cols={[
         { h: "Type", v: (x) => x.k },

@@ -21,6 +21,8 @@ import {
   qualified,
   readinessBlockers,
   refNo,
+  roleOf,
+  ROLE_LABEL,
   verificationBlockers,
 } from "./logic";
 import type {
@@ -98,7 +100,7 @@ function issueBadge(state: AppState, app: DrApplication): AppState {
     email: app.contact.email,
     phone: app.contact.phone,
     organisation: app.org.name,
-    jobTitle: app.decisionMaker.name === app.contact.name ? app.decisionMaker.title : app.type === "seeker" ? "Capital seeker" : app.providerKind ?? "Finance provider",
+    jobTitle: app.decisionMaker.name === app.contact.name ? app.decisionMaker.title : app.type === "seeker" ? "Capital seeker" : app.providerKind ?? ROLE_LABEL[roleOf(app)],
     country: app.org.country,
     category: "Deal Room",
     tierId: DR_TIER,

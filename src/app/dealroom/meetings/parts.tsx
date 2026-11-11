@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Section } from "@/components/ui";
 import { useStore } from "@/lib/store";
-import { DR_ZONE, lapsed, slotProblems, slotTimes } from "@/lib/dealroom/logic";
+import { DR_ZONE, drCan, lapsed, moveSpot, sideName, slotProblems, slotTimes } from "@/lib/dealroom/logic";
 import type { DrMeeting } from "@/lib/dealroom/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
 import { Pill, useDr } from "../bits";
@@ -111,8 +111,8 @@ export const MeetingPill = ({ m }: { m: DrMeeting }) => {
 
 export function MeetingPanel({ m, onClose }: { m: DrMeeting; onClose: () => void }) {
   const { state } = useStore();
-  const { dr, dispatch } = useDr();
-  const [mode, setMode] = useState<"view" | "move" | "cancel">("view");
+  const { dr, dispatch, me } = useDr();
+  const [mode, setMode] = useState<"view" | "move" | "cancel" | "decline">("view");
   const [reason, setReason] = useState("");
   const mm = dr.matches.find((x) => x.id === m.matchId)!;
   const s = dr.apps.find((a) => a.id === mm.seekerId)!;
@@ -129,10 +129,22 @@ export function MeetingPanel({ m, onClose }: { m: DrMeeting; onClose: () => void
         </span>
       </div>
       <p className="mt-2 text-[13px] text-slate">
-        Seeker {m.confirm.seeker ? `confirmed ${fmtStamp(m.confirm.seeker)}` : "has not confirmed"}; provider {m.confirm.provider ? `confirmed ${fmtStamp(m.confirm.provider)}` : "has not confirmed"}.
-        {m.change && ` The ${m.change.by} asked to move: “${m.change.reason}”.`}
+        Seeker {m.confirm.seeker ? `confirmed ${fmtStamp(m.confirm.seeker)}` : "has not confirmed"}; counterparty {m.confirm.provider ? `confirmed ${fmtStamp(m.confirm.provider)}` : "has not confirmed"}.
+        {m.change && !m.change.start && ` The ${sideName(m.change.by)} asked to move: “${m.change.reason}”.`}
         {m.override && ` Cap overridden: ${m.override.reason}.`}
       </p>
+      {m.status === "Change requested" && m.change?.start && <MoveRequest m={m} asker={m.change.by === "seeker" ? s.org.name : p.org.name} other={m.change.by === "seeker" ? p.org.name : s.org.name} canAct={drCan(me, "schedule")} onDecline={() => setMode("decline")} />}
+      {mode === "decline" && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <input className="input h-9 flex-1 min-w-48 text-[13px]" placeholder="Why it cannot move, sent to both" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <button className="btn-primary btn-sm" disabled={!reason.trim()} onClick={() => { dispatch({ type: "dr/declineChange", meetingId: m.id, reason }); setMode("view"); setReason(""); }}>
+            Decline the move
+          </button>
+          <button className="btn-quiet" onClick={() => setMode("view")}>
+            Back
+          </button>
+        </div>
+      )}
       {editable && mode === "view" && (
         <div className="mt-3 flex gap-2">
           <button className="btn-secondary btn-sm" onClick={() => setMode("move")}>
@@ -171,3 +183,36 @@ export function MeetingPanel({ m, onClose }: { m: DrMeeting; onClose: () => void
   );
 }
 
+
+/** A participant's proposed move: the team accepts it only once the other side has agreed, and only if the time is still free. */
+function MoveRequest({ m, asker, other, canAct, onDecline }: { m: DrMeeting; asker: string; other: string; canAct: boolean; onDecline: () => void }) {
+  const { state } = useStore();
+  const { dispatch } = useDr();
+  const ch = m.change!;
+  const spot = ch.agreed ? moveSpot(state, m, ch.start!) : undefined;
+  const room = state.rooms.find((r) => r.id === spot?.roomId);
+  return (
+    <div className="mt-3 rounded-md bg-paper p-3 text-[14px]">
+      <p>
+        {asker} asks to move it to <b className="font-medium">{fmtStamp(ch.start!)}</b>: “{ch.reason}”
+      </p>
+      <p className="mt-1 text-[13px] text-slate">
+        {!ch.agreed
+          ? `Waiting for ${other} to agree. You can accept once they do; until then the meeting keeps its slot.`
+          : spot
+            ? `${other} agreed ${fmtStamp(ch.agreed)}. Free at that time: ${spot.link ? "online" : `${room?.name}${spot.table ? `, table ${spot.table}` : ""}`}. Accepting books it as confirmed by both.`
+            : `${other} agreed, but that time is no longer free. Pick another slot with Move, or decline.`}
+      </p>
+      {canAct && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button className="btn-primary btn-sm" disabled={!spot} title={!ch.agreed ? `${other} has not agreed yet` : undefined} onClick={() => dispatch({ type: "dr/acceptChange", meetingId: m.id })}>
+            Accept the move
+          </button>
+          <button className="btn-secondary btn-sm" onClick={onDecline}>
+            Decline the move
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

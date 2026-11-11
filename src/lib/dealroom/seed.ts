@@ -167,7 +167,7 @@ const COUNTRIES = ["Kenya", "Uganda", "Tanzania", "Rwanda", "Ethiopia", "Nigeria
 const SOURCES = ["Referral", "Partner", "Outreach campaign", "Inbound", "Mission team"];
 // seven kinds in turn, as before; venture capital is then split into angel, venture and private equity
 const KINDS: ProviderKind[] = ["Venture capital", "Fund", "DFI", "Bank", "Corporate buyer", "Distributor or channel partner", "Ecosystem partner"];
-const ALL_KINDS: ProviderKind[] = ["Angel investor", "Venture capital", "Private equity", "Fund", "DFI", "Bank", "Corporate buyer", "Distributor or channel partner", "Public institution", "Ecosystem partner"];
+const ALL_KINDS: ProviderKind[] = ["Angel investor", "Venture capital", "Private equity", "Fund", "DFI", "Bank", "Corporate buyer", "Distributor or channel partner", "Public institution", "Ecosystem partner", "Technology partner", "Regional operator"];
 
 export const ca3Config: DrConfig = {
   eventId: EV_CA3,
@@ -382,6 +382,8 @@ const MANDATE_BY_KIND: Record<ProviderKind, { min: number; max: number; instrume
   "Distributor or channel partner": { min: 100_000, max: 1_500_000, instruments: ["Market access", "Procurement and contracts"], stages: ["Early revenue", "Growth"] },
   "Public institution": { min: 250_000, max: 10_000_000, instruments: ["Procurement and contracts", "Pilots and deployment", "Project development"], stages: ["Early revenue", "Growth", "Bankable project"] },
   "Ecosystem partner": { min: 50_000, max: 1_000_000, instruments: ["Market access", "Project development"], stages: ["Early revenue", "Growth"] },
+  "Technology partner": { min: 100_000, max: 2_000_000, instruments: ["Strategic partnerships", "Pilots and deployment"], stages: ["Early revenue", "Growth"] },
+  "Regional operator": { min: 250_000, max: 5_000_000, instruments: ["Market access", "Strategic partnerships"], stages: ["Growth", "Expansion"] },
 };
 const NAME_BY_KIND: Record<ProviderKind, string[]> = {
   "Angel investor": ["Angel Network", "Angels", "Angel Syndicate"],
@@ -394,6 +396,8 @@ const NAME_BY_KIND: Record<ProviderKind, string[]> = {
   "Distributor or channel partner": ["Distribution", "Trade Links", "Channel Partners", "Distributors"],
   "Public institution": ["Authority"],
   "Ecosystem partner": ["Innovation Hub", "Tech Hub", "Enterprise Network", "Accelerator"],
+  "Technology partner": ["Technologies", "Systems", "Digital"],
+  "Regional operator": ["Regional", "Africa Operations", "East Africa"],
 };
 const PROVIDER_NAMES = ["Capital Partners", "Growth Fund", "Development Finance", "Bank", "Impact Investors", "Trade Finance", "Infrastructure Fund", "Ventures", "Agri Fund", "Holdings"];
 
