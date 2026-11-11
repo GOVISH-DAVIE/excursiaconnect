@@ -545,6 +545,8 @@ export function validateDealRoom(state: { dealRoom: DealRoomState; delegates: { 
   const refs = new Map<string, number>();
   for (const a of dr.apps) if (a.ref) refs.set(a.ref, (refs.get(a.ref) ?? 0) + 1);
   for (const [ref, n] of refs) if (n > 1) problems.push(`Reference ${ref} is used ${n} times`);
+  // a verified provider or institution passed every step verification asks for
+  for (const a of dr.apps) if (a.type === "provider" && a.verification?.state === "Verified" && verificationBlockers(a).length) problems.push(`${a.ref ?? a.id} is verified but ${verificationBlockers(a)[0].toLowerCase()}`);
   for (const a of dr.apps) {
     const cfg = dr.configs[a.eventId];
     if (qualified(a)) {

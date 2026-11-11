@@ -9,7 +9,7 @@ import { canOpen, useDr } from "./bits";
 
 /** DL-8: one funnel from lead to qualified, against Bouer's targets, every number a link to its records. */
 export default function DealRoomDashboard() {
-  const { dr, cfg, now, me, can } = useDr();
+  const { dr, cfg, now, me, can, event } = useDr();
   if (!cfg) return null;
   const f = funnel(dr, cfg.eventId);
   const apps = dr.apps.filter((a) => a.eventId === cfg.eventId);
@@ -34,16 +34,19 @@ export default function DealRoomDashboard() {
   const mineOpen = opps.filter((o) => oppOpen(o) && (me?.role === "Lead" || o.owner === me?.id));
   const matches = dr.matches.filter((m) => m.eventId === cfg.eventId);
   const meetings = dr.meetings.filter((m) => m.eventId === cfg.eventId);
-  const attention = [
+  // intake, review, introductions and scheduling are summit work; after its last day only outcomes owed and the
+  // opportunities remain, and once archived nothing can be acted on at all
+  const summitOver = now.slice(0, 10) > event.endDate;
+  const attention = dr.archivedAt ? [] : [
     // the review team's work; oversight sees the same counts to monitor, unlinked
-    ...(seesApps || me?.role === "Oversight"
+    ...(!summitOver && (seesApps || me?.role === "Oversight")
       ? (Object.keys(FLAGS) as FlagKey[])
           .filter((k) => ["unassigned", "second", "expired", "rereview", "teaser", "kyc", "profile", "unpaid"].includes(k))
           .map((k) => ({ k, href: q(k), label: FLAGS[k].label, n: apps.filter((a) => FLAGS[k].test(a, cfg, now)).length }))
       : []),
     // the coordinator's and operations' work: introductions, scheduling, outcomes
-    ...(can("match") ? [{ k: "intro", href: "/dealroom/matching?tab=By%20mission&mission=All&stage=Introduced", label: "Introductions waiting for an answer", n: matches.filter((m) => matchStage(m, cfg, now) === "Introduced").length }] : []),
-    ...(can("schedule") ? [{ k: "toschedule", href: "/dealroom/meetings", label: "Accepted pairs to schedule", n: readyToSchedule(dr, cfg).length }] : []),
+    ...(!summitOver && can("match") ? [{ k: "intro", href: "/dealroom/matching?tab=By%20mission&mission=All&stage=Introduced", label: "Introductions waiting for an answer", n: matches.filter((m) => matchStage(m, cfg, now) === "Introduced").length }] : []),
+    ...(!summitOver && can("schedule") ? [{ k: "toschedule", href: "/dealroom/meetings", label: "Accepted pairs to schedule", n: readyToSchedule(dr, cfg).length }] : []),
     ...(can("outcome") || me?.role === "Oversight" ? [{ k: "nooutcome", href: "/dealroom/live", label: "Meetings ended without an outcome", n: meetings.filter((m) => m.end <= now && ((m.status === "Held" && !m.outcome) || (occupies(m, cfg, now) && m.status !== "Held" && m.status !== "No-show"))).length }] : []),
     ...(can("schedule") || can("outcome") || me?.role === "Oversight" ? [{ k: "sessions", href: "/dealroom/programme", label: "Session attendees without an outcome", n: dr.sessions.filter((x) => x.eventId === cfg.eventId && !x.cancelled && x.end <= now).reduce((n, x) => n + sessionOpenOutcomes(x).length, 0) }] : []),
     // after the summit: the owner's and the lead's overdue next actions, and the lead's monthly review (PRD Conversion req. 2, 3)
@@ -123,7 +126,22 @@ export default function DealRoomDashboard() {
         </Section>
 
         <Section title="Needs attention" flush>
-          {attention.length === 0 ? (
+          {dr.archivedAt ? (
+            <p className="px-5 pb-5 text-sm text-slate">
+              Nothing: the Deal Room was archived {fmtStamp(dr.archivedAt)} and is read-only. The post-summit pack went to the lead
+              {can("conversion") || me?.role === "Oversight" ? (
+                <>
+                  ;{" "}
+                  <Link className="link" href="/dealroom/reports?tab=Conversion">
+                    the final conversion report
+                  </Link>{" "}
+                  is in Reports.
+                </>
+              ) : (
+                "."
+              )}
+            </p>
+          ) : attention.length === 0 ? (
             <p className="px-5 pb-5 text-sm text-slate">Nothing waiting.</p>
           ) : (
             <ul>

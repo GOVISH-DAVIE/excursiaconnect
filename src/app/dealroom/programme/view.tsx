@@ -435,7 +435,7 @@ function SessionDetail({ s, onClose }: { s: DrSession; onClose: () => void }) {
         <ul className="mt-2 space-y-1 text-[13px]">
           {[...s.history].reverse().map((h, i) => (
             <li key={i}>
-              <span className="text-slate">{fmtStamp(h.at)}</span> {h.by === "applicant" ? "" : `${staffName(dr, h.by)}: `}
+              <span className="text-slate">{fmtStamp(h.at)}</span> {h.by === "applicant" || h.by === "door" ? "" : `${staffName(dr, h.by)}: `}
               {h.what}
             </li>
           ))}

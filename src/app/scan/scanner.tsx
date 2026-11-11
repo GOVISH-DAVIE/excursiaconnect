@@ -5,17 +5,17 @@ import { useSearchParams } from "next/navigation";
 import { Logo } from "@/components/ui";
 import { overrider, roomVerdict, scanOperator, scanRefusal, scanVerdict, sessionAtRoom, useStore } from "@/lib/store";
 import { can } from "@/lib/roles";
-import { DR_ZONE, eventDay } from "@/lib/dealroom/logic";
+import { DR_ZONE, eventDay, sessionHolds } from "@/lib/dealroom/logic";
 import { moduleClock } from "@/lib/clock";
 import { deskProblem, deskRefusal } from "@/lib/expo/ops";
-import type { DrMeeting } from "@/lib/dealroom/types";
+import type { DrMeeting, DrSession } from "@/lib/dealroom/types";
 import { addMinutes, fmtStamp } from "@/lib/time";
 import type { AppState, Delegate, Shift } from "@/lib/types";
 
 type Post = { kind: "desk" } | { kind: "drdesk" } | { kind: "zone"; zoneId: string; direction: "in" | "out" } | { kind: "room"; roomId: string };
 // `waivable`: a refusal staff may override with a PIN. At the desk only a stand that still owes (OPS-1); at a door
 // hours, entitlement, re-entry and capacity, never a bad, unpaid or unaccredited badge (AZ-5)
-type Verdict = { verdict: "allow" | "deny" | "override"; reason?: string; delegate?: Delegate; meeting?: DrMeeting; waivable?: boolean };
+type Verdict = { verdict: "allow" | "deny" | "override"; reason?: string; delegate?: Delegate; meeting?: DrMeeting; drSession?: DrSession; waivable?: boolean };
 
 const findBadge = (state: AppState, code: string) => state.delegates.find((d) => d.badgeCode.toLowerCase() === code.trim().toLowerCase() || d.id === code.trim());
 
@@ -39,6 +39,14 @@ function meetingsToday(state: AppState, appId: string) {
     .sort((a, b) => a.start.localeCompare(b.start));
 }
 
+/** The sessions a participant hosts or accepted on the clock's day, earliest first. */
+function sessionsToday(state: AppState, appId: string) {
+  const today = state.dealRoom.clock.slice(0, 10);
+  return state.dealRoom.sessions.filter((s) => s.start.slice(0, 10) === today && sessionHolds(s, appId)).sort((a, b) => a.start.localeCompare(b.start));
+}
+
+const describeSession = (state: AppState, s: DrSession) => `${s.start.slice(11)} ${s.title}, ${state.rooms.find((r) => r.id === s.roomId)?.name ?? "the Deal Room"}`;
+
 function describe(state: AppState, m: DrMeeting, appId: string) {
   const dr = state.dealRoom;
   const x = dr.matches.find((mm) => mm.id === m.matchId)!;
@@ -52,12 +60,20 @@ function describe(state: AppState, m: DrMeeting, appId: string) {
 function drDeskVerdict(state: AppState, code: string, eventId: string): Verdict {
   const who = drParticipant(state, code, eventId);
   if (who.verdict === "deny") return who;
+  const clock = state.dealRoom.clock;
+  // a meeting or a session they host or accepted: either is business in the Deal Room today
   const today = meetingsToday(state, who.appId!);
-  if (!today.length) return { verdict: "deny", reason: "No Deal Room meetings today. Check the participant's portal for their schedule.", delegate: who.delegate };
-  const next = today.find((m) => m.status !== "Held" && m.end > state.dealRoom.clock);
-  if (!next) return { verdict: "deny", reason: "All of today's meetings are over", delegate: who.delegate };
+  const sessions = sessionsToday(state, who.appId!);
+  if (!today.length && !sessions.length) return { verdict: "deny", reason: "No Deal Room meetings or sessions today. Check the participant's portal for their schedule.", delegate: who.delegate };
+  const nextMeeting = today.find((m) => m.status !== "Held" && m.end > clock);
+  const nextSession = sessions.find((s) => s.end > clock);
+  if (!nextMeeting && !nextSession) return { verdict: "deny", reason: "All of today's meetings and sessions are over", delegate: who.delegate };
   const open = today.filter((m) => m.status !== "Held").length;
-  return { verdict: "allow", reason: `Checked in for ${open} meeting${open === 1 ? "" : "s"} today. Next: ${describe(state, next, who.appId!)}`, delegate: who.delegate, meeting: next };
+  const ahead = sessions.filter((s) => s.end > clock).length;
+  const counts = [open ? `${open} meeting${open === 1 ? "" : "s"}` : "", ahead ? `${ahead} session${ahead === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+  const sessionFirst = nextSession && (!nextMeeting || nextSession.start < nextMeeting.start);
+  const next = sessionFirst ? describeSession(state, nextSession!) : describe(state, nextMeeting!, who.appId!);
+  return { verdict: "allow", reason: `Checked in for ${counts} today. Next: ${next}`, delegate: who.delegate, meeting: nextMeeting };
 }
 
 /** A Deal Room room's door: only a party to a meeting at this room, from 15 minutes before it until it ends. */
@@ -65,6 +81,17 @@ function drDoorVerdict(state: AppState, code: string, roomId: string, eventId: s
   const who = drParticipant(state, code, eventId);
   if (who.verdict === "deny") return who;
   const clock = state.dealRoom.clock;
+  // the presentation area and roundtable room hold sessions: the host and those who accepted, from 15 minutes before
+  if (state.dealRoom.configs[eventId]?.sessionRooms.includes(roomId)) {
+    const mine = sessionsToday(state, who.appId!);
+    const here = mine.find((s) => s.roomId === roomId && clock >= addMinutes(s.start, -15) && clock < s.end);
+    if (!here) {
+      const next = mine.find((s) => s.end > clock);
+      const invited = state.dealRoom.sessions.find((s) => s.roomId === roomId && !s.cancelled && s.invitees.includes(who.appId!) && !sessionHolds(s, who.appId!) && clock >= addMinutes(s.start, -15) && clock < s.end);
+      return { verdict: "deny", reason: invited ? `Invited to "${invited.title}" but did not accept: the coordinator can add them` : next ? `No session for them here now. Next: ${describeSession(state, next)}` : "No session for them in this room now", delegate: who.delegate };
+    }
+    return { verdict: "allow", reason: `Session: ${here.title}, until ${here.end.slice(11)}${here.host === who.appId ? ". Hosting" : ""}`, delegate: who.delegate, drSession: here };
+  }
   const today = meetingsToday(state, who.appId!).filter((m) => m.status !== "Held");
   const here = today.find((m) => m.roomId === roomId && clock >= addMinutes(m.start, -15) && clock < m.end);
   if (!here) {
@@ -108,6 +135,9 @@ export function Scanner() {
   const drRoom = !!room && room.zoneId === DR_ZONE;
   const roomSession = post.kind === "room" && !drRoom ? sessionAtRoom(state, post.roomId, DAY) : undefined;
   const roomIn = roomSession ? state.delegates.filter((d) => (d.roomLog ?? []).some((l) => l.sessionId === roomSession.id && l.verdict !== "deny")).length : 0;
+  const sessionRoom = drRoom && !!dr.configs[event.id]?.sessionRooms.includes(room!.id);
+  const roomSessions = sessionRoom ? dr.sessions.filter((s) => s.roomId === room!.id && !s.cancelled && s.start.slice(0, 10) === clock.slice(0, 10)).sort((a, b) => a.start.localeCompare(b.start)) : [];
+  const roomNow = roomSessions.find((s) => clock >= addMinutes(s.start, -15) && clock < s.end);
   const roomMeetings = drRoom ? dr.meetings.filter((m) => m.roomId === room!.id && m.start.slice(0, 10) === clock.slice(0, 10) && ["Confirmed", "In progress", "Held"].includes(m.status)) : [];
   const tierOf = (d: Delegate) => state.tiers.find((t) => t.id === d.tierId)?.name;
   const now = () => (mod ? fmtStamp(clock) : new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
@@ -138,6 +168,12 @@ export function Scanner() {
     }
     if (post.kind === "room" && drRoom) {
       const v = drDoorVerdict(state, c, post.roomId, event.id);
+      // a session room's door takes attendance as people scan in
+      if (v.verdict === "allow" && v.delegate && v.drSession) {
+        const already = v.drSession.attended.includes(state.dealRoom.apps.find((a) => a.delegateId === v.delegate!.id)?.id ?? "");
+        if (!already) dispatch({ type: "dr/sessionArrive", sessionId: v.drSession.id, delegateId: v.delegate.id });
+        v.reason += already ? ". Already in" : ". Marked present";
+      }
       if (v.verdict === "allow" && v.delegate && v.meeting && v.side) {
         const other = v.side === "seeker" ? "provider" : "seeker";
         if (!v.meeting.arrivals[v.side]) dispatch({ type: "dr/arrive", delegateId: v.delegate.id });
@@ -280,8 +316,14 @@ export function Scanner() {
             ))}
           </select>
           {mod && <div className="mt-2 text-[13px] text-white/60">Summit day {DAY}, {fmtStamp(clock)} on the {mod.name}</div>}
-          {post.kind === "drdesk" && <div className="mt-1 text-[13px] text-white/60">Checks the participant in for every meeting they have today; the live board shows who is here.</div>}
-          {drRoom && (
+          {post.kind === "drdesk" && <div className="mt-1 text-[13px] text-white/60">Checks the participant in for every meeting and session they have today; the live board shows who is here.</div>}
+          {drRoom && sessionRoom && (
+            <div className="mt-1 flex items-center justify-between gap-3 text-[13px] text-white/60">
+              <span className="truncate">{roomNow ? `${clock < roomNow.start ? "Next" : "Now"}: ${roomNow.title}` : roomSessions.length ? `${roomSessions.length} sessions here today` : "No sessions here today"}</span>
+              {roomNow && <span className="shrink-0 tabular-nums font-medium text-white">{roomNow.attended.length} in</span>}
+            </div>
+          )}
+          {drRoom && !sessionRoom && (
             <div className="mt-1 flex items-center justify-between gap-3 text-[13px] text-white/60">
               <span>{roomMeetings.length ? `${roomMeetings.length} meetings here today` : "No meetings here today"}</span>
               <span className="tabular-nums font-medium text-white">{roomMeetings.filter((m) => m.status === "In progress").length} in progress</span>
@@ -404,7 +446,8 @@ export function Scanner() {
               // the post on this person's rota for the day and the half-day opens first
               const slot = (mod ? clock.slice(11, 16) : new Date().toTimeString().slice(0, 5)) < "13:00" ? "Morning" : "Afternoon";
               const shift = state.shifts.find((x) => x.eventId === event.id && x.day === DAY && x.slot === slot && x.memberId === memberId);
-              setPost(toPost(shift));
+              // a link that names the post (the Deal Room desk's own link) keeps it; otherwise the rota decides
+              setPost(params.get("post") === "drdesk" && event.id === params.get("event") ? { kind: "drdesk" } : toPost(shift));
               setResult(null);
               setLog([]);
             }}
@@ -412,7 +455,7 @@ export function Scanner() {
         )}
         <footer className="px-5 py-3 text-[13px] text-white/40">
           {post.kind === "drdesk" || drRoom
-            ? "Checks in order: valid badge → this event → a Deal Room participant → a meeting today (desk) or here, from 15 minutes before (door)."
+            ? "Checks in order: valid badge → this event → a Deal Room participant → a meeting or session today (desk) or here, from 15 minutes before (door)."
             : "Checks in order: valid badge → accredited → entitled here, now → anti-passback → zone capacity. An override needs the PIN of someone allowed to give one, and never admits a bad, unpaid or unaccredited badge. Offline: cached list, capacity check skipped."}
         </footer>
       </div>

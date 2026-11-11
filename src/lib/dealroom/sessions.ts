@@ -7,7 +7,7 @@
  */
 import type { AppState } from "../types";
 import { addMinutes, crosses, fmtStamp } from "../time";
-import { acting, drCan, feeSettled, occupies, qualified, sessionClash, staffName } from "./logic";
+import { acting, drCan, feeSettled, occupies, qualified, sessionClash, sessionHolds, staffName } from "./logic";
 import type { DealRoomState, DrApplication, DrSession, MeetingOutcome } from "./types";
 import { send, uid, withDr } from "./util";
 
@@ -19,7 +19,8 @@ export type DrSessionAction =
   | { type: "dr/sessionRespond"; sessionId: string; appId: string; answer: "Accepted" | "Declined" }
   | { type: "dr/sessionAttend"; sessionId: string; appId: string; present: boolean }
   | { type: "dr/sessionOutcome"; sessionId: string; appId: string; category: MeetingOutcome; note: string }
-  | { type: "dr/sessionCancel"; sessionId: string; reason: string };
+  | { type: "dr/sessionCancel"; sessionId: string; reason: string }
+  | { type: "dr/sessionArrive"; sessionId: string; delegateId: string };
 
 /** Who may be invited: a qualified seeker with the fee settled, or a verified provider or institution. */
 export const invitable = (a: DrApplication) => (a.type === "seeker" ? qualified(a) && feeSettled(a) : a.verification?.state === "Verified");
@@ -147,6 +148,14 @@ export function drSessionReducer(state: AppState, action: DrSessionAction): AppS
         outcomes: [...x.outcomes.filter((o) => o.appId !== action.appId), { appId: action.appId, category: action.category, note: action.note.trim(), by: me!.id, at }],
         history: [...x.history, { at, by: me!.id, what: `${org}: ${action.category}${action.note.trim() ? `. ${action.note.trim()}` : ""}` }],
       }));
+      return withDr(state, dr);
+    }
+
+    case "dr/sessionArrive": {
+      // the room's door scanner: the badge is the check, so no staff role is needed, only the person's place in it
+      const app = dr.apps.find((a) => a.delegateId === action.delegateId);
+      if (!s || !app || !sessionHolds(s, app.id) || at < addMinutes(s.start, -15) || at >= s.end || s.attended.includes(app.id)) return state;
+      dr = patch(dr, s.id, (x) => ({ ...x, attended: [...x.attended, app.id], history: [...x.history, { at, by: "door", what: `${app.org.name} scanned in at the door` }] }));
       return withDr(state, dr);
     }
 

@@ -771,7 +771,8 @@ export function seedDealRoom(): { dr: DealRoomState; delegates: Delegate[]; drZo
       assignee: c.reviewer,
       org: { name: c.name, regNo: `REG-${c.id.slice(-2)}-PUB`, country: "Kenya", sector: c.sectors[0], website: `https://${c.domain}.example` },
       contact: { name, email, phone: `+25470${c.id.slice(-2)}00${c.id.slice(-2)}11` },
-      decisionMaker: { name, title, email, phone: `+25470${c.id.slice(-2)}00${c.id.slice(-2)}11` },
+      // confirmed by the reviewer before verifying, as verification requires
+      decisionMaker: { name, title, email, phone: `+25470${c.id.slice(-2)}00${c.id.slice(-2)}11`, confirmed: c.verified ? { by: c.reviewer, at: addMinutes(c.verified, -90) } : undefined },
       mandate: { sectors: c.sectors, countries: ["Kenya", "Uganda", "Tanzania", "Rwanda"], stages: c.stages, ticketMin: c.min, ticketMax: c.max, currency: "USD", instruments: ["Procurement and contracts", "Pilots and deployment", ...(c.challenge!.route === "Public-private partnership" ? (["Project development"] as const) : [])], exclusions: [], timeline: c.challenge!.timeline },
       challenge: c.challenge,
       caps: { perDay: 5, perEvent: 12 },
