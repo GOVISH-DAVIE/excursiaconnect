@@ -31,7 +31,7 @@ import { UPLOAD_TYPES, cleanFileName, type Storage } from "../../storage/storage
 import type { AuthService, ClientMeta, Issued, Resolved } from "../auth/auth.service";
 import type { DrConfigRecord } from "../dealroom/dealroom.mapper";
 import type { Note, OrganisersRepo } from "./organisers.repo";
-import { eventView, organiserView } from "./organisers.views";
+import { eventView, organiserView, withoutGoneDocs } from "./organisers.views";
 
 const MAX_KYC_UPLOADS_PER_HOUR = 20;
 
@@ -68,10 +68,10 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
 
   /** An organiser's view; Algotech's leaves out the drafts, which only the organiser sees (OR-2). */
   async function viewOf(organiserId: string, forAdmin = false): Promise<OrganiserView> {
-    const [row, events, owner] = await Promise.all([repo.organiser(organiserId), repo.eventsOf(organiserId), repo.ownerOf(organiserId)]);
+    const [row, events, owner, scans] = await Promise.all([repo.organiser(organiserId), repo.eventsOf(organiserId), repo.ownerOf(organiserId), repo.fileStates(organiserId)]);
     if (!row) throw new HttpError("not_found", "No such organiser.");
     const records = events.map((e) => e.record as unknown as EventRecord).filter((e) => !forAdmin || e.state !== "Draft");
-    return organiserView(row.record as unknown as Organiser, records, owner);
+    return organiserView(row.record as unknown as Organiser, records, owner, scans);
   }
 
   async function eventViewOf(eventId: string): Promise<EventView> {
@@ -177,10 +177,13 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
     signDpa: (session: Resolved, organiserId: string, by: string, ip: string | null) =>
       changeOrganiser(session, organiserId, "organiser/signDpa", ip, (o) => must(signDpa(o, by, at())), { by }),
 
-    submitKyc: (session: Resolved, organiserId: string, ip: string | null) =>
-      changeOrganiser(session, organiserId, "organiser/submitKyc", ip, (o) => must(submitKyc(o, at())), undefined, async (o) =>
+    // a document that failed its virus scan goes before the rules count what is there
+    submitKyc: async (session: Resolved, organiserId: string, ip: string | null) => {
+      const scans = await repo.fileStates(organiserId);
+      return changeOrganiser(session, organiserId, "organiser/submitKyc", ip, (o) => must(submitKyc(withoutGoneDocs(o, scans), at())), undefined, async (o) =>
         (await repo.adminIds()).map((to) => ({ to, subject: `KYC to check: ${o.name}`, link: `/team/admin/organisers/${o.id}` })),
-      ),
+      );
+    },
 
     /** Where to upload one KYC document; it is attached once it has arrived (`completeKycDoc`). */
     async startKycDoc(session: Resolved, organiserId: string, req: { kind: string; name: string; contentType: string; size: number }): Promise<UploadTarget> {
@@ -201,6 +204,7 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
       await mustOwn(session, organiserId);
       const file = await repo.fileOf(fileId, organiserId);
       if (!file?.kind) throw new HttpError("not_found", "No such upload.");
+      if (file.state === "rejected") throw new HttpError("conflict", `${file.name} failed the virus check. Upload a clean copy.`);
       const arrived = await storage.stat(file.storageKey);
       if (!arrived || arrived.size !== file.size) throw new HttpError("conflict", "The file hasn't arrived yet. Try uploading it again.");
       return changeOrganiser(session, organiserId, "organiser/addKycDoc", ip, (o) =>
@@ -220,6 +224,7 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
       const file = await repo.fileOf(fileId, organiserId);
       if (!file) throw new HttpError("not_found", "No such document.");
       if (file.state === "rejected") throw new HttpError("conflict", "This file failed its virus scan and can't be opened.");
+      if (file.deletedAt) throw new HttpError("conflict", "This file was deleted.");
       if (file.state !== "clean" && !allowUnscanned) throw new HttpError("conflict", "This file is waiting for its virus scan. Try again in a few minutes.");
       const link = storage.downloadUrl(file.storageKey, { name: file.name, contentType: file.contentType });
       await repo.audit({ actorKind: isAdmin(session) ? "admin" : "owner", actorId: session.user.id, action: "file/open", detail: { kind: file.kind, scanned: file.state === "clean" }, ip }, "file", file.id, null);

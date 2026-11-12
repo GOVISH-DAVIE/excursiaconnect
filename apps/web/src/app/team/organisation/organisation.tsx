@@ -11,7 +11,7 @@ import { KYC_DOC_KINDS } from "@excursia/contracts/onboarding";
 import { PageHeader, Section } from "@/components/ui";
 import { onboardingApi } from "@/features/onboarding/api";
 import { useMyOrganisers, useOpenKycDoc, useOrganiserChange } from "@/features/onboarding/hooks/use-onboarding";
-import { Failed, FileButton, Gaps, History, KycTone, Loading, StateTone } from "../bits";
+import { Failed, FileButton, Gaps, History, KycTone, Loading, ScanNote, StateTone } from "../bits";
 
 export function Organisation() {
   const mine = useMyOrganisers();
@@ -140,10 +140,15 @@ function Kyc({ initial }: { initial: OrganiserView }) {
                       {returned(`doc:${kind}`) && <div className="text-[13px] text-bad">Algotech: {returned(`doc:${kind}`)}. Upload a new one.</div>}
                       {docs.length ? (
                         docs.map((d) => (
-                          <div key={d.id} className="flex items-center gap-3 text-[13px] text-slate">
-                            <button type="button" className="truncate underline underline-offset-4 hover:text-ink" onClick={() => open.mutate(d.id)}>
-                              {d.name}
-                            </button>
+                          <div key={d.id} className="flex flex-wrap items-center gap-x-3 text-[13px] text-slate">
+                            {d.scan === "failed" || d.scan === "deleted" ? (
+                              <span className="truncate line-through">{d.name}</span>
+                            ) : (
+                              <button type="button" className="truncate underline underline-offset-4 hover:text-ink" onClick={() => open.mutate(d.id)}>
+                                {d.name}
+                              </button>
+                            )}
+                            <ScanNote scan={d.scan} fix="Remove it and upload a clean copy." />
                             {edit && (
                               <button type="button" className="text-bad hover:underline" disabled={remove.isPending} onClick={() => remove.mutate(d.id)}>
                                 Remove

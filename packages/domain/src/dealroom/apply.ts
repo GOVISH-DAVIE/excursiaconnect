@@ -124,3 +124,17 @@ export function blankApplication(opts: { id: string; eventId: string; mode: Appl
     history: [{ at: now, by: "applicant", what: "Started an application" }],
   };
 }
+
+/**
+ * When a Deal Room document is deleted (PRD, Document retention): `retentionMonths` after the conversion end, the
+ * day the Deal Room's settings give. A month past the end of a shorter month ends on its last day (31 Aug + 6 months
+ * is 28 or 29 Feb).
+ */
+export function retentionDate(rules: { conversionEnd: string; retentionMonths: number }): string {
+  const [y, m, d] = rules.conversionEnd.slice(0, 10).split("-").map(Number);
+  const months = m - 1 + rules.retentionMonths;
+  const year = y + Math.floor(months / 12);
+  const month = months % 12;
+  const last = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
+}

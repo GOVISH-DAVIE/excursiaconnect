@@ -4,6 +4,7 @@
  * @excursia/domain/core/onboarding; these are the shapes on the wire.
  */
 import { z } from "zod";
+import { ScanState } from "./apply";
 import { Email } from "./auth";
 
 const SixDigits = z.string().trim().regex(/^\d{6}$/, "six digits");
@@ -52,7 +53,8 @@ export type KycInput = z.infer<typeof KycInput>;
 export const DpaSign = z.object({ by: text(120).min(2) });
 export const KycDocUpload = z.object({ kind: z.enum(KYC_DOC_KINDS), name: z.string().min(1).max(200), contentType: z.string().max(120), size: z.number().int().min(1) });
 
-const Doc = z.object({ id: z.string(), kind: z.string(), name: z.string(), size: z.number(), at: z.string() });
+/** A KYC document, with where its virus scan stands: one that failed doesn't count, and should be removed and uploaded again. */
+const Doc = z.object({ id: z.string(), kind: z.string(), name: z.string(), size: z.number(), at: z.string(), scan: ScanState });
 const History = z.array(z.object({ at: z.string(), what: z.string() }));
 
 export const EventSummary = z.object({

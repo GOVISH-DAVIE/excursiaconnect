@@ -24,7 +24,7 @@ Internet :443 ──> nginx (server A; firewall open for 80 and 443, 22 from adm
 server A also runs:
   excursia-worker      pg-boss: outbox (email, SMS), reminders, STK queries and reconciliation,
                        virus scans, retention, digests, the archive; its own database role
-  clamd                optional; or the worker scans
+  clamd                ClamAV's daemon, on 127.0.0.1:3310: the worker's virus scan
 
 PostgreSQL     managed, in the chosen region, HA standby, 30-day point-in-time recovery, private network, TLS
                roles: migrator (schema) · app · worker · reporting_ro (oversight); app may only INSERT audit
@@ -57,13 +57,16 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
     - `COOKIE_DOMAIN=.example.co.ke`
     - `APP_ENV=production` (or `staging`), which every database command also reads from `migrate.env`
     - `RULES_CLOCK`: staging only, to try dated rules early; the API refuses it in production
-    - `STORAGE_DIR`: where uploads are kept until a bucket is chosen (D6), for example `/srv/excursia/uploads`. It must be on backed-up disk, writable by the API only, and outside every release folder
+    - `STORAGE_DIR`: where uploads are kept until a bucket is chosen (D6), for example `/srv/excursia/uploads`. It must be on backed-up disk, writable by the API and the worker only (the worker reads files to scan them and deletes them), and outside every release folder
     - `AUTH_SECRET`: 32 random bytes, base64 (`openssl rand -base64 32`). It is different in each environment and never rotated casually, since changing it makes every enrolled authenticator unreadable. An offline copy goes in the vault with the other secrets.
     - the provider keys
     - email (D7, Zoho over SMTP): `MAIL_TRANSPORT=smtp`, `SMTP_HOST=smtp.zoho.com`, `SMTP_PORT=465`, `SMTP_SECURE=true`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM="Events <noreply@algotech.co.ke>"`. The API sends sign-in codes itself; everything else goes through the worker. Away from production, `MAIL_ALLOW` (addresses or `@domains`) names the only recipients that get real mail; the rest is printed to the log
   - The API refuses to start in production without https origins and a cookie domain.
   - On SIGTERM it stops taking connections, finishes open requests and closes its pool, and exits after 10 s at most.
-- **`excursia-worker`** runs `node dist/worker.js` in `apps/api` with `/etc/excursia/worker.env`: `WORKER_DATABASE_URL` (the `worker` role), `AUTH_SECRET`, `WEB_ORIGINS` (the first is the site the emails link to) and the same email settings as the API.
+- **`excursia-worker`** runs `node dist/worker.js` in `apps/api` with `/etc/excursia/worker.env`: `WORKER_DATABASE_URL` (the `worker` role), `AUTH_SECRET`, `WEB_ORIGINS` (the first is the site the emails link to), the same email settings as the API, `STORAGE_DIR` (the API's) and `CLAMD_ADDRESS`.
+  - **Virus scan:** every 3 seconds it takes up to five new uploads and scans each through clamd (`CLAMD_ADDRESS=127.0.0.1:3310`, or the socket's path). A clean file may then be opened; an infected one is deleted at once, kept as a row with the signature found, and its owner is emailed to upload a clean copy, which the rules then need before submitting. An upload not there yet is looked at again in 15 seconds, and one that never arrived is forgotten after an hour. If clamd doesn't answer, the file waits a minute and the error is logged: nothing is cleared without a scan. The API and the worker refuse to start in production without `CLAMD_ADDRESS`.
+  - **ClamAV:** `apt install clamav-daemon clamav-freshclam`; in `/etc/clamav/clamd.conf` set `TCPSocket 3310`, `TCPAddr 127.0.0.1` and `StreamMaxLength 25M` (above `UPLOAD_MAX_MB`); `freshclam` keeps the signatures current (check `systemctl status clamav-freshclam`). clamd needs about 1.5 GB of memory for its signatures. Test it with the EICAR test file: it must come back rejected.
+  - **Retention:** once a minute it deletes the bytes of files past their retention date, keeping each row and an audit entry. A Deal Room document's date is set when it is uploaded: the Deal Room's retention months (12 by default) after its conversion end. KYC documents have none: they are kept while the organiser works with Algotech.
   - It sends the outbox every 3 seconds: a batch claimed with `FOR UPDATE SKIP LOCKED`, so a second worker never sends the same message. A failure is retried after 1, 5, 15, 60 and 240 minutes, then marked failed; a message stuck "sending" by a worker that died goes back in the queue after 10 minutes. pg-boss joins it for timed jobs (reminders, STK queries) when those are built.
   - On SIGTERM it finishes the batch in hand and exits.
   - **Before the first deploy that sends email:** publish SPF, DKIM and DMARC for the sending domain as Zoho gives them, or mail lands in spam. Then `node dist/cli/check-mail.js` logs in without sending; `--to <address>` sends one test.

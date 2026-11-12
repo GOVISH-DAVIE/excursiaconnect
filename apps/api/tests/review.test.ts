@@ -89,7 +89,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("reviewing an application", () =
       return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     };
     base = await start({});
-    prodBase = await start({ APP_ENV: "production" }); // production: unscanned files stay closed
+    prodBase = await start({ APP_ENV: "production", CLAMD_ADDRESS: "127.0.0.1:3310" }); // production: unscanned files stay closed
 
     // a real application, with real files, submitted by its applicant
     appId = MyApplication.parse((await call("POST", mine(), "applicant", { mode: "seeker" })).json).id;

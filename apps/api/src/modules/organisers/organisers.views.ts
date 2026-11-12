@@ -2,6 +2,7 @@
  * What the organiser's and Algotech's screens see of an organiser and an event, built from the rules' records.
  * Shared by the owner's service and Algotech's (platform module), so both read the same thing.
  */
+import type { ScanState } from "@excursia/contracts/apply";
 import type { EventSummary, EventView, OrganiserView } from "@excursia/contracts/onboarding";
 import { KYC_ITEMS, eventEditable, eventGaps, kycEditable, kycGaps, rateCardOf, termsFrom } from "@excursia/domain/core/onboarding";
 import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
@@ -24,8 +25,12 @@ export function eventSummary(e: EventRecord, organiser: string): EventSummary {
   };
 }
 
-export function organiserView(o: Organiser, events: EventRecord[], owner: { name: string; email: string } | null): OrganiserView {
-  const gaps = kycGaps(o);
+/** KYC documents that failed the virus scan, or were deleted, no longer count. */
+export const withoutGoneDocs = (o: Organiser, scans: Map<string, ScanState>): Organiser =>
+  o.kycDocs?.some((d) => ["failed", "deleted"].includes(scans.get(d.id) ?? "")) ? { ...o, kycDocs: o.kycDocs.filter((d) => !["failed", "deleted"].includes(scans.get(d.id) ?? "")) } : o;
+
+export function organiserView(o: Organiser, events: EventRecord[], owner: { name: string; email: string } | null, scans: Map<string, ScanState> = new Map()): OrganiserView {
+  const gaps = kycGaps(withoutGoneDocs(o, scans));
   return {
     id: o.id,
     name: o.name,
@@ -42,7 +47,7 @@ export function organiserView(o: Organiser, events: EventRecord[], owner: { name
     payoutAccount: o.payoutAccount,
     signatory: o.signatory ?? { name: "", title: "" },
     dpaSigned: o.dpaSigned ?? null,
-    docs: o.kycDocs ?? [],
+    docs: (o.kycDocs ?? []).map((d) => ({ ...d, scan: scans.get(d.id) ?? "clean" })),
     gaps,
     history: o.history ?? [],
     owner,

@@ -4,7 +4,8 @@
  * - `uploadTarget` hands the browser a short-lived, signed place to PUT exactly one file of an exact size and type;
  *   the bytes never pass through a service, and with a bucket they never reach the API at all;
  * - `stat` says whether the file arrived, and how big it is.
- * Every file starts in quarantine (file.state); the virus scan that clears it is M1.2.
+ * - `read` and `remove` are the worker's: it scans what arrived, and deletes what failed or reached its retention date.
+ * Every file starts in quarantine (file.state) until the worker's virus scan clears or rejects it.
  */
 export type UploadTarget = { url: string; method: "PUT"; headers: Record<string, string> };
 
@@ -13,6 +14,10 @@ export interface Storage {
   stat(key: string): Promise<{ size: number } | null>;
   /** A link that downloads one file, for two minutes, as an attachment with this name and type. */
   downloadUrl(key: string, file: { name: string; contentType: string }): { url: string; expiresAt: Date };
+  /** The file's bytes, or null if nothing is there. */
+  read(key: string): Promise<Buffer | null>;
+  /** Deletes the file; nothing happens if it is already gone. */
+  remove(key: string): Promise<void>;
 }
 
 /** The types an applicant may upload, with the bytes each must start with (checked when the file arrives). */

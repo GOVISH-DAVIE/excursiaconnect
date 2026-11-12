@@ -7,7 +7,6 @@
  *   <module>.repo.ts        the only code that touches @excursia/db
  * and its index.ts assembles them; this file only mounts what each module returns.
  */
-import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
@@ -27,7 +26,7 @@ import { dealRoomModule } from "./modules/dealroom";
 import { healthModule } from "./modules/health";
 import { uploadsModule } from "./modules/uploads";
 import { deriveKeys } from "./security/secrets";
-import { createLocalStorage, type LocalStorage } from "./storage/local";
+import { createLocalStorage, uploadsDir, type LocalStorage } from "./storage/local";
 
 export type AppDeps = {
   config: Config;
@@ -84,8 +83,8 @@ export function createApp({ config, db, mailer, now, storage, logError = default
   const uploadMaxBytes = config.UPLOAD_MAX_MB * 1_048_576;
   const files =
     storage ??
-    createLocalStorage({ dir: config.STORAGE_DIR ?? fileURLToPath(new URL("../../../data/uploads", import.meta.url)), key: deriveKeys(config.AUTH_SECRET).upload });
-  // until M1.2's virus scan, unscanned files open only away from production
+    createLocalStorage({ dir: uploadsDir(config), key: deriveKeys(config.AUTH_SECRET).upload });
+  // the worker's scan clears files within seconds; away from production one not yet scanned may still be opened
   const allowUnscanned = config.APP_ENV ? config.APP_ENV !== "production" : config.NODE_ENV !== "production";
   app.use("/v1/dealroom", dealRoomModule({ db, now: rulesNow, storage: files, allowUnscanned }));
   app.use("/v1/apply", applyModule({ db, now: rulesNow, storage: files, uploadMaxBytes }));

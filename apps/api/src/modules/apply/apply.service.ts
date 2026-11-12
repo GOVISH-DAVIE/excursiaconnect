@@ -8,9 +8,9 @@
  * (patchDraft), dr/submit for the reference and the confirmation message, dr/addDoc once an upload has arrived.
  */
 import { randomBytes } from "node:crypto";
-import type { ApplyForm, ApplyMode, DraftChanges, MyApplication, MyApplications, RespondInput, UploadTarget } from "@excursia/contracts/apply";
+import type { ApplyForm, ApplyMode, DraftChanges, MyApplication, MyApplications, RespondInput, ScanState, UploadTarget } from "@excursia/contracts/apply";
 import type { Action } from "@excursia/domain/core/reducer";
-import { blankApplication, modeOf, patchDraft } from "@excursia/domain/dealroom/apply";
+import { blankApplication, modeOf, patchDraft, retentionDate } from "@excursia/domain/dealroom/apply";
 import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, formGaps, openRfi, rfiDue } from "@excursia/domain/dealroom/logic";
 import type { DrApplication, DrConfig } from "@excursia/domain/dealroom/types";
 import type { AppState } from "@excursia/domain/types";
@@ -33,8 +33,14 @@ const MAX_UPLOADS_PER_HOUR = 30;
 
 export type ApplyDeps = { repo: ApplyRepo; commands: Commands; storage: Storage; uploadMaxBytes: number };
 
+type Scans = Map<string, ScanState>;
+/** Documents that failed the virus scan, or were deleted, no longer count: the applicant uploads them again. */
+const gone = (s: ScanState | undefined) => s === "failed" || s === "deleted";
+const withoutGone = (app: DrApplication, scans: Scans): DrApplication =>
+  app.documents.some((d) => gone(scans.get(d.id))) ? { ...app, documents: app.documents.filter((d) => !gone(scans.get(d.id))) } : app;
+
 /** The application as its applicant sees it. */
-function view(app: DrApplication, cfg: DrConfig, version: number): MyApplication {
+function view(app: DrApplication, cfg: DrConfig, version: number, scans: Scans): MyApplication {
   const dm = app.decisionMaker;
   const decisionMaker = { name: dm.name, title: dm.title, email: dm.email, phone: dm.phone };
   return {
@@ -59,9 +65,10 @@ function view(app: DrApplication, cfg: DrConfig, version: number): MyApplication
       mandate: app.mandate,
       challenge: app.challenge,
     },
-    documents: app.documents.map((d) => ({ id: d.id, kind: d.kind, name: d.name, size: d.size, at: d.at })),
+    // a document with no file row is the demo's, which never went through a scan
+    documents: app.documents.map((d) => ({ id: d.id, kind: d.kind, name: d.name, size: d.size, at: d.at, scan: scans.get(d.id) ?? "clean" })),
     requests: app.rfis.map((r) => ({ id: r.id, questions: r.questions, docs: r.docs, at: r.at, due: rfiDue(r, cfg), answeredAt: r.response?.at ?? null, open: !r.response && !r.expiry })),
-    gaps: formGaps(app, cfg),
+    gaps: formGaps(withoutGone(app, scans), cfg),
   };
 }
 
@@ -95,7 +102,7 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
 
   /** The application as it now is, after a command. */
   async function after(state: AppState, appId: string, cfg: DrConfig) {
-    return view(appIn(state, appId), cfg, await repo.versionOf(appId));
+    return view(appIn(state, appId), cfg, await repo.versionOf(appId), await repo.fileStates([appId]));
   }
 
   /** Reads go to the summary row, not the whole aggregate: only the owner's own record. */
@@ -136,8 +143,10 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
     async mine(session: Resolved, slug: string): Promise<MyApplications> {
       const email = applicant(session);
       const e = await event(slug);
-      return (await repo.mine(e.id, email)).map((r) => {
-        const v = view(r.record as unknown as DrApplication, e.cfg, r.version);
+      const rows = await repo.mine(e.id, email);
+      const scans = await repo.fileStates(rows.map((r) => r.id));
+      return rows.map((r) => {
+        const v = view(r.record as unknown as DrApplication, e.cfg, r.version, scans);
         return { id: v.id, mode: v.mode, status: v.status, ref: v.ref, submittedAt: v.submittedAt, draftSavedAt: v.draftSavedAt, org: v.form.org.name };
       });
     },
@@ -146,7 +155,7 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
       const email = applicant(session);
       const e = await event(slug);
       const { app, version } = await ownRow(e.id, appId, email);
-      return view(app, e.cfg, version);
+      return view(app, e.cfg, version, await repo.fileStates([appId]));
     },
 
     /** A new draft of one kind; or, with an invitation sent to this email, the invited application. */
@@ -181,13 +190,14 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
     async save(session: Resolved, slug: string, appId: string, changes: DraftChanges, ip: string | null): Promise<MyApplication> {
       const email = applicant(session);
       const e = await event(slug);
+      const scans = await repo.fileStates([appId]);
       const state = await commands.run({
         eventId: e.id,
         actor: { kind: "applicant", appId },
         userId: session.user.id,
         ip,
         owned: owns(appId, email),
-        actions: (s) => [{ type: "dr/saveDraft", app: patched(appIn(s, appId), changes) }],
+        actions: (s) => [{ type: "dr/saveDraft", app: patched(withoutGone(appIn(s, appId), scans), changes) }],
       });
       return after(state, appId, e.cfg);
     },
@@ -196,16 +206,20 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
     async submit(session: Resolved, slug: string, appId: string, changes: DraftChanges | undefined, ip: string | null): Promise<MyApplication> {
       const email = applicant(session);
       const e = await event(slug);
+      const scans = await repo.fileStates([appId]);
       const state = await commands.run({
         eventId: e.id,
         actor: { kind: "applicant", appId },
         userId: session.user.id,
         ip,
         owned: owns(appId, email),
-        actions: (s) => [
-          ...(changes && Object.keys(changes).length ? [{ type: "dr/saveDraft" as const, app: patched(appIn(s, appId), changes) }] : []),
-          { type: "dr/submit", appId },
-        ],
+        actions: (s) => {
+          // a document that failed its scan goes before the rules count what is there
+          const stored = appIn(s, appId);
+          const kept = withoutGone(stored, scans);
+          const draft = changes && Object.keys(changes).length ? patched(kept, changes) : kept;
+          return [...(draft !== stored ? [{ type: "dr/saveDraft" as const, app: draft }] : []), { type: "dr/submit" as const, appId }];
+        },
       });
       return after(state, appId, e.cfg);
     },
@@ -231,7 +245,9 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
 
       const fileId = `file_${randomBytes(10).toString("hex")}`;
       const storageKey = `dr/${e.id}/${appId}/${fileId}`;
-      await repo.addFile({ id: fileId, eventId: e.id, appId, kind: req.kind, storageKey, name: cleanName(req.name), contentType: req.contentType, size: req.size });
+      // kept until the Deal Room's retention date: 12 months after the conversion end, by default
+      const retentionUntil = new Date(`${retentionDate(e.cfg.rules)}T23:59:59+03:00`);
+      await repo.addFile({ id: fileId, eventId: e.id, appId, kind: req.kind, storageKey, name: cleanName(req.name), contentType: req.contentType, size: req.size, retentionUntil });
       return { fileId, ...storage.uploadTarget(storageKey, { contentType: req.contentType, size: req.size }) };
     },
 
@@ -241,6 +257,7 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
       const e = await event(slug);
       const file = await repo.fileOf(fileId, appId);
       if (!file) throw new HttpError("not_found", "No such upload.");
+      if (file.state === "rejected") throw new HttpError("conflict", `${file.name} failed the virus check. Upload a clean copy.`);
       const arrived = await storage.stat(file.storageKey);
       if (!arrived || arrived.size !== file.size) throw new HttpError("conflict", "The file hasn't arrived yet. Try uploading it again.");
       const state = await commands.run({
@@ -269,6 +286,7 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
         [...new Set(input.fileIds)].map(async (id) => {
           const f = await repo.fileOf(id, appId);
           const arrived = f && (await storage.stat(f.storageKey));
+          if (f?.state === "rejected") throw new HttpError("conflict", `${f.name} failed the virus check. Upload a clean copy.`);
           if (!f || !arrived || arrived.size !== f.size) throw new HttpError("conflict", "A file for this answer hasn't arrived. Upload it again.");
           return f;
         }),

@@ -5,8 +5,9 @@
  * a bucket replaces it when D6 is decided.
  */
 import { createHmac } from "node:crypto";
-import { mkdir, open, rename, stat } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { sameDigest } from "../security/secrets";
 import { looksLike, type Storage } from "./storage";
 
@@ -17,6 +18,9 @@ const SAFE_KEY = /^[a-z0-9][a-z0-9_/-]{2,200}$/;
 type Grant = { k: string; s: number; t: string; e: number };
 /** A download grant: the key, the name and type to serve it under, the expiry, and "d" so it can't pass as an upload. */
 type DownloadGrant = { d: 1; k: string; n: string; t: string; e: number };
+
+/** Where uploads are kept: STORAGE_DIR, else data/uploads in the repository. The API and the worker share it. */
+export const uploadsDir = (config: { STORAGE_DIR?: string }) => config.STORAGE_DIR ?? fileURLToPath(new URL("../../../../data/uploads", import.meta.url));
 
 export class UploadRefused extends Error {
   constructor(message: string) {
@@ -68,6 +72,10 @@ export function createLocalStorage(opts: { dir: string; key: Buffer; now?: () =>
       if (!(await stat(path).then(() => true, () => false))) throw new UploadRefused("This file is no longer here");
       return { path, name: g.n, contentType: g.t };
     },
+
+    read: (key) => readFile(pathOf(key)).catch(() => null),
+
+    remove: (key) => rm(pathOf(key), { force: true }),
 
     async stat(key) {
       try {

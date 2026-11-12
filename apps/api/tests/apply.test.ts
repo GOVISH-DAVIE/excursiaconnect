@@ -19,13 +19,18 @@ import { memoryMailer } from "../src/mail/mailer";
 import { createSeedRepo } from "../src/modules/seed/seed.repo";
 import { demoRows, demoUserId } from "../src/modules/seed/seed.service";
 import { deriveKeys, hashToken, newToken } from "../src/security/secrets";
-import { createLocalStorage } from "../src/storage/local";
+import { createFilesRepo } from "../src/modules/files/files.repo";
+import { createFilesService } from "../src/modules/files/files.service";
+import { testScanner } from "../src/scan/scanner";
+import { createLocalStorage, type LocalStorage } from "../src/storage/local";
 import { toInstant } from "../src/persistence/time";
 
 const WEB = "https://events.example.co.ke";
 const SLUG = "connected-africa-3";
 const run = Date.now().toString(36);
 const PDF = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(2000, 0x20)]);
+/** A PDF carrying the EICAR test marker, which every scanner (and the test scanner) reports as infected. */
+const INFECTED = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.from(["EICAR", "STANDARD", "ANTIVIRUS", "TEST", "FILE"].join("-")), Buffer.alloc(500, 0x20)]);
 
 describe.skipIf(!process.env.TEST_DATABASE_URL)("applying to the Deal Room", () => {
   const db = createDb(process.env.TEST_DATABASE_URL, 6);
@@ -36,6 +41,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("applying to the Deal Room", () 
   let server: Server;
   let base = "";
   let dir = "";
+  let storage: LocalStorage;
   const cookies: Record<string, string> = {};
   const users: string[] = [];
 
@@ -94,7 +100,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("applying to the Deal Room", () 
     await seedRepo.replaceDemo(demoRows());
     dir = await mkdtemp(join(tmpdir(), "excursia-uploads-"));
     cookies.lead = await signedIn(demoUserId("st_lead"));
-    const app = createApp({ config, db, mailer: memoryMailer(), now: () => clock, storage: createLocalStorage({ dir, key: deriveKeys(secret).upload }), logError: (e) => console.error(e) });
+    storage = createLocalStorage({ dir, key: deriveKeys(secret).upload });
+    const app = createApp({ config, db, mailer: memoryMailer(), now: () => clock, storage, logError: (e) => console.error(e) });
     server = await new Promise<Server>((resolve) => {
       const s = app.listen(0, "127.0.0.1", () => resolve(s));
     });
@@ -250,6 +257,42 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("applying to the Deal Room", () 
     expect(capital.mode).toBe("capital");
     expect(errorOf(await save("oldlink", capital.id, { providerKind: "Technology partner" })).fields).toEqual(["providerKind"]);
     expect((await start("oldlink", "banana")).status).toBe(400);
+  });
+
+  test("a document that fails the virus scan is deleted, doesn't count, and its applicant is told", async () => {
+    const worker = createFilesService({ repo: createFilesRepo(db), storage, scanner: testScanner });
+    // the worker takes the oldest first, a few at a time: run it until this file has its verdict
+    const scanned = async (fileId: string) => {
+      for (let i = 0; i < 20 && (await db.file.findUniqueOrThrow({ where: { id: fileId } })).state === "quarantine"; i++) await worker.scan();
+    };
+    await applicant("scanned");
+    const id = MyApplication.parse((await start("scanned", "seeker")).json).id;
+    const bad = await upload("scanned", id, "Pitch deck", INFECTED);
+    expect(bad.done?.status).toBe(200);
+    expect(MyApplication.parse(bad.done!.json).documents[0].scan).toBe("checking");
+    await scanned(bad.target!.fileId);
+    const after = MyApplication.parse((await call("GET", mine(`/${id}`), "scanned")).json);
+    expect(after.documents[0]).toMatchObject({ kind: "Pitch deck", scan: "failed" });
+    expect(after.gaps.missing).toContain("Pitch deck");
+    const row = await db.file.findUniqueOrThrow({ where: { id: bad.target!.fileId } });
+    expect(row).toMatchObject({ state: "rejected", scanNote: expect.stringMatching(/Eicar/) });
+    expect(row.deletedAt).not.toBeNull();
+    expect(await storage.read(row.storageKey)).toBeNull(); // the bytes are gone
+    expect((await db.outboxMessage.findFirst({ where: { recipient: id } }))?.subject).toMatch(/Pitch deck .* failed the virus check/);
+    // the review team can't open it
+    const opened = await call("GET", `/v1/dealroom/ev_ca3/applications/${id}/documents/${row.id}`, "lead");
+    expect(opened.status).toBe(409);
+    expect(errorOf(opened).message).toMatch(/failed its virus scan/);
+
+    // a clean copy counts once scanned; the failed one is dropped from the draft on the next save
+    const good = await upload("scanned", id, "Pitch deck");
+    await scanned(good.target!.fileId);
+    const fixed = MyApplication.parse((await save("scanned", id, { "org.name": "Clean Copy Ltd" })).json);
+    expect(fixed.documents.map((d) => d.scan)).toEqual(["clean"]);
+    expect(fixed.documents[0].id).toBe(good.target!.fileId);
+    expect(fixed.gaps.missing).not.toContain("Pitch deck");
+    // uploads are kept until the Deal Room's retention date
+    expect((await db.file.findUniqueOrThrow({ where: { id: good.target!.fileId } })).retentionUntil?.getTime()).toBeGreaterThan(clock.getTime());
   });
 
   test("an invitation is taken up only by the email it was sent to", async () => {

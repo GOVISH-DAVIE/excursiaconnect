@@ -583,7 +583,14 @@ model File {
   contentType    String    @map("content_type")
   size           Int
   state          FileState @default(quarantine)
+  /// when the worker may next try to scan it: a lease while it scans, a short wait while the upload is still coming
+  nextScanAt     DateTime? @map("next_scan_at") @db.Timestamptz(3)
+  scannedAt      DateTime? @map("scanned_at") @db.Timestamptz(3)
+  /// what the scanner said: the signature it found, or which scanner cleared it
+  scanNote       String?   @map("scan_note")
   retentionUntil DateTime? @map("retention_until") @db.Timestamptz(3)
+  /// the bytes were deleted (at the retention date, or because the scan failed); the row stays as the record
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(3)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([ownerKind, ownerId])

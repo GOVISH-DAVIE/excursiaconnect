@@ -432,7 +432,7 @@ function Documents({ slug, form, app }: { slug: string; form: ApplyForm; app: My
                 {!d.required && <span className="ml-1 font-normal text-slate">optional</span>}
               </span>
               <label className={`btn-secondary btn-sm ${upload.isPending ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
-                {busy ? "Uploading…" : have.length ? "Add another" : "Upload"}
+                {busy ? "Uploading…" : have.some((h) => h.scan !== "failed") ? "Add another" : "Upload"}
                 <input
                   type="file"
                   className="sr-only"
@@ -450,10 +450,12 @@ function Documents({ slug, form, app }: { slug: string; form: ApplyForm; app: My
               </label>
             </div>
             {have.map((h) => (
-              <div key={h.id} className="mt-1 flex items-center gap-2 text-[13px] text-slate">
+              <div key={h.id} className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px] text-slate">
                 <span aria-hidden="true">📄</span>
-                <span className="truncate">{h.name}</span>
+                <span className={`truncate ${h.scan === "failed" ? "line-through" : ""}`}>{h.name}</span>
                 <span className="shrink-0">{Math.max(1, Math.round(h.size / 1024))} KB</span>
+                {h.scan === "checking" && <span>· Checking for viruses…</span>}
+                {h.scan === "failed" && <span className="text-bad">· Failed the virus check and was deleted. Upload a clean copy.</span>}
               </div>
             ))}
           </div>

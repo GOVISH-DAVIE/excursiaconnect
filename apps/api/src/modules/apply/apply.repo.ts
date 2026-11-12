@@ -18,11 +18,23 @@ export function createApplyRepo(db: Db) {
 
     versionOf: async (id: string) => (await db.drApplication.findUnique({ where: { id }, select: { version: true } }))?.version ?? 0,
 
-    /** A file waiting for its upload, in quarantine until scanned (M1.2). */
-    addFile: (f: { id: string; eventId: string; appId: string; kind: string; storageKey: string; name: string; contentType: string; size: number }) =>
+    /** A file waiting for its upload, in quarantine until the worker's scan, kept until its retention date. */
+    addFile: (f: { id: string; eventId: string; appId: string; kind: string; storageKey: string; name: string; contentType: string; size: number; retentionUntil: Date }) =>
       db.file.create({
-        data: { id: f.id, eventId: f.eventId, ownerKind: "dr_application", ownerId: f.appId, kind: f.kind, storageKey: f.storageKey, name: f.name, contentType: f.contentType, size: f.size },
+        data: {
+          id: f.id, eventId: f.eventId, ownerKind: "dr_application", ownerId: f.appId, kind: f.kind, storageKey: f.storageKey, name: f.name,
+          contentType: f.contentType, size: f.size, retentionUntil: f.retentionUntil,
+        },
       }),
+
+    /** Where each of the applications' files stands: in quarantine, clean, failed the scan, or deleted. */
+    fileStates: async (appIds: string[]) =>
+      new Map(
+        (await db.file.findMany({ where: { ownerKind: "dr_application", ownerId: { in: appIds } }, select: { id: true, state: true, deletedAt: true } })).map((f) => [
+          f.id,
+          f.state === "rejected" ? ("failed" as const) : f.deletedAt ? ("deleted" as const) : f.state === "clean" ? ("clean" as const) : ("checking" as const),
+        ]),
+      ),
 
     fileOf: (id: string, appId: string) => db.file.findFirst({ where: { id, ownerKind: "dr_application", ownerId: appId } }),
 

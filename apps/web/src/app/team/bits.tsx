@@ -112,3 +112,11 @@ export function FileButton({ label, busy, disabled, onFile }: { label: string; b
     </label>
   );
 }
+
+/** Where a document's virus scan stands; nothing once it is clean. */
+export function ScanNote({ scan, fix }: { scan: "checking" | "clean" | "failed" | "deleted"; fix: string }) {
+  if (scan === "checking") return <span className="text-slate">Checking for viruses…</span>;
+  if (scan === "failed") return <span className="text-bad">Failed the virus check and was deleted. {fix}</span>;
+  if (scan === "deleted") return <span className="text-slate">Deleted at its retention date</span>;
+  return null;
+}

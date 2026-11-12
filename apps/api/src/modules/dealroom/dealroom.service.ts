@@ -139,6 +139,7 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
       const file = await repo.fileOf(docId, appId);
       if (!file) throw new HttpError("not_found", "This document has no file to open: it is demo data.");
       if (file.state === "rejected") throw new HttpError("conflict", "This file failed its virus scan and can't be opened.");
+      if (file.deletedAt) throw new HttpError("conflict", "This file was deleted at its retention date.");
       if (file.state !== "clean" && !allowUnscanned) throw new HttpError("conflict", "This file is waiting for its virus scan. Try again in a few minutes.");
       const link = storage.downloadUrl(file.storageKey, { name: file.name, contentType: file.contentType });
       await repo.audit({ actorKind: actor.kind, actorId: session.user.id, eventId, entity: "file", entityId: file.id, action: "file/open", detail: { appId, kind: file.kind, scanned: file.state === "clean" }, ip });

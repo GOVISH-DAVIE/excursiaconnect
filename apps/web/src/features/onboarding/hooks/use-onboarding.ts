@@ -7,7 +7,9 @@ import type { AdminMember, EventView, OrganiserView } from "@excursia/contracts/
 import { onboardingApi } from "../api";
 import { adminTeamQuery, eventQuery, mineQuery, onboardingKeys, organiserQuery, queueQuery, settingsQuery } from "../queries";
 
-export const useMyOrganisers = (enabled = true) => useQuery({ ...mineQuery(), enabled });
+// while a KYC document is still being checked for viruses, look again every few seconds
+export const useMyOrganisers = (enabled = true) =>
+  useQuery({ ...mineQuery(), enabled, refetchInterval: (q) => (q.state.data?.some((o) => o.docs.some((d) => d.scan === "checking")) ? 4000 : false) });
 export const useOrganiser = (id: string) => useQuery(organiserQuery(id));
 export const useEvent = (id: string) => useQuery(eventQuery(id));
 export const useAdminQueue = (enabled = true) => useQuery({ ...queueQuery(), enabled });

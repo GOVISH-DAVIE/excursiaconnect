@@ -134,10 +134,19 @@ export function createOrganisersRepo(db: Db) {
         await tx.auditEntry.create({ data: auditRow(audit, "event", e.id, e.id) });
       }),
 
-    // KYC documents: File rows owned by the organiser, kept in quarantine until M1.2's scan
+    // KYC documents: File rows owned by the organiser, in quarantine until the worker's virus scan.
+    // They have no retention date: KYC is kept while the organiser works with Algotech.
     addFile: (f: { id: string; organiserId: string; kind: string; storageKey: string; name: string; contentType: string; size: number }) =>
       db.file.create({ data: { id: f.id, ownerKind: "organiser", ownerId: f.organiserId, kind: f.kind, storageKey: f.storageKey, name: f.name, contentType: f.contentType, size: f.size } }),
     fileOf: (id: string, organiserId: string) => db.file.findFirst({ where: { id, ownerKind: "organiser", ownerId: organiserId } }),
+    /** Where each of the organiser's files stands: in quarantine, clean, failed the scan, or deleted. */
+    fileStates: async (organiserId: string) =>
+      new Map(
+        (await db.file.findMany({ where: { ownerKind: "organiser", ownerId: organiserId }, select: { id: true, state: true, deletedAt: true } })).map((f) => [
+          f.id,
+          f.state === "rejected" ? ("failed" as const) : f.deletedAt ? ("deleted" as const) : f.state === "clean" ? ("clean" as const) : ("checking" as const),
+        ]),
+      ),
     recentFiles: (organiserId: string, since: Date) => db.file.count({ where: { ownerKind: "organiser", ownerId: organiserId, createdAt: { gt: since } } }),
     audit: (a: Audit, entity: string, entityId: string, eventId: string | null) => db.auditEntry.create({ data: auditRow(a, entity, entityId, eventId) }),
 

@@ -173,6 +173,15 @@ describe("the API's settings", () => {
     }
   });
 
+  test("production doesn't start without a virus scanner; elsewhere it is optional", () => {
+    const prod = { NODE_ENV: "production", APP_ENV: "production", DATABASE_URL: "x", WEB_ORIGINS: "https://events.example.co.ke", COOKIE_DOMAIN: "events.example.co.ke", AUTH_SECRET: TEST_SECRET };
+    expect(() => loadConfig(prod)).toThrow(/CLAMD_ADDRESS: required in production/);
+    expect(loadConfig({ ...prod, CLAMD_ADDRESS: "127.0.0.1:3310" }).CLAMD_ADDRESS).toBe("127.0.0.1:3310");
+    expect(loadConfig({ ...prod, CLAMD_ADDRESS: "/run/clamav/clamd.ctl" }).CLAMD_ADDRESS).toBe("/run/clamav/clamd.ctl");
+    expect(() => loadConfig({ ...prod, CLAMD_ADDRESS: "clamd" })).toThrow(/host:port or a socket path/);
+    expect(loadConfig({ DATABASE_URL: "x", AUTH_SECRET: TEST_SECRET, APP_ENV: "staging" }).CLAMD_ADDRESS).toBeUndefined();
+  });
+
   test("a missing database URL stops the start", () => {
     expect(() => loadConfig({})).toThrow(/DATABASE_URL/);
   });

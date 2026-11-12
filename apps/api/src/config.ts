@@ -62,6 +62,14 @@ const Env = z
     STORAGE_DIR: z.string().optional(),
     /** The largest upload accepted, in megabytes. */
     UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(50).default(15),
+    /**
+     * ClamAV's daemon, for the worker's virus scan: "127.0.0.1:3310" or its socket's path. Required in production.
+     * Unset elsewhere, the worker uses a test scanner that catches only the EICAR test file.
+     */
+    CLAMD_ADDRESS: z
+      .string()
+      .regex(/^(\/\S+|[\w.-]+:\d{1,5})$/, "must be host:port or a socket path")
+      .optional(),
   })
   .superRefine((env, ctx) => {
     if (env.RULES_CLOCK && (env.APP_ENV === "production" || (env.NODE_ENV === "production" && env.APP_ENV !== "staging")))
@@ -69,6 +77,7 @@ const Env = z
     if (env.MAIL_TRANSPORT === "smtp")
       for (const key of ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "EMAIL_FROM"] as const)
         if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "is required when MAIL_TRANSPORT is smtp" });
+    if (env.APP_ENV === "production" && !env.CLAMD_ADDRESS) ctx.addIssue({ code: "custom", path: ["CLAMD_ADDRESS"], message: "required in production: uploads are scanned before anyone can open them" });
     if (env.NODE_ENV !== "production") return;
     if (env.WEB_ORIGINS.some((o) => !o.startsWith("https://")))
       ctx.addIssue({ code: "custom", path: ["WEB_ORIGINS"], message: "every web origin must be https in production" });

@@ -71,6 +71,10 @@ export const ApplyForm = z.object({
 });
 export type ApplyForm = z.infer<typeof ApplyForm>;
 
+/** A document's virus scan: still checking, clean, failed (deleted at once), or deleted at its retention date. */
+export const ScanState = z.enum(["checking", "clean", "failed", "deleted"]);
+export type ScanState = z.infer<typeof ScanState>;
+
 const Org = z.object({ name: z.string(), regNo: z.string(), country: z.string(), sector: z.string(), founded: z.string().optional(), website: z.string().optional() });
 const Person = z.object({ name: z.string(), title: z.string().optional(), email: z.string(), phone: z.string() });
 
@@ -105,7 +109,8 @@ export const MyApplication = z.object({
       .object({ title: z.string(), problem: z.string(), users: z.string(), constraints: z.string(), outcome: z.string(), budget: z.string(), route: z.string(), timeline: z.string(), decisionProcess: z.string() })
       .optional(),
   }),
-  documents: z.array(z.object({ id: z.string(), kind: z.string(), name: z.string(), size: z.number(), at: z.string() })),
+  /** each with where its virus scan stands: a failed one doesn't count, and should be uploaded again */
+  documents: z.array(z.object({ id: z.string(), kind: z.string(), name: z.string(), size: z.number(), at: z.string(), scan: ScanState })),
   /** information the review team asked for: the open one can be answered from the status page */
   requests: z.array(
     z.object({ id: z.string(), questions: z.array(z.string()), docs: z.array(z.string()), at: z.string(), due: z.string(), answeredAt: z.string().nullable(), open: z.boolean() }),

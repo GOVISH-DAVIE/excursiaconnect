@@ -14,7 +14,9 @@ export const useApplyForm = (slug: string) => useQuery(applyFormQuery(slug));
 export const useMyApplications = (slug: string, enabled: boolean) => useQuery({ ...myApplicationsQuery(slug), enabled });
 
 /** One application, loaded into the form. */
-export const useMyApplication = (slug: string, id: string | null) => useQuery({ ...myApplicationQuery(slug, id ?? ""), enabled: !!id });
+// while a document is still being checked for viruses, look again every few seconds: the worker takes seconds
+export const useMyApplication = (slug: string, id: string | null) =>
+  useQuery({ ...myApplicationQuery(slug, id ?? ""), enabled: !!id, refetchInterval: (q) => (q.state.data?.documents.some((d) => d.scan === "checking") ? 4000 : false) });
 
 function useKeepCurrent(slug: string) {
   const queryClient = useQueryClient();

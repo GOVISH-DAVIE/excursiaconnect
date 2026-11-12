@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 import { apply } from "@excursia/domain/core/reducer";
 import { fixedCtx } from "@excursia/domain/ctx";
-import { blankApplication, modeFromLink, modeOf, patchDraft, writablePaths } from "@excursia/domain/dealroom/apply";
+import { blankApplication, modeFromLink, modeOf, patchDraft, retentionDate, writablePaths } from "@excursia/domain/dealroom/apply";
 import { roleOf } from "@excursia/domain/dealroom/logic";
 import { seed } from "@excursia/domain/seed";
 
@@ -103,5 +103,14 @@ describe("submitting respects the application window", () => {
     const app = r.state.dealRoom.apps.find((a) => a.id === draft.id)!;
     expect(app.status).toBe("Submitted");
     expect(app.ref).toBe(`CA3-FP-${String(seed.dealRoom.seq.fp + 1).padStart(5, "0")}`);
+  });
+});
+
+describe("documents are kept until their retention date", () => {
+  test("months after the conversion end, ending on a shorter month's last day", () => {
+    expect(retentionDate({ conversionEnd: "2027-08-18", retentionMonths: 12 })).toBe("2028-08-18");
+    expect(retentionDate({ conversionEnd: "2027-08-31", retentionMonths: 6 })).toBe("2028-02-29");
+    expect(retentionDate({ conversionEnd: "2027-11-30", retentionMonths: 3 })).toBe("2028-02-29");
+    expect(retentionDate({ conversionEnd: "2026-12-31", retentionMonths: 2 })).toBe("2027-02-28");
   });
 });
