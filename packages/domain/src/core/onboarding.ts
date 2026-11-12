@@ -8,7 +8,7 @@
  * Every function is pure: it takes the record and returns the next one, or a refusal in a sentence the person can
  * act on. Who may call which (the owner, an Algotech admin) is the server's to check first.
  */
-import type { EventRecord, Organiser } from "../types";
+import type { EventRecord, Organiser, RateCard } from "../types";
 
 export type Result<T> = { value: T; refusal?: undefined } | { value?: undefined; refusal: string };
 const ok = <T>(value: T): Result<T> => ({ value });
@@ -17,6 +17,19 @@ const no = <T>(refusal: string): Result<T> => ({ refusal });
 /** The documents Algotech checks, once per organiser and reused for every event. */
 export const KYC_DOCS = ["Registration certificate", "Tax PIN certificate", "Signatory ID"] as const;
 export type KycDocKind = (typeof KYC_DOCS)[number];
+
+/** Every item Algotech checks, each of which it can return on its own (PA-2), with what it reads to see a change. */
+export const KYC_ITEMS: { key: string; label: string; value: (o: Organiser) => string }[] = [
+  { key: "name", label: "Registered name", value: (o) => o.name },
+  { key: "registrationNo", label: "Registration number", value: (o) => o.registrationNo },
+  { key: "kraPin", label: "Tax PIN", value: (o) => o.kraPin },
+  { key: "address", label: "Physical address", value: (o) => o.address ?? "" },
+  { key: "payoutAccount", label: "Payout account", value: (o) => o.payoutAccount },
+  { key: "signatory", label: "Signatory", value: (o) => `${o.signatory?.name ?? ""}|${o.signatory?.title ?? ""}` },
+  ...KYC_DOCS.map((kind) => ({ key: `doc:${kind}`, label: kind, value: (o: Organiser) => (o.kycDocs ?? []).filter((d) => d.kind === kind).map((d) => d.id).join(",") })),
+  { key: "dpa", label: "Data processing agreement", value: (o) => (o.dpaSigned ? `${o.dpaSigned.by}|${o.dpaSigned.at}` : "") },
+];
+export const kycItem = (key: string) => KYC_ITEMS.find((i) => i.key === key);
 
 /** KYC can be changed while it is with the organiser: before sending, or after Algotech returned it. */
 export const kycEditable = (o: Organiser) => o.kycStatus === "Not submitted" || o.kycStatus === "Returned";
@@ -64,7 +77,7 @@ export function removeKycDoc(o: Organiser, docId: string): Result<Organiser> {
 /** The data processing agreement, signed by typing the signatory's full name. */
 export function signDpa(o: Organiser, by: string, now: string): Result<Organiser> {
   const name = by.trim();
-  if (o.dpaSigned) return no(`The agreement was already signed by ${o.dpaSigned.by}.`);
+  if (o.dpaSigned && !o.kycReturns?.dpa) return no(`The agreement was already signed by ${o.dpaSigned.by}.`);
   if (!o.signatory?.name) return no("Name the signatory first: they sign the agreement.");
   if (name.toLowerCase() !== o.signatory.name.trim().toLowerCase()) return no(`Type the signatory's full name, ${o.signatory.name}, to sign.`);
   return ok({ ...o, dpaSigned: { by: name, at: now }, history: [...(o.history ?? []), { at: now, what: `Data processing agreement signed by ${name}` }] });
@@ -81,6 +94,11 @@ export function kycGaps(o: Organiser): string[] {
   if (!o.signatory?.name.trim() || !o.signatory?.title.trim()) gaps.push("Signatory's name and title");
   for (const kind of KYC_DOCS) if (!o.kycDocs?.some((d) => d.kind === kind)) gaps.push(kind);
   if (!o.dpaSigned) gaps.push("Data processing agreement, signed");
+  // what Algotech returned must have changed before it goes back
+  for (const [key, r] of Object.entries(o.kycReturns ?? {})) {
+    const item = kycItem(key);
+    if (item && item.value(o) === r.was) gaps.push(`${item.label}, as Algotech asked: ${r.note}`);
+  }
   return gaps;
 }
 
@@ -88,17 +106,36 @@ export function submitKyc(o: Organiser, now: string): Result<Organiser> {
   if (!kycEditable(o)) return no(o.kycStatus === "Verified" ? "KYC is already verified." : "KYC is already with Algotech.");
   const gaps = kycGaps(o);
   if (gaps.length) return no(`Still needed: ${gaps.join(", ")}.`);
-  return ok({ ...o, kycStatus: "Pending", kycNote: undefined, history: [...(o.history ?? []), { at: now, what: "KYC sent for checking" }] });
+  const again = o.kycStatus === "Returned";
+  const last = again && o.kycReturns ? Object.fromEntries(Object.entries(o.kycReturns).map(([k, r]) => [k, r.note])) : undefined;
+  return ok({ ...o, kycStatus: "Pending", kycNote: undefined, kycReturns: undefined, kycReturnedAt: undefined, kycLastReturns: last, history: [...(o.history ?? []), { at: now, what: again ? "KYC sent again, fixed" : "KYC sent for checking" }] });
 }
 
-/** Algotech's answer. A return says why, so the organiser can fix it. */
-export function decideKyc(o: Organiser, verdict: "Verified" | "Returned", note: string, by: string, now: string): Result<Organiser> {
+/**
+ * Algotech's answer (PA-2). Verified, or returned item by item: each returned item carries its own note (and an
+ * optional general note); the organiser sees exactly what to fix, and can't send again until each has changed.
+ */
+export function decideKyc(o: Organiser, verdict: "Verified" | "Returned", note: string, by: string, now: string, items: Record<string, string> = {}): Result<Organiser> {
   if (o.kycStatus !== "Pending") return no(`KYC is ${o.kycStatus.toLowerCase()}, not waiting for a decision.`);
   const why = note.trim();
-  if (verdict === "Returned" && !why) return no("Say what needs fixing: the organiser sees this note.");
-  if (verdict === "Verified" && kycGaps(o).length) return no(`It can't be verified with these missing: ${kycGaps(o).join(", ")}.`);
-  const what = verdict === "Verified" ? `KYC verified by ${by}` : `KYC returned by ${by}: ${why}`;
-  return ok({ ...o, kycStatus: verdict, kycNote: verdict === "Returned" ? why : undefined, history: [...(o.history ?? []), { at: now, what }] });
+  if (verdict === "Verified") {
+    if (kycGaps(o).length) return no(`It can't be verified with these missing: ${kycGaps(o).join(", ")}.`);
+    return ok({ ...o, kycStatus: "Verified", kycNote: undefined, kycReturns: undefined, kycLastReturns: undefined, history: [...(o.history ?? []), { at: now, what: `KYC verified by ${by}` }] });
+  }
+  const returns: NonNullable<Organiser["kycReturns"]> = {};
+  for (const [key, text] of Object.entries(items)) {
+    const item = kycItem(key);
+    if (!item) return no(`There is no KYC item called ${key}.`);
+    if (!text.trim()) return no(`Say what to fix in ${item.label}.`);
+    // a returned agreement is cleared below, so any signature after this one is the fix, even in the same minute
+    returns[key] = { note: text.trim(), was: key === "dpa" ? "" : item.value(o) };
+  }
+  if (!Object.keys(returns).length && !why) return no("Mark what needs fixing, with a note for each: the organiser sees them.");
+  // a returned agreement is signed again; a returned document is replaced
+  const next: Organiser = { ...o, kycStatus: "Returned", kycNote: why || undefined, kycReturns: returns, kycReturnedAt: now, kycLastReturns: undefined };
+  if (returns.dpa) delete next.dpaSigned;
+  const labels = Object.keys(returns).map((k) => kycItem(k)!.label);
+  return ok({ ...next, history: [...(o.history ?? []), { at: now, what: `KYC returned by ${by}${labels.length ? `: ${labels.join(", ")}` : ""}${why ? `. ${why}` : ""}` }] });
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -108,7 +145,37 @@ export function decideKyc(o: Organiser, verdict: "Verified" | "Returned", note: 
 /** An event can be edited by its organiser while it is a draft or sent back for changes. */
 export const eventEditable = (e: EventRecord) => e.state === "Draft" || e.state === "Changes requested";
 
+/**
+ * The platform's starting rate card, for an organiser a super admin hasn't priced yet. The prototype's figures,
+ * until Algotech's price list is decided (backend-plan.md).
+ */
+export const DEFAULT_RATE_CARD: RateCard = { commissionPct: 5, licenceFee: 120_000, oneOffFee: 0, gatewayFeesBorneBy: "Algotech", dealRoomAddOn: 450_000, dealRoomOnly: 650_000, deskStaff: 3 };
+export const rateCardOf = (o: Organiser): RateCard => o.rateCard ?? DEFAULT_RATE_CARD;
+
+/** The terms an approval starts from: the organiser's rate card, for this kind of event. */
+export function termsFrom(card: RateCard, e: Pick<EventRecord, "kind" | "dealRoomRequest">): EventTerms {
+  const dealroom = e.kind === "dealroom";
+  return {
+    commissionPct: card.commissionPct,
+    licenceFee: card.licenceFee,
+    oneOffFee: card.oneOffFee,
+    gatewayFeesBorneBy: card.gatewayFeesBorneBy,
+    staffCount: 0,
+    stations: 0,
+    dealRoom: { enabled: dealroom || !!e.dealRoomRequest, addOnPrice: dealroom ? card.dealRoomOnly : card.dealRoomAddOn, deskStaff: card.deskStaff },
+  };
+}
+
+export function setRateCard(o: Organiser, card: RateCard, by: string, now: string): Result<Organiser> {
+  if (card.commissionPct < 0 || card.commissionPct > 100) return no("Commission is a percentage from 0 to 100.");
+  if ([card.licenceFee, card.oneOffFee, card.dealRoomAddOn, card.dealRoomOnly, card.deskStaff].some((n) => n < 0)) return no("Fees and staff can't be negative.");
+  return ok({ ...o, rateCard: card, commissionPct: card.commissionPct, licenceFee: card.licenceFee, history: [...(o.history ?? []), { at: now, what: `Rate card set by ${by}: ${card.commissionPct}% commission` }] });
+}
+
 export type EventDetails = {
+  kind: "summit" | "dealroom";
+  timezone: string;
+  currency: "KES" | "USD";
   name: string;
   tagline: string;
   venue: string;
@@ -183,6 +250,7 @@ export function eventGaps(e: EventRecord, today: string): string[] {
     if (e.endDate < e.startDate) gaps.push("An end date on or after the start");
   }
   if (!(e.expectedAttendance > 0)) gaps.push("The expected attendance");
+  if (e.kind === "dealroom" && !e.dealRoomRequest) gaps.push("The Deal Room lead: a Deal Room-only event is the Deal Room");
   if (e.dealRoomRequest && (!e.dealRoomRequest.lead.name.trim() || !e.dealRoomRequest.lead.email.includes("@"))) gaps.push("The Deal Room lead's name and email");
   return gaps;
 }
@@ -208,6 +276,10 @@ export type EventTerms = {
   oneOffFee: number;
   licenceFee: number;
   gatewayFeesBorneBy: "Algotech" | "Organiser";
+  /** on-site staff and accreditation stations a day (PA-3) */
+  staffCount: number;
+  stations: number;
+  /** for a Deal Room-only event, addOnPrice is the Deal Room's own price */
   dealRoom: { enabled: boolean; addOnPrice: number; deskStaff: number };
 };
 
@@ -224,7 +296,8 @@ export function decideEvent(e: EventRecord, o: Organiser, d: EventDecision, by: 
     if (o.kycStatus !== "Verified") return no("The organiser's KYC isn't verified.");
     const t = d.terms;
     if (t.commissionPct < 0 || t.commissionPct > 100) return no("Commission is a percentage from 0 to 100.");
-    const addOn = t.dealRoom.enabled ? `, with the Deal Room add-on at KES ${t.dealRoom.addOnPrice.toLocaleString("en-KE")}` : "";
+    if (e.kind === "dealroom" && !t.dealRoom.enabled) return no("A Deal Room-only event is approved with its Deal Room.");
+    const addOn = !t.dealRoom.enabled ? "" : e.kind === "dealroom" ? `, the Deal Room at KES ${t.dealRoom.addOnPrice.toLocaleString("en-KE")}` : `, with the Deal Room add-on at KES ${t.dealRoom.addOnPrice.toLocaleString("en-KE")}`;
     return ok(moved(e, "Approved", `Approved by ${by}: ${t.commissionPct}% commission${addOn}`, now, { ...t, reviewNote: d.note?.trim() || undefined }));
   }
   const why = d.note.trim();

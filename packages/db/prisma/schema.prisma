@@ -105,6 +105,7 @@ model TotpSecret {
 }
 
 enum MembershipRole {
+  super_admin // Algotech, who also manage the admins and the organisers' rate cards
   admin // Algotech
   // an organiser's team (src/lib/roles.ts)
   owner

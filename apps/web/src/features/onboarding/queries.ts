@@ -7,6 +7,7 @@ export const onboardingKeys = {
   organiser: (id: string) => ["organiser", id] as const,
   event: (id: string) => ["event", id] as const,
   queue: ["admin", "queue"] as const,
+  team: ["admin", "team"] as const,
   settings: (eventId: string) => ["dealroom", eventId, "settings"] as const,
 };
 
@@ -15,3 +16,4 @@ export const organiserQuery = (id: string) => queryOptions({ queryKey: onboardin
 export const eventQuery = (id: string) => queryOptions({ queryKey: onboardingKeys.event(id), queryFn: () => onboardingApi.event(id), staleTime: 15_000 });
 export const queueQuery = () => queryOptions({ queryKey: onboardingKeys.queue, queryFn: onboardingApi.queue, staleTime: 15_000 });
 export const settingsQuery = (eventId: string) => queryOptions({ queryKey: onboardingKeys.settings(eventId), queryFn: () => onboardingApi.settings(eventId), staleTime: 30_000 });
+export const adminTeamQuery = () => queryOptions({ queryKey: onboardingKeys.team, queryFn: onboardingApi.team, staleTime: 15_000 });

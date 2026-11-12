@@ -5,7 +5,9 @@ export function rolesOf(s: SessionView | null | undefined) {
   const m = s?.memberships ?? [];
   const dr = m.find((x) => x.role.startsWith("dr_") && x.eventId);
   return {
-    admin: s?.user.kind === "admin" || m.some((x) => x.role === "admin"),
+    admin: s?.user.kind === "admin" || m.some((x) => x.role === "admin" || x.role === "super_admin"),
+    /** a super admin also manages Algotech's team and the organisers' rate cards */
+    superAdmin: m.some((x) => x.role === "super_admin"),
     owner: m.some((x) => x.role === "owner"),
     dealRoom: !!dr,
     lead: m.some((x) => x.role === "dr_lead"),

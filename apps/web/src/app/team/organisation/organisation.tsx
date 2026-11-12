@@ -23,6 +23,7 @@ export function Organisation() {
 }
 
 const formOf = (o: OrganiserView) => ({
+  name: o.name,
   registrationNo: o.registrationNo,
   kraPin: o.kraPin,
   address: o.address,
@@ -45,24 +46,43 @@ function Kyc({ initial }: { initial: OrganiserView }) {
   const [signer, setSigner] = useState("");
   const edit = o.can.edit;
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const field = (k: keyof typeof form, label: string, hint?: string) => (
-    <div>
-      <label className="label" htmlFor={`kyc-${k}`}>
-        {label}
-      </label>
-      <input id={`kyc-${k}`} className="input" value={form[k]} onChange={set(k)} disabled={!edit} />
-      {hint && <p className="mt-1 text-[12px] text-slate">{hint}</p>}
-    </div>
-  );
+  /** Algotech's note on an item it returned, until the item has changed */
+  const returned = (key: string) => {
+    const i = o.kycItems.find((x) => x.key === key);
+    return i?.returned && !i.fixed ? i.returned : null;
+  };
+  const ITEM: Partial<Record<keyof typeof form, string>> = { name: "name", registrationNo: "registrationNo", kraPin: "kraPin", address: "address", payoutAccount: "payoutAccount", signatoryName: "signatory", signatoryTitle: "signatory" };
+  const field = (k: keyof typeof form, label: string, hint?: string) => {
+    const note = ITEM[k] && k !== "signatoryTitle" ? returned(ITEM[k]!) : null;
+    return (
+      <div>
+        <label className="label" htmlFor={`kyc-${k}`}>
+          {label}
+        </label>
+        <input id={`kyc-${k}`} className={`input ${note ? "border-bad" : ""}`} value={form[k]} onChange={set(k)} disabled={!edit} />
+        {note ? <p className="mt-1 text-[12px] text-bad">Algotech: {note}</p> : hint && <p className="mt-1 text-[12px] text-slate">{hint}</p>}
+      </div>
+    );
+  };
 
   return (
     <>
       <PageHeader title={o.name} badge={<KycTone status={o.kycStatus} />} kicker={`Registered in ${o.country || "—"}. KYC is done once and reused for every event.`} />
 
-      {o.kycStatus === "Returned" && o.kycNote && (
-        <p className="mb-4 rounded-lg border border-bad bg-bad-50 px-4 py-3 text-[14px]">
-          <span className="font-medium text-bad">Algotech returned your KYC:</span> {o.kycNote}
-        </p>
+      {o.kycStatus === "Returned" && (
+        <div className="mb-4 rounded-lg border border-bad bg-bad-50 px-4 py-3 text-[14px]">
+          <p className="font-medium text-bad">Algotech returned your KYC. Fix these, then send it again:</p>
+          <ul className="mt-1 list-disc pl-5">
+            {o.kycItems
+              .filter((i) => i.returned)
+              .map((i) => (
+                <li key={i.key} className={i.fixed ? "text-slate line-through" : ""}>
+                  <span className="font-medium">{i.label}:</span> {i.returned}
+                </li>
+              ))}
+          </ul>
+          {o.kycNote && <p className="mt-2">{o.kycNote}</p>}
+        </div>
       )}
       {o.kycStatus === "Pending" && <p className="mb-4 rounded-lg bg-paper-200 px-4 py-3 text-[14px]">Your KYC is with Algotech. You can draft events meanwhile; they can be submitted once it is verified.</p>}
 
@@ -75,6 +95,7 @@ function Kyc({ initial }: { initial: OrganiserView }) {
                 e.preventDefault();
                 save.mutate(
                   {
+                    name: form.name,
                     registrationNo: form.registrationNo,
                     kraPin: form.kraPin,
                     address: form.address,
@@ -86,6 +107,7 @@ function Kyc({ initial }: { initial: OrganiserView }) {
                 );
               }}
             >
+              <div className="sm:col-span-2">{field("name", "Registered name", "As on the registration certificate")}</div>
               {field("registrationNo", "Registration number")}
               {field("kraPin", o.country === "Kenya" ? "KRA PIN" : "Tax PIN", o.country === "Kenya" ? "Like P051234567X" : undefined)}
               <div className="sm:col-span-2">{field("address", "Physical address", "Street and town. Not shown publicly.")}</div>
@@ -115,6 +137,7 @@ function Kyc({ initial }: { initial: OrganiserView }) {
                   <li key={kind} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3 last:border-0">
                     <div className="min-w-0 text-[14px]">
                       <div className="font-medium">{kind}</div>
+                      {returned(`doc:${kind}`) && <div className="text-[13px] text-bad">Algotech: {returned(`doc:${kind}`)}. Upload a new one.</div>}
                       {docs.length ? (
                         docs.map((d) => (
                           <div key={d.id} className="flex items-center gap-3 text-[13px] text-slate">
@@ -155,6 +178,7 @@ function Kyc({ initial }: { initial: OrganiserView }) {
                   sign.mutate(signer);
                 }}
               >
+                {returned("dpa") && <p className="text-[14px] text-bad">Algotech: {returned("dpa")}. Sign it again.</p>}
                 <p className="text-[14px] text-slate">It sets how delegates&apos; and applicants&apos; data is held and deleted. The signatory signs by typing their full name; it is timestamped.</p>
                 <div>
                   <label className="label" htmlFor="dpa-by">

@@ -3,9 +3,9 @@
  * it (the organiser's own, Algotech's queue) are asked again.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { EventView, OrganiserView } from "@excursia/contracts/onboarding";
+import type { AdminMember, EventView, OrganiserView } from "@excursia/contracts/onboarding";
 import { onboardingApi } from "../api";
-import { eventQuery, mineQuery, onboardingKeys, organiserQuery, queueQuery, settingsQuery } from "../queries";
+import { adminTeamQuery, eventQuery, mineQuery, onboardingKeys, organiserQuery, queueQuery, settingsQuery } from "../queries";
 
 export const useMyOrganisers = (enabled = true) => useQuery({ ...mineQuery(), enabled });
 export const useOrganiser = (id: string) => useQuery(organiserQuery(id));
@@ -57,4 +57,12 @@ export function useSaveSettings(eventId: string) {
     mutationFn: (input: Parameters<typeof onboardingApi.saveSettings>[1]) => onboardingApi.saveSettings(eventId, input),
     onSuccess: (view) => qc.setQueryData(onboardingKeys.settings(eventId), view),
   });
+}
+
+export const useAdminTeam = () => useQuery(adminTeamQuery());
+
+/** A change to Algotech's team: the answer is the team as it now is. */
+export function useAdminTeamChange<A>(fn: (arg: A) => Promise<AdminMember[]>) {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: fn, onSuccess: (team) => qc.setQueryData(onboardingKeys.team, team) });
 }

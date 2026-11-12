@@ -4,6 +4,18 @@
 import { useState } from "react";
 import type { EventInput, EventView } from "@excursia/contracts/onboarding";
 
+/** The time zones the region's events run in; others can be added as clients need them. */
+const TIMEZONES = [
+  ["Africa/Nairobi", "East Africa (Nairobi, Kampala, Dar es Salaam, Addis Ababa)"],
+  ["Africa/Kigali", "Central Africa (Kigali, Lusaka, Harare)"],
+  ["Africa/Johannesburg", "South Africa (Johannesburg)"],
+  ["Africa/Lagos", "West Africa (Lagos, Kinshasa)"],
+  ["Africa/Accra", "West Africa (Accra, Dakar, Abidjan)"],
+  ["Africa/Cairo", "North Africa (Cairo)"],
+  ["Europe/London", "London"],
+  ["Asia/Dubai", "Dubai"],
+] as const;
+
 const slugFor = (name: string) =>
   name
     .toLowerCase()
@@ -14,6 +26,9 @@ const slugFor = (name: string) =>
 
 export function EventForm({ initial, disabled, busy, submitLabel, onSave }: { initial?: EventView; disabled?: boolean; busy?: boolean; submitLabel: string; onSave: (input: EventInput) => void }) {
   const [f, setF] = useState({
+    kind: initial?.kind ?? ("summit" as "summit" | "dealroom"),
+    timezone: initial?.timezone ?? "Africa/Nairobi",
+    currency: initial?.currency ?? ("KES" as "KES" | "USD"),
     name: initial?.name ?? "",
     slug: initial?.slug ?? "",
     tagline: initial?.tagline ?? "",
@@ -46,6 +61,9 @@ export function EventForm({ initial, disabled, busy, submitLabel, onSave }: { in
       onSubmit={(e) => {
         e.preventDefault();
         onSave({
+          kind: f.kind,
+          timezone: f.timezone,
+          currency: f.currency,
           name: f.name,
           ...(initial ? {} : { slug }),
           tagline: f.tagline,
@@ -55,10 +73,33 @@ export function EventForm({ initial, disabled, busy, submitLabel, onSave }: { in
           endDate: f.endDate || f.startDate,
           expectedAttendance: Number(f.expectedAttendance) || 0,
           brand: { primary: f.primary, logoText: f.logoText || f.name.replace(/[^A-Za-z0-9 ]/g, "").split(/\s+/).map((w) => w[0]).join("").slice(0, 4) },
-          dealRoomRequest: f.dealRoom ? { lead: { name: f.leadName, email: f.leadEmail } } : null,
+          dealRoomRequest: f.dealRoom || f.kind === "dealroom" ? { lead: { name: f.leadName, email: f.leadEmail } } : null,
         });
       }}
     >
+      <fieldset className="sm:col-span-2" disabled={disabled}>
+        <legend className="label">What kind of event</legend>
+        <div className="grid gap-2 sm:grid-cols-2" role="radiogroup">
+          {(
+            [
+              ["summit", "A summit or conference", "Tickets and registration, with the Deal Room as an optional add-on"],
+              ["dealroom", "A Deal Room on its own", "Curated meetings between businesses and investors, buyers or partners; no tickets"],
+            ] as const
+          ).map(([k, label, hint]) => (
+            <button
+              key={k}
+              type="button"
+              role="radio"
+              aria-checked={f.kind === k}
+              onClick={() => setF((x) => ({ ...x, kind: k }))}
+              className={`rounded-lg border p-3 text-left ${f.kind === k ? "border-ink bg-paper-200" : "border-line hover:border-line-strong"}`}
+            >
+              <span className="block text-[15px] font-medium">{label}</span>
+              <span className="mt-1 block text-[13px] text-slate">{hint}</span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
       <div className="sm:col-span-2">{input("name", "Event name", { required: true, minLength: 3 })}</div>
       {!initial && (
         <div className="sm:col-span-2">
@@ -70,7 +111,28 @@ export function EventForm({ initial, disabled, busy, submitLabel, onSave }: { in
       {input("city", "City")}
       {input("startDate", "First day", { type: "date", required: true })}
       {input("endDate", "Last day", { type: "date" })}
-      {input("expectedAttendance", "Expected attendance", { type: "number", min: 0, inputMode: "numeric" })}
+      <div>
+        <label className="label" htmlFor="ev-timezone">
+          Time zone
+        </label>
+        <select id="ev-timezone" className="input" value={f.timezone} disabled={disabled} onChange={(e) => setF((x) => ({ ...x, timezone: e.target.value }))}>
+          {TIMEZONES.map(([tz, label]) => (
+            <option key={tz} value={tz}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="label" htmlFor="ev-currency">
+          {f.kind === "dealroom" ? "Currency for fees" : "Ticket currency"}
+        </label>
+        <select id="ev-currency" className="input" value={f.currency} disabled={disabled} onChange={(e) => setF((x) => ({ ...x, currency: e.target.value as "KES" | "USD" }))}>
+          <option value="KES">Kenya shillings (KES)</option>
+          <option value="USD">US dollars (USD)</option>
+        </select>
+      </div>
+      {input("expectedAttendance", f.kind === "dealroom" ? "Expected participants" : "Expected attendance", { type: "number", min: 0, inputMode: "numeric" })}
       <div className="grid grid-cols-[auto_1fr] items-end gap-3">
         <div>
           <label className="label" htmlFor="ev-primary">
@@ -82,12 +144,19 @@ export function EventForm({ initial, disabled, busy, submitLabel, onSave }: { in
       </div>
 
       <div className="rounded-lg border border-line p-4 sm:col-span-2">
-        <label className="flex items-center gap-2 text-[14px] font-medium">
-          <input type="checkbox" checked={f.dealRoom} onChange={set("dealRoom")} disabled={disabled} />
-          Ask for the Deal Room add-on
-        </label>
-        <p className="mt-1 text-[13px] text-slate">Curated investor, buyer and partner meetings, with applications and review. Algotech sets its price when it approves the event, and gives the lead their account.</p>
-        {f.dealRoom && (
+        {f.kind === "dealroom" ? (
+          <p className="text-[14px] font-medium">The Deal Room&apos;s lead</p>
+        ) : (
+          <label className="flex items-center gap-2 text-[14px] font-medium">
+            <input type="checkbox" checked={f.dealRoom} onChange={set("dealRoom")} disabled={disabled} />
+            Ask for the Deal Room add-on
+          </label>
+        )}
+        <p className="mt-1 text-[13px] text-slate">
+          {f.kind === "dealroom" ? "Who runs it: they review applications and set its missions and dates. " : "Curated investor, buyer and partner meetings, with applications and review. "}
+          Algotech sets its price when it approves the event, and gives the lead their account.
+        </p>
+        {(f.dealRoom || f.kind === "dealroom") && (
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {input("leadName", "Deal Room lead's name", { required: true })}
             {input("leadEmail", "Lead's work email", { type: "email", required: true })}

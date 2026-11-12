@@ -1,6 +1,7 @@
 /** Onboarding's rules: KYC from not sent to verified, an event from draft to live, and the Deal Room's starter. */
 import { describe, expect, test } from "vitest";
 import {
+  DEFAULT_RATE_CARD,
   addKycDoc,
   decideEvent,
   decideKyc,
@@ -10,10 +11,14 @@ import {
   newEvent,
   newOrganiser,
   publishEvent,
+  rateCardOf,
+  removeKycDoc,
+  setRateCard,
   signDpa,
   slugFor,
   submitEvent,
   submitKyc,
+  termsFrom,
   type EventDetails,
   type Result,
 } from "@excursia/domain/core/onboarding";
@@ -35,6 +40,9 @@ function readyOrganiser(): Organiser {
 }
 
 const details: EventDetails = {
+  kind: "summit",
+  timezone: "Africa/Nairobi",
+  currency: "KES",
   name: "Savanna Capital Summit",
   tagline: "",
   venue: "KICC",
@@ -45,7 +53,7 @@ const details: EventDetails = {
   brand: { primary: "#1F6F5C", logoText: "SCS" },
   dealRoomRequest: null,
 };
-const terms = { commissionPct: 5, oneOffFee: 0, licenceFee: 120000, gatewayFeesBorneBy: "Organiser" as const, dealRoom: { enabled: true, addOnPrice: 450000, deskStaff: 3 } };
+const terms = { commissionPct: 5, oneOffFee: 0, licenceFee: 120000, gatewayFeesBorneBy: "Organiser" as const, staffCount: 4, stations: 2, dealRoom: { enabled: true, addOnPrice: 450000, deskStaff: 3 } };
 
 describe("KYC", () => {
   test("a new organiser starts with nothing sent, and says what is missing", () => {
@@ -67,7 +75,8 @@ describe("KYC", () => {
     const sent = v(submitKyc(readyOrganiser(), NOW));
     expect(sent.kycStatus).toBe("Pending");
     expect(editKyc(sent, { address: "x" }).refusal).toBeTruthy();
-    expect(decideKyc(sent, "Returned", " ", "Algotech", NOW).refusal).toMatch(/what needs fixing/);
+    expect(decideKyc(sent, "Returned", " ", "Algotech", NOW).refusal).toMatch(/Mark what needs fixing/);
+    expect(decideKyc(sent, "Returned", "", "Algotech", NOW, { "doc:Signatory ID": " " }).refusal).toMatch(/Say what to fix in Signatory ID/);
     const back = v(decideKyc(sent, "Returned", "Blurry ID", "Algotech", NOW));
     expect(back.kycNote).toBe("Blurry ID");
     expect(v(editKyc(back, { address: "Upper Hill" })).address).toBe("Upper Hill");
@@ -76,6 +85,26 @@ describe("KYC", () => {
     expect(ok.kycNote).toBeUndefined();
     expect(decideKyc(ok, "Verified", "", "Algotech", NOW).refusal).toMatch(/not waiting/);
   });
+});
+
+test("returned item by item: each must change before KYC goes back, and a returned agreement is signed again", () => {
+  const sent = v(submitKyc(readyOrganiser(), NOW));
+  const back = v(decideKyc(sent, "Returned", "", "Algotech", NOW, { "doc:Signatory ID": "Blank page", payoutAccount: "Not in the company's name", dpa: "Signed before the signatory was named" }));
+  expect(back.kycStatus).toBe("Returned");
+  expect(back.dpaSigned).toBeUndefined();
+  expect(back.history?.at(-1)?.what).toMatch(/Signatory ID, Payout account, Data processing agreement/);
+  // nothing changed yet: each returned item is still to fix
+  expect(submitKyc(back, NOW).refusal).toMatch(/Signatory ID, as Algotech asked: Blank page.*Payout account, as Algotech asked/);
+  let fixed = v(editKyc(back, { payoutAccount: "KCB ****9" }));
+  fixed = v(removeKycDoc(fixed, "file_2"));
+  fixed = v(addKycDoc(fixed, { id: "file_9", kind: "Signatory ID", name: "id.pdf", size: 10, at: NOW }));
+  fixed = v(signDpa(fixed, "Wanjiru Kamau", NOW));
+  const again = v(submitKyc(fixed, NOW));
+  expect(again.kycStatus).toBe("Pending");
+  expect(again.kycReturns).toBeUndefined();
+  // the next check starts from what was returned last time
+  expect(again.kycLastReturns).toEqual({ "doc:Signatory ID": "Blank page", payoutAccount: "Not in the company's name", dpa: "Signed before the signatory was named" });
+  expect(v(decideKyc(again, "Verified", "", "Algotech", NOW)).kycLastReturns).toBeUndefined();
 });
 
 describe("an event", () => {
@@ -106,6 +135,27 @@ describe("an event", () => {
     const approved = v(decideEvent(sent, verified, { to: "Approved", terms }, "Algotech", NOW));
     expect(approved).toMatchObject({ state: "Approved", commissionPct: 5, dealRoom: { enabled: true } });
     expect(v(publishEvent(approved, NOW)).state).toBe("Live");
+  });
+});
+
+describe("a Deal Room-only event, and rate cards", () => {
+  const verified = v(decideKyc(v(submitKyc(readyOrganiser(), NOW)), "Verified", "", "Algotech", NOW));
+  const dr = { ...details, kind: "dealroom" as const };
+
+  test("it names its lead, and is approved only with its Deal Room", () => {
+    expect(eventGaps(newEvent(verified, dr, { id: "ev_d", slug: "d" }, NOW), TODAY)).toContain("The Deal Room lead: a Deal Room-only event is the Deal Room");
+    const withLead = newEvent(verified, { ...dr, dealRoomRequest: { lead: { name: "Otieno", email: "o@x.example" } } }, { id: "ev_d", slug: "d" }, NOW);
+    const sent = v(submitEvent(withLead, verified, TODAY, NOW));
+    expect(decideEvent(sent, verified, { to: "Approved", terms: { ...terms, dealRoom: { ...terms.dealRoom, enabled: false } } }, "Algotech", NOW).refusal).toMatch(/approved with its Deal Room/);
+    expect(v(decideEvent(sent, verified, { to: "Approved", terms }, "Algotech", NOW)).history?.at(-1)?.what).toMatch(/the Deal Room at KES 450,000/);
+  });
+
+  test("approval starts from the organiser's rate card, or the platform's until one is set", () => {
+    const e = newEvent(verified, dr, { id: "ev_d", slug: "d" }, NOW);
+    expect(termsFrom(rateCardOf(verified), e)).toMatchObject({ commissionPct: DEFAULT_RATE_CARD.commissionPct, dealRoom: { enabled: true, addOnPrice: DEFAULT_RATE_CARD.dealRoomOnly } });
+    const priced = v(setRateCard(verified, { ...DEFAULT_RATE_CARD, commissionPct: 3.5, dealRoomAddOn: 300_000 }, "Algotech", NOW));
+    expect(termsFrom(rateCardOf(priced), { kind: "summit", dealRoomRequest: undefined })).toMatchObject({ commissionPct: 3.5, dealRoom: { enabled: false, addOnPrice: 300_000 } });
+    expect(setRateCard(verified, { ...DEFAULT_RATE_CARD, commissionPct: 120 }, "Algotech", NOW).refusal).toMatch(/0 to 100/);
   });
 });
 

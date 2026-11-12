@@ -100,6 +100,8 @@ export type Command = {
   accounts?: (after: AppState) => StaffLink[];
   /** Emails to queue with the change, beyond what the rules send (M1.4): to a staff or application id. */
   notify?: (after: AppState) => { to: string; subject: string; link: string }[];
+  /** Staff whose sign-in loses this Deal Room with the change (DA-3). */
+  revoke?: string[];
 };
 
 export type CommandDeps = { repo: DealRoomRepo; now: () => Date; newId?: (prefix: string) => string };
@@ -109,7 +111,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
     newId,
     /** Runs a command; returns the state after it, as committed. */
     run(cmd: Command): Promise<AppState> {
-      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff, queue }) => {
+      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff, queue, revokeStaff }) => {
         if (!stored) throw new HttpError("not_found", "This event has no Deal Room.");
         const at = nairobiNow(now());
         const ctx: Ctx = { now: at, newId, actor: cmd.actor };
@@ -142,6 +144,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
         );
         await audit(rows);
         if (cmd.notify) await queue(cmd.notify(state).map((n) => ({ ...n, eventId: cmd.eventId })));
+        if (cmd.revoke) await revokeStaff(cmd.revoke);
         return state;
       });
     },

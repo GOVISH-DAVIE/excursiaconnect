@@ -58,6 +58,7 @@ export function EventScreen({ id }: { id: string }) {
                   ["Licence fee", kes(e.terms.licenceFee)],
                   ["One-off fee", kes(e.terms.oneOffFee)],
                   ["Gateway fees borne by", e.terms.gatewayFeesBorneBy],
+                  ["On-site", `${e.terms.staffCount} staff, ${e.terms.stations} station${e.terms.stations === 1 ? "" : "s"} a day`],
                   ["Deal Room", e.terms.dealRoom.enabled ? `${kes(e.terms.dealRoom.addOnPrice)}, ${e.terms.dealRoom.deskStaff} desk staff a day` : "Not included"],
                 ]}
               />
@@ -76,6 +77,8 @@ function Details({ e }: { e: EventView }) {
   return (
     <KV
       rows={[
+        ["Kind", e.kind === "dealroom" ? "A Deal Room on its own" : "A summit or conference"],
+        ["Time zone and currency", `${e.timezone}, ${e.currency}`],
         ["Tagline", e.tagline || "—"],
         ["Venue", e.venue || "—"],
         ["City", e.city || "—"],
@@ -142,10 +145,23 @@ function OwnerSteps({ e }: { e: EventView }) {
 /** Algotech's review of a submitted event: terms for an approval, a note for anything else. */
 function AdminReview({ e }: { e: EventView }) {
   const decide = useEventChange((input: EventDecisionInput) => onboardingApi.decideEvent(e.id, input));
-  const [t, setT] = useState({ commissionPct: "5", oneOffFee: "0", licenceFee: "120000", gatewayFeesBorneBy: "Algotech" as "Algotech" | "Organiser", dealRoom: !!e.dealRoomRequest, addOnPrice: "450000", deskStaff: "3" });
+  // the organiser's rate card, for this kind of event (PA-4)
+  const st = e.startTerms;
+  const [t, setT] = useState({
+    commissionPct: String(st.commissionPct),
+    oneOffFee: String(st.oneOffFee),
+    licenceFee: String(st.licenceFee),
+    gatewayFeesBorneBy: st.gatewayFeesBorneBy,
+    staffCount: String(st.staffCount),
+    stations: String(st.stations),
+    dealRoom: st.dealRoom.enabled,
+    addOnPrice: String(st.dealRoom.addOnPrice),
+    deskStaff: String(st.dealRoom.deskStaff),
+  });
   const [note, setNote] = useState("");
   if (e.state !== "Submitted" && e.state !== "Under review") return null;
-  const num = (k: "commissionPct" | "oneOffFee" | "licenceFee" | "addOnPrice" | "deskStaff", label: string) => (
+  const dealroomOnly = e.kind === "dealroom";
+  const num = (k: "commissionPct" | "oneOffFee" | "licenceFee" | "addOnPrice" | "deskStaff" | "staffCount" | "stations", label: string) => (
     <div>
       <label className="label" htmlFor={`t-${k}`}>
         {label}
@@ -165,6 +181,7 @@ function AdminReview({ e }: { e: EventView }) {
             </Link>
           </p>
         )}
+        <p className="text-[13px] text-slate">Starting from {e.organiser.name}&apos;s rate card. Change any figure for this event.</p>
         <div className="grid gap-3 sm:grid-cols-3">
           {num("commissionPct", "Commission %")}
           {num("licenceFee", "Licence fee (KES)")}
@@ -178,15 +195,21 @@ function AdminReview({ e }: { e: EventView }) {
               <option>Organiser</option>
             </select>
           </div>
+          {num("staffCount", "On-site staff a day")}
+          {num("stations", "Accreditation stations")}
         </div>
         <div className="rounded-md border border-line p-3">
-          <label className="flex items-center gap-2 text-[14px] font-medium">
-            <input type="checkbox" checked={t.dealRoom} onChange={(x) => setT((v) => ({ ...v, dealRoom: x.target.checked }))} />
-            Deal Room add-on{e.dealRoomRequest ? " (asked for)" : ""}
-          </label>
-          {t.dealRoom && (
+          {dealroomOnly ? (
+            <p className="text-[14px] font-medium">The Deal Room (this event is a Deal Room on its own)</p>
+          ) : (
+            <label className="flex items-center gap-2 text-[14px] font-medium">
+              <input type="checkbox" checked={t.dealRoom} onChange={(x) => setT((v) => ({ ...v, dealRoom: x.target.checked }))} />
+              Deal Room add-on{e.dealRoomRequest ? " (asked for)" : ""}
+            </label>
+          )}
+          {(t.dealRoom || dealroomOnly) && (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {num("addOnPrice", "Add-on price (KES)")}
+              {num("addOnPrice", dealroomOnly ? "Deal Room price (KES)" : "Add-on price (KES)")}
               {num("deskStaff", "Desk staff a day")}
             </div>
           )}
@@ -217,7 +240,9 @@ function AdminReview({ e }: { e: EventView }) {
                   oneOffFee: Number(t.oneOffFee),
                   licenceFee: Number(t.licenceFee),
                   gatewayFeesBorneBy: t.gatewayFeesBorneBy,
-                  dealRoom: { enabled: t.dealRoom, addOnPrice: Number(t.addOnPrice), deskStaff: Number(t.deskStaff) },
+                  staffCount: Number(t.staffCount),
+                  stations: Number(t.stations),
+                  dealRoom: { enabled: t.dealRoom || dealroomOnly, addOnPrice: Number(t.addOnPrice), deskStaff: Number(t.deskStaff) },
                 },
               })
             }
@@ -237,6 +262,9 @@ function DealRoomPanel({ e, admin }: { e: EventView; admin: boolean }) {
   const ask = e.dealRoomRequest?.lead;
   const [f, setF] = useState<DealRoomStaffInput>({ name: hasLead ? "" : (ask?.name ?? ""), email: hasLead ? "" : (ask?.email ?? ""), role: hasLead ? "Reviewer" : "Lead", canDecide: false });
   const add = useEventChange((input: DealRoomStaffInput) => onboardingApi.addStaff(e.id, input));
+  const change = useEventChange((a: { staffId: string; role: DealRoomStaffInput["role"]; canDecide: boolean }) => onboardingApi.changeStaff(e.id, a.staffId, { role: a.role, canDecide: a.canDecide }));
+  const remove = useEventChange((staffId: string) => onboardingApi.removeStaff(e.id, staffId));
+  const [removing, setRemoving] = useState<string | null>(null);
   return (
     <Section title="Deal Room" flush>
       <div className="space-y-3 px-5 pb-4">
@@ -252,22 +280,63 @@ function DealRoomPanel({ e, admin }: { e: EventView; admin: boolean }) {
             <th className="th">Staff</th>
             <th className="th">Role</th>
             <th className="th hidden sm:table-cell">Account</th>
+            {admin && <th className="th" />}
           </tr>
         </thead>
         <tbody>
-          {dr.staff.map((s) => (
-            <tr key={s.id}>
-              <td className="td">
-                <div className="font-medium">{s.name}</div>
-                <div className="text-[13px] text-slate">{s.email}</div>
-              </td>
-              <td className="td">
-                {s.role}
-                {s.canDecide && s.role !== "Lead" ? ", may decide" : ""}
-              </td>
-              <td className="td hidden sm:table-cell">{s.signedUp ? <Tone tone="ok">Password set</Tone> : <Tone tone="warn">Invited</Tone>}</td>
-            </tr>
-          ))}
+          {dr.staff
+            .filter((s) => s.active)
+            .map((s) => (
+              <tr key={s.id}>
+                <td className="td">
+                  <div className="font-medium">{s.name}</div>
+                  <div className="text-[13px] text-slate">{s.email}</div>
+                </td>
+                <td className="td">
+                  {admin && s.role !== "Lead" ? (
+                    <div className="space-y-1">
+                      <select
+                        className="input"
+                        aria-label={`${s.name}'s role`}
+                        value={s.role}
+                        disabled={change.isPending}
+                        onChange={(x) => change.mutate({ staffId: s.id, role: x.target.value as DealRoomStaffInput["role"], canDecide: s.canDecide })}
+                      >
+                        {DR_ROLES.map((r) => (
+                          <option key={r}>{r}</option>
+                        ))}
+                      </select>
+                      {s.role === "Reviewer" && (
+                        <label className="flex items-center gap-2 text-[13px]">
+                          <input type="checkbox" checked={s.canDecide} disabled={change.isPending} onChange={(x) => change.mutate({ staffId: s.id, role: s.role as DealRoomStaffInput["role"], canDecide: x.target.checked })} />
+                          May decide
+                        </label>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      {s.role}
+                      {s.canDecide && s.role !== "Lead" ? ", may decide" : ""}
+                    </>
+                  )}
+                </td>
+                <td className="td hidden sm:table-cell">{s.signedUp ? <Tone tone="ok">Password set</Tone> : <Tone tone="warn">Invited</Tone>}</td>
+                {admin && (
+                  <td className="td text-right">
+                    {s.role !== "Lead" &&
+                      (removing === s.id ? (
+                        <button className="btn-secondary btn-sm text-bad" disabled={remove.isPending} onClick={() => remove.mutate(s.id, { onSettled: () => setRemoving(null) })}>
+                          Remove {s.name.split(" ")[0]}?
+                        </button>
+                      ) : (
+                        <button className="btn-secondary btn-sm" onClick={() => setRemoving(s.id)}>
+                          Remove
+                        </button>
+                      ))}
+                  </td>
+                )}
+              </tr>
+            ))}
           {!dr.staff.length && (
             <tr>
               <td className="td text-slate" colSpan={3}>
@@ -277,6 +346,9 @@ function DealRoomPanel({ e, admin }: { e: EventView; admin: boolean }) {
           )}
         </tbody>
       </table>
+      <div className="px-5">
+        <Failed error={change.error ?? remove.error} />
+      </div>
       {admin && (
         <form
           className="grid gap-3 border-t border-line p-5 sm:grid-cols-2"
@@ -308,8 +380,8 @@ function DealRoomPanel({ e, admin }: { e: EventView; admin: boolean }) {
               ))}
             </select>
           </div>
-          <label className="flex items-center gap-2 self-end pb-2 text-[14px]">
-            <input type="checkbox" checked={f.role === "Lead" || !!f.canDecide} disabled={f.role === "Lead"} onChange={(x) => setF({ ...f, canDecide: x.target.checked })} />
+          <label className={`flex items-center gap-2 self-end pb-2 text-[14px] ${f.role === "Reviewer" || f.role === "Lead" ? "" : "invisible"}`}>
+            <input type="checkbox" checked={f.role === "Lead" || !!f.canDecide} disabled={f.role !== "Reviewer"} onChange={(x) => setF({ ...f, canDecide: x.target.checked })} />
             May decide
           </label>
           <p className="text-[13px] text-slate sm:col-span-2">They set their own password on the sign-in page (Staff → Set or reset your password), then add an authenticator.</p>

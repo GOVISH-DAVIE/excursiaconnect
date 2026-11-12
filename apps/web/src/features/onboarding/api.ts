@@ -1,7 +1,9 @@
 /** Organisers', events' and Algotech's calls to the API: the only file in the web app that knows these paths. */
 import { UploadTarget } from "@excursia/contracts/apply";
 import {
+  AdminMember,
   AdminQueue,
+  type AdminInvite,
   DealRoomSettings,
   EventView,
   OrganiserView,
@@ -10,6 +12,8 @@ import {
   type EventDecisionInput,
   type EventInput,
   type KycDecision,
+  type OpenOrganiser,
+  type RateCard,
   type KycInput,
   type OrganiserSignup,
 } from "@excursia/contracts/onboarding";
@@ -44,8 +48,17 @@ export const onboardingApi = {
   publishEvent: (id: string) => http.post(`/v1/events/${id}/publish`, { schema: EventView }),
 
   queue: () => http.get("/v1/admin/queue", { schema: AdminQueue }),
+  team: () => http.get("/v1/admin/team", { schema: AdminMember.array() }),
+  inviteAdmin: (input: AdminInvite) => http.post("/v1/admin/team", { body: input, schema: AdminMember.array() }),
+  setAdminLevel: (userId: string, superAdmin: boolean) => http.post(`/v1/admin/team/${userId}/level`, { body: { superAdmin }, schema: AdminMember.array() }),
+  removeAdmin: (userId: string) => http.post(`/v1/admin/team/${userId}/remove`, { schema: AdminMember.array() }),
+  setRateCard: (organiserId: string, card: RateCard) => http.put(`/v1/admin/organisers/${organiserId}/rate-card`, { body: card, schema: OrganiserView }),
+  openOrganiser: (input: OpenOrganiser) => http.post("/v1/admin/organisers", { body: input, schema: OrganiserView }),
   decideKyc: (organiserId: string, input: KycDecision) => http.post(`/v1/admin/organisers/${organiserId}/kyc`, { body: input, schema: OrganiserView }),
   decideEvent: (id: string, input: EventDecisionInput) => http.post(`/v1/admin/events/${id}/decision`, { body: input, schema: EventView }),
+  changeStaff: (id: string, staffId: string, input: { role: DealRoomStaffInput["role"]; canDecide: boolean }) =>
+    http.post(`/v1/admin/events/${id}/dealroom/staff/${staffId}`, { body: input, schema: EventView }),
+  removeStaff: (id: string, staffId: string) => http.post(`/v1/admin/events/${id}/dealroom/staff/${staffId}/remove`, { schema: EventView }),
   addStaff: (id: string, input: DealRoomStaffInput) => http.post(`/v1/admin/events/${id}/dealroom/staff`, { body: input, schema: EventView }),
 
   settings: (eventId: string) => http.get(`/v1/dealroom/${eventId}/settings`, { schema: DealRoomSettings }),

@@ -94,8 +94,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     // Algotech's first admin, made by the command line: one with the authenticator, one who skipped it
     const platform = createPlatformRepo(db);
-    for (const who of ["admin", "lazyadmin"]) {
-      const r = await platform.createAdmin(at(who), `${who} Algotech`);
+    for (const [who, superAdmin] of [["admin", true], ["lazyadmin", true], ["clerk", false]] as const) {
+      const r = await platform.createAdmin(at(who), `${who} Algotech`, superAdmin);
       if (!("id" in r)) throw new Error("admin not made");
       jar[who] = await sessionFor(r.id!, { skipped: who === "lazyadmin" });
     }
@@ -194,9 +194,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     // deciding needs the authenticator; a return needs a reason
     expect((await call("POST", `/v1/admin/organisers/${organiserId}/kyc`, "lazyadmin", { verdict: "Verified" })).status).toBe(403);
     expect((await call("POST", `/v1/admin/organisers/${organiserId}/kyc`, "admin", { verdict: "Returned" })).status).toBe(409);
-    const back = OrganiserView.parse((await call("POST", `/v1/admin/organisers/${organiserId}/kyc`, "admin", { verdict: "Returned", note: "The signatory ID is unreadable." })).json);
+    // returned item by item: only the signatory ID, with its own note
+    const back = OrganiserView.parse((await call("POST", `/v1/admin/organisers/${organiserId}/kyc`, "admin", { verdict: "Returned", items: { "doc:Signatory ID": "The scan is unreadable." } })).json);
     expect(back.kycStatus).toBe("Returned");
-    expect(back.kycNote).toBe("The signatory ID is unreadable.");
+    expect(back.kycItems.filter((i) => i.returned)).toEqual([{ key: "doc:Signatory ID", label: "Signatory ID", returned: "The scan is unreadable.", fixed: false, lastReturned: null }]);
+    // it can't go back until that item has changed
+    expect(errorOf(await call("POST", `/v1/organisers/${organiserId}/kyc/submit`, "owner", {})).message).toMatch(/Signatory ID, as Algotech asked/);
     // fixed and sent again
     const old = back.docs.find((d) => d.kind === "Signatory ID")!;
     await call("DELETE", `/v1/organisers/${organiserId}/kyc/documents/${old.id}`, "owner");
@@ -214,6 +217,27 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
       ["Your KYC is verified: you can send events for approval", "queued"],
     ]);
     expect(await db.outboxMessage.count({ where: { recipient: `user:${admin.id}`, subject: { startsWith: "KYC to check" } } })).toBe(2);
+  });
+
+  test("Algotech opens an organiser for a client; the owner is invited, sets a password and finds it waiting", async () => {
+    const body = { organisation: `Client Events ${run}`, country: "Kenya", owner: { name: "Client Owner", email: at("client") } };
+    expect((await call("POST", "/v1/admin/organisers", "owner", body)).status).toBe(403);
+    expect((await call("POST", "/v1/admin/organisers", "lazyadmin", body)).status).toBe(403);
+    expect((await call("POST", "/v1/admin/organisers", "admin", { ...body, owner: { name: "Founder", email: at("founder") } })).status).toBe(409);
+    const made = await call("POST", "/v1/admin/organisers", "admin", body);
+    expect(made.status).toBe(201);
+    const view = OrganiserView.parse(made.json);
+    expect(view).toMatchObject({ kycStatus: "Not submitted", owner: { email: at("client") } });
+    const owner = await db.user.findUniqueOrThrow({ where: { email: at("client") } });
+    expect(owner.passwordHash).toBeNull();
+    expect((await db.outboxMessage.findFirst({ where: { recipient: `user:${owner.id}` } }))?.subject).toMatch(/opened an ExcursiaConnect account for Client Events/);
+    // the owner sets a password and signs in like any staff member, and finds the organiser theirs
+    await call("POST", "/v1/auth/staff/password/code", "client", { email: at("client") });
+    expect((await call("POST", "/v1/auth/staff/password", "client", { email: at("client"), code: codeTo(at("client")), password: PASSWORD })).status).toBe(204);
+    await call("POST", "/v1/auth/staff/signin", "client", { email: at("client"), password: PASSWORD });
+    await call("POST", "/v1/auth/totp/skip", "client", {});
+    const mine = OrganiserView.array().parse((await call("GET", "/v1/organisers/mine", "client")).json);
+    expect(mine.map((o) => o.id)).toEqual([view.id]);
   });
 
   test("an event goes from draft to approved with the Deal Room add-on, then live", async () => {
@@ -348,5 +372,45 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     const r = await call("PUT", `/v1/dealroom/${eventId}/settings`, "reviewer", { missions: s.missions, tracks: s.tracks, appOpen: s.appOpen, appClose: s.appClose, rfiDays: 3 });
     expect(r.status).toBe(409);
     expect(errorOf(r).message).toMatch(/Only the lead/);
+  });
+
+  test("a super admin sets the organiser's rate card, and approvals start from it", async () => {
+    const card = { commissionPct: 3.5, licenceFee: 90000, oneOffFee: 10000, gatewayFeesBorneBy: "Organiser", dealRoomAddOn: 300000, dealRoomOnly: 500000, deskStaff: 2 };
+    expect((await call("PUT", `/v1/admin/organisers/${organiserId}/rate-card`, "clerk", card)).status).toBe(403);
+    const o = OrganiserView.parse((await call("PUT", `/v1/admin/organisers/${organiserId}/rate-card`, "admin", card)).json);
+    expect(o.rateCard).toMatchObject({ ...card, custom: true });
+  });
+
+  test("a Deal Room-only event names its lead, starts from the Deal Room's own price, and is approved only with it", async () => {
+    const input = { kind: "dealroom", name: `Savanna Deal Room ${run}`, venue: "Radisson Blu", city: "Nairobi", startDate: "2027-05-04", endDate: "2027-05-05", expectedAttendance: 120, brand: { primary: "#123456", logoText: "SDR" }, timezone: "Africa/Nairobi", currency: "USD" };
+    const draft = EventView.parse((await call("POST", `/v1/organisers/${organiserId}/events`, "owner", input)).json);
+    expect(draft).toMatchObject({ kind: "dealroom", currency: "USD" });
+    expect(draft.gaps).toContain("The Deal Room lead: a Deal Room-only event is the Deal Room");
+    const fixed = EventView.parse((await call("PUT", `/v1/events/${draft.id}`, "owner", { ...input, dealRoomRequest: { lead: { name: "Achieng Lead", email: at("drlead") } } })).json);
+    expect(fixed.gaps).toEqual([]);
+    await call("POST", `/v1/events/${draft.id}/submit`, "owner", {});
+    const view = EventView.parse((await call("GET", `/v1/events/${draft.id}`, "admin")).json);
+    expect(view.startTerms).toMatchObject({ commissionPct: 3.5, dealRoom: { enabled: true, addOnPrice: 500000, deskStaff: 2 } });
+    const without = await call("POST", `/v1/admin/events/${draft.id}/decision`, "admin", { to: "Approved", terms: { ...view.startTerms, dealRoom: { ...view.startTerms.dealRoom, enabled: false } } });
+    expect(errorOf(without).message).toMatch(/approved with its Deal Room/);
+    const approved = EventView.parse((await call("POST", `/v1/admin/events/${draft.id}/decision`, "admin", { to: "Approved", terms: { ...view.startTerms, staffCount: 3, stations: 1 } })).json);
+    expect(approved.terms).toMatchObject({ staffCount: 3, stations: 1, dealRoom: { enabled: true, addOnPrice: 500000 } });
+    expect(approved.dealRoom).not.toBeNull();
+  });
+
+  test("Algotech changes a staff member's role, then removes them: their access to this Deal Room ends at once", async () => {
+    const before = EventView.parse((await call("GET", `/v1/events/${eventId}`, "admin")).json);
+    const reviewer = before.dealRoom!.staff.find((x) => x.role === "Reviewer")!;
+    const lead = before.dealRoom!.staff.find((x) => x.role === "Lead")!;
+    expect(errorOf(await call("POST", `/v1/admin/events/${eventId}/dealroom/staff/${lead.id}`, "admin", { role: "Reviewer" })).message).toMatch(/always has one/);
+    const changed = EventView.parse((await call("POST", `/v1/admin/events/${eventId}/dealroom/staff/${reviewer.id}`, "admin", { role: "Coordinator", canDecide: false })).json);
+    expect(changed.dealRoom!.staff.find((x) => x.id === reviewer.id)).toMatchObject({ role: "Coordinator", canDecide: false });
+    const user = await db.user.findUniqueOrThrow({ where: { email: at("reviewer") } });
+    expect((await db.membership.findFirstOrThrow({ where: { userId: user.id, eventId } })).role).toBe("dr_coordinator");
+    // removed: the Deal Room no longer answers them
+    expect((await call("GET", `/v1/dealroom/${eventId}/settings`, "reviewer")).status).toBe(200);
+    await call("POST", `/v1/admin/events/${eventId}/dealroom/staff/${reviewer.id}/remove`, "admin", {});
+    expect((await call("GET", `/v1/dealroom/${eventId}/settings`, "reviewer")).status).toBe(403);
+    expect(await db.membership.count({ where: { userId: user.id, eventId, revokedAt: null } })).toBe(0);
   });
 });

@@ -115,6 +115,9 @@ export function createOrganisersService({ repo, auth, storage, now, uploadMaxByt
   }
 
   const details = (input: EventInput & { slug?: string }): EventDetails => ({
+    kind: input.kind ?? "summit",
+    timezone: input.timezone ?? "Africa/Nairobi",
+    currency: input.currency ?? "KES",
     name: input.name,
     tagline: input.tagline ?? "",
     venue: input.venue ?? "",

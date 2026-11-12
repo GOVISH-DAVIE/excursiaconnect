@@ -38,6 +38,8 @@ export type PublicDealRoom = z.infer<typeof PublicDealRoom>;
 export const PublicEvent = z.object({
   id: z.string(),
   slug: z.string(),
+  /** a Deal Room-only event's page is its Deal Room's */
+  kind: z.enum(["summit", "dealroom"]),
   name: z.string(),
   tagline: z.string(),
   venue: z.string(),

@@ -34,6 +34,17 @@ export type Category =
 
 export type PaymentMethod = "mpesa" | "card" | "bank";
 
+/** What Algotech charges an organiser (PA-4): its defaults for every event's approval. */
+export interface RateCard {
+  commissionPct: number;
+  licenceFee: number; // KES, per event
+  oneOffFee: number; // KES
+  gatewayFeesBorneBy: "Algotech" | "Organiser";
+  dealRoomAddOn: number; // KES, the Deal Room with a summit
+  dealRoomOnly: number; // KES, a Deal Room on its own
+  deskStaff: number; // Deal Room desk staff a day
+}
+
 export interface Organiser {
   id: string;
   name: string;
@@ -50,7 +61,14 @@ export interface Organiser {
   address?: string;
   signatory?: { name: string; title: string };
   kycDocs?: { id: string; kind: string; name: string; size: number; at: string }[];
-  kycNote?: string; // Algotech's reason when it returned the KYC
+  kycNote?: string; // Algotech's general note when it returned the KYC
+  /** what Algotech returned, item by item (core/onboarding.ts KYC_ITEMS): its note, and the value then, to see it changed */
+  kycReturns?: Record<string, { note: string; was: string }>;
+  kycReturnedAt?: string;
+  /** on a resubmission, what Algotech returned last time, so the next check starts there; cleared by the decision */
+  kycLastReturns?: Record<string, string>;
+  /** Algotech's terms for this organiser (PA-4), set by a super admin; approvals start from them */
+  rateCard?: RateCard;
   history?: { at: string; what: string }[];
   createdAt?: string;
 }
@@ -197,6 +215,10 @@ export interface EventRecord {
   dealRoom?: { enabled: boolean; addOnPrice: number; deskStaff: number }; // DA-1: the add-on, fixed on the approval record
   /** the organiser asks for the Deal Room add-on, and names who will lead it; Algotech decides on approval */
   dealRoomRequest?: { lead: { name: string; email: string } };
+  /** "summit": tickets, with the Deal Room as an optional add-on; "dealroom": a Deal Room on its own, no tickets */
+  kind?: "summit" | "dealroom";
+  timezone?: string; // IANA, for example Africa/Nairobi
+  currency?: "KES" | "USD"; // what its tickets and fees are priced in
 }
 
 /** A reconciliation exception the nightly job raised (PA-6). */

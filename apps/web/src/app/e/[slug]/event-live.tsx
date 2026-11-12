@@ -33,7 +33,7 @@ export function EventLive({ event }: { event: PublicEvent }) {
   const directions = `https://www.openstreetmap.org/search?query=${encodeURIComponent(`${event.venue} ${event.city}`)}`;
   const deal = `/e/${event.slug}/deal-room`;
   const nav: [string, string][] = [["about", "About"], ...(dr ? ([["deal-room", "Deal Room"]] as [string, string][]) : []), ["venue", "Venue"]];
-  const status = event.state === "Suspended" ? "Registration paused" : event.state === "Closed" ? "This event has ended" : "Registration opens soon";
+  const status = event.state === "Suspended" ? "Registration paused" : event.state === "Closed" ? "This event has ended" : event.kind === "dealroom" ? "Applications open soon" : "Registration opens soon";
 
   const mark = (
     <span className="mark" style={{ background: accent, color: accentInk, fontSize: markText.length > 2 ? 10 : 13 }} aria-hidden="true">

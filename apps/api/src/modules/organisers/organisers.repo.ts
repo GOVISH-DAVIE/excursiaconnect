@@ -19,7 +19,7 @@ const outboxRows = (notes: Note[]) =>
 
 type Tx = Prisma.TransactionClient;
 
-const eventColumns = (e: EventRecord) => ({ organiserId: e.organiserId, slug: e.slug, name: e.name, startDate: toDay(e.startDate), endDate: toDay(e.endDate), state: e.state, record: json(e) });
+const eventColumns = (e: EventRecord) => ({ organiserId: e.organiserId, slug: e.slug, name: e.name, startDate: toDay(e.startDate), endDate: toDay(e.endDate), timezone: e.timezone ?? "Africa/Nairobi", state: e.state, record: json(e) });
 
 const auditRow = (a: Audit, entity: string, entityId: string, eventId: string | null) => ({
   actorKind: a.actorKind,
@@ -51,6 +51,33 @@ export function createOrganisersRepo(db: Db) {
     ownerIds: async (organiserId: string) =>
       (await db.membership.findMany({ where: { organiserId, role: "owner", revokedAt: null }, select: { userId: true } })).map((m) => `user:${m.userId}`),
     adminIds: async () => (await db.user.findMany({ where: { kind: "admin", disabledAt: null, demo: false }, select: { id: true } })).map((u) => `user:${u.id}`),
+
+    /**
+     * Algotech opens an organiser for a client (PA-1): the organiser, the owner's account (made if there is none,
+     * with no password until they set one) and their membership, the audit row and the invitation, together.
+     * Null if the email belongs to an applicant or an Algotech admin.
+     */
+    openForClient: (input: { organiser: Organiser; owner: { email: string; name: string } }, audit: Audit) =>
+      db.$transaction(async (tx) => {
+        const existing = await tx.user.findUnique({ where: { email: input.owner.email }, select: { id: true, kind: true } });
+        if (existing && existing.kind !== "staff") return { refused: existing.kind };
+        const user = existing ?? (await tx.user.create({ data: { kind: "staff", email: input.owner.email, name: input.owner.name }, select: { id: true, kind: true } }));
+        await tx.organiser.create({ data: { id: input.organiser.id, name: input.organiser.name, record: json(input.organiser) } });
+        await tx.membership.create({ data: { userId: user.id, role: "owner", organiserId: input.organiser.id } });
+        await tx.auditEntry.create({ data: auditRow(audit, "organiser", input.organiser.id, null) });
+        await tx.outboxMessage.createMany({
+          data: outboxRows([
+            {
+              to: `user:${user.id}`,
+              subject: existing
+                ? `Algotech added ${input.organiser.name} to your ExcursiaConnect account: complete its KYC`
+                : `Algotech opened an ExcursiaConnect account for ${input.organiser.name}: set your password, then complete KYC`,
+              link: "/signin",
+            },
+          ]),
+        });
+        return { id: input.organiser.id, existing: !!existing };
+      }),
 
     /** The organisers this user owns. */
     ownedBy: async (userId: string) =>

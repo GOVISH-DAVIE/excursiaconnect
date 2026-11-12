@@ -76,7 +76,7 @@ export function DealRoomPublic({ slug }: { slug: string }) {
   return <DealRoomView slug={slug} event={{ ...event, live: event.state === "Live" }} organiser={organiser?.name ?? ""} dr={dr} />;
 }
 
-type ViewEvent = { name: string; city: string; startDate: string; endDate: string; brand: { primary: string; logoText: string }; live: boolean };
+type ViewEvent = { name: string; city: string; startDate: string; endDate: string; brand: { primary: string; logoText: string }; live: boolean; kind?: "summit" | "dealroom" };
 
 /**
  * The Deal Room's public page, from its data: the prototype's store for the demo, the API for a real event
@@ -109,9 +109,11 @@ export function DealRoomView({ slug, event, organiser, dr }: { slug: string; eve
             <span className="nav__name">{event.name}</span>
           </Link>
           <div className="nav__actions">
-            <Link href={`/e/${slug}`} className="link hidden sm:inline">
-              The summit
-            </Link>
+            {event.kind !== "dealroom" && (
+              <Link href={`/e/${slug}`} className="link hidden sm:inline">
+                The summit
+              </Link>
+            )}
             {open && (
               <Link href="#register" className="btn btn-primary btn-cta">
                 Register

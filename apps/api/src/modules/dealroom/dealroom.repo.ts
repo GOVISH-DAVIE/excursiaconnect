@@ -142,6 +142,7 @@ export function createDealRoomRepo(db: Db) {
         audit: (rows: AuditRow[]) => Promise<void>;
         linkStaff: (links: StaffLink[]) => Promise<string[]>;
         queue: (notes: { to: string; subject: string; link: string; eventId: string }[]) => Promise<void>;
+        revokeStaff: (staffIds: string[]) => Promise<void>;
       }) => Promise<T>,
     ): Promise<T> {
       return db.$transaction(
@@ -155,6 +156,10 @@ export function createDealRoomRepo(db: Db) {
               if (rows.length) await tx.auditEntry.createMany({ data: rows });
             },
             linkStaff: (links) => linkStaffWith(tx, links),
+            // a removed staff member's sign-in loses this Deal Room at once (their other memberships stay)
+            revokeStaff: async (staffIds) => {
+              if (staffIds.length) await tx.membership.updateMany({ where: { id: { in: staffIds.map((x) => `mem_${x}`) }, revokedAt: null }, data: { revokedAt: new Date() } });
+            },
             queue: async (notes) => {
               if (notes.length)
                 await tx.outboxMessage.createMany({

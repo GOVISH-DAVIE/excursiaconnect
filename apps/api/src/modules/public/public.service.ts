@@ -61,6 +61,7 @@ export function createPublicService({ repo, now }: { repo: PublicRepo; now: () =
       return {
         id: e.id,
         slug: e.slug,
+        kind: e.kind ?? "summit",
         name: e.name,
         tagline: e.tagline,
         venue: e.venue,
