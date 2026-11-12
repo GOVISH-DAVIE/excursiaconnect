@@ -297,7 +297,8 @@ export function decideEvent(e: EventRecord, o: Organiser, d: EventDecision, by: 
     const t = d.terms;
     if (t.commissionPct < 0 || t.commissionPct > 100) return no("Commission is a percentage from 0 to 100.");
     if (e.kind === "dealroom" && !t.dealRoom.enabled) return no("A Deal Room-only event is approved with its Deal Room.");
-    const addOn = !t.dealRoom.enabled ? "" : e.kind === "dealroom" ? `, the Deal Room at KES ${t.dealRoom.addOnPrice.toLocaleString("en-KE")}` : `, with the Deal Room add-on at KES ${t.dealRoom.addOnPrice.toLocaleString("en-KE")}`;
+    const price = `${e.currency ?? "KES"} ${t.dealRoom.addOnPrice.toLocaleString("en-KE")}`;
+    const addOn = !t.dealRoom.enabled ? "" : e.kind === "dealroom" ? `, the Deal Room at ${price}` : `, with the Deal Room add-on at ${price}`;
     return ok(moved(e, "Approved", `Approved by ${by}: ${t.commissionPct}% commission${addOn}`, now, { ...t, reviewNote: d.note?.trim() || undefined }));
   }
   const why = d.note.trim();

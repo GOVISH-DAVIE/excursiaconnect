@@ -18,7 +18,9 @@ const POOL_MAX = 10;
 export function createDb(connectionString: string | undefined, poolMax = POOL_MAX): PrismaClient {
   if (!connectionString) throw new Error("The database URL is not set: run npm run db:setup, or set it in the environment");
   return new PrismaClient({
-    adapter: new PrismaPg({ connectionString, max: poolMax }),
+    // Prisma's adapter sends times as UTC without a zone, and Postgres reads a zoneless time in the session's zone:
+    // on a server set to Africa/Nairobi every stored time was three hours early, and SQL's now() disagreed with them
+    adapter: new PrismaPg({ connectionString, max: poolMax, options: "-c TimeZone=UTC" }),
     // queries are never logged: they can carry personal data (deploy.md, The server itself);
     // tests expect refusals, so they log nothing
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : process.env.NODE_ENV === "test" ? [] : ["error"],

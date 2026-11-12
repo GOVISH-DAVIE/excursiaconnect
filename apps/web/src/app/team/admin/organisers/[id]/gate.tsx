@@ -12,7 +12,10 @@ import { useSession } from "@/features/auth/hooks/use-session";
 import { rolesOf } from "@/features/auth/roles";
 import { onboardingApi } from "@/features/onboarding/api";
 import { useOpenKycDoc, useOrganiser, useOrganiserChange } from "@/features/onboarding/hooks/use-onboarding";
-import { Failed, Gaps, History, KycTone, Loading, Signed, StateTone } from "../../../bits";
+import { AlgotechOnly, Failed, Gaps, History, KycTone, Loading, Signed, StateTone } from "../../../bits";
+
+/** A document's size as people read it: never "0 KB" for a small file. */
+const fileSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
 function KycReview({ id }: { id: string }) {
   const org = useOrganiser(id);
@@ -63,7 +66,7 @@ function KycReview({ id }: { id: string }) {
                             docs.length ? (
                               docs.map((d) => (
                                 <button key={d.id} type="button" className="block truncate text-[13px] text-slate underline underline-offset-4 hover:text-ink" disabled={open.isPending} onClick={() => open.mutate(d.id)}>
-                                  {d.name} · {(d.size / 1024).toFixed(0)} KB · download
+                                  {d.name} · {fileSize(d.size)} · download
                                 </button>
                               ))
                             ) : (
@@ -256,7 +259,9 @@ function RateCardPanel({ o }: { o: OrganiserView }) {
 export function KycReviewGate({ id }: { id: string }) {
   return (
     <Signed>
-      <KycReview id={id} />
+      <AlgotechOnly>
+        <KycReview id={id} />
+      </AlgotechOnly>
     </Signed>
   );
 }

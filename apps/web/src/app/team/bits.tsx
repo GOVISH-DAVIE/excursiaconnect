@@ -3,7 +3,9 @@
 /** Pieces the organiser's and Algotech's screens share: the session wait, statuses, a history list, a file picker. */
 import { useSyncExternalStore, type ReactNode } from "react";
 import { Tone } from "@/components/ui";
+import Link from "next/link";
 import { useSession } from "@/features/auth/hooks/use-session";
+import { homeOf, rolesOf } from "@/features/auth/roles";
 
 const noop = () => () => {};
 /**
@@ -18,6 +20,23 @@ export function Signed({ children }: { children: ReactNode }) {
   const hydrated = useHydrated();
   if (!hydrated || !s || s.mfa === "pending" || s.user.kind === "participant") return <p className="text-[14px] text-slate">Checking your sign-in…</p>;
   return <>{children}</>;
+}
+
+/** Algotech's screens: anyone else is told so and pointed to their own workspace (the API refuses them anyway). */
+export function AlgotechOnly({ children }: { children: ReactNode }) {
+  const s = useSession().data;
+  if (!s || rolesOf(s).admin) return <>{children}</>;
+  return (
+    <div className="max-w-xl">
+      <h1 className="h1">This is Algotech&apos;s</h1>
+      <p className="mt-2 text-[15px] text-slate">
+        These screens are for Algotech&apos;s team.{" "}
+        <Link href={homeOf(s)} className="underline underline-offset-4">
+          Go to your workspace
+        </Link>
+      </p>
+    </div>
+  );
 }
 
 export function Loading() {

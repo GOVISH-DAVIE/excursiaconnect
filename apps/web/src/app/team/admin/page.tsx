@@ -8,7 +8,7 @@ import type { OpenOrganiser } from "@excursia/contracts/onboarding";
 import { onboardingApi } from "@/features/onboarding/api";
 import { Empty, PageHeader, Section, Stat } from "@/components/ui";
 import { useAdminQueue, useOrganiserChange } from "@/features/onboarding/hooks/use-onboarding";
-import { Failed, KycTone, Loading, Signed, StateTone } from "../bits";
+import { AlgotechOnly, Failed, KycTone, Loading, Signed, StateTone } from "../bits";
 
 function Queue() {
   const q = useAdminQueue();
@@ -175,7 +175,9 @@ function OpenForClient() {
 export default function AdminPage() {
   return (
     <Signed>
-      <Queue />
+      <AlgotechOnly>
+        <Queue />
+      </AlgotechOnly>
     </Signed>
   );
 }

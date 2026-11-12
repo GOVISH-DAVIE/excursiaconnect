@@ -526,6 +526,26 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - telling the lead when a request expires: the rules already know once the due date has passed, but nothing prompts the lead yet (Phase 2's jobs)
   - recommendations and decisions (M1.6)
 
+**Notes on organisers, Algotech and KYC, 12 Nov 2026** (the platform admin use cases PA-1 to PA-5 and DA-3, and OR-2, before the four application pathways):
+- **Two Algotech levels.** Admins check KYC, approve events and give Deal Rooms their staff. Super admins also run the Algotech team (invite by email, promote, remove) and set the organisers' rate cards. The first super admin comes from the command line; after that nobody changes or removes themselves, Algotech always keeps a super admin, and a removed admin is signed out everywhere at once. Every decision needs the authenticator, not "set up later".
+- **Organisers come in two ways.** They sign themselves up, or Algotech opens one for a client (PA-1): the organisation, and the owner, who is invited by email, sets a password and does KYC like anyone else.
+- **KYC is returned item by item (PA-2).** Each detail, document and the agreement can be returned with its own note. The organiser sees the note on that item and can't send again until each has changed (a new document, a changed value, the agreement signed again). On the next check Algotech sees what it returned last time.
+- **Rate cards (PA-4).** Each organiser has one, set by a super admin; until then the platform's starting card applies (the prototype's figures, until the price list is decided). Approval starts from it, for the kind of event.
+- **Two kinds of event.** A summit (tickets, with the Deal Room as an optional add-on) or a Deal Room on its own: it names its lead, is approved only with its Deal Room at the Deal Room's own price, has no tickets, and its web address opens on the Deal Room page. Every event has a time zone and a currency (OR-2); approval records on-site staff and stations (PA-3).
+- **Deal Room staff can be changed or removed (DA-3).** A role change goes through the rules and moves the person's sign-in with it; a removal ends their access to that Deal Room at once. The lead can't be demoted or removed until another is named; only the lead and marked reviewers decide.
+- **Algotech's overview** searches organisers, owners and events, and shows Deal Room-only events as such.
+- **Tested:** 5 tests for the team, more in onboarding's suite (opening an organiser for a client, per-item returns, rate cards, a Deal Room-only event, staff changes) and the rules' tests; then walked in two browsers on the walk-through database.
+- **Walked in Chrome, 12 Nov 2026** (Coastline Expos Ltd, opened by Algotech for a Tanzanian client): KYC filled and signed (a wrong name refused), two documents returned with notes, fixed and sent again ("Returned last time, changed since"), verified; a rate card set; a Deal Room-only event in USD sent, approved with staffing, its lead and a reviewer added, the reviewer made a coordinator (losing "may decide") and removed. Found and fixed:
+  - **Fees in the wrong currency.** Approving a USD event offered the KES rate card's figures labelled KES (a USD 100,000 licence). Fees now show in the event's currency; when it isn't the card's (KES), they start empty and must be typed before approval. The approval's history line names the currency too.
+  - **Stored times three hours early.** Prisma's pg adapter sends times without a zone, and a Postgres set to Africa/Nairobi read them as Nairobi time, so SQL's `now()` disagreed with every time the API wrote (the outbox's retry wait was skipped). Each connection now uses UTC. Rows written before the fix stay three hours early on local databases; a UTC server never had it.
+  - A document under 1 KB showed as "0 KB".
+- **Still open from that walk:** rate cards exist only in KES (a USD or TZS card is a decision); an event's currency is KES or USD only (no TZS or UGX); the new event form starts the city at Nairobi whatever the organiser's country.
+- **Not yet:**
+  - a live event can't be changed (OR-14), and organisers can't invite their own staff (OR-10)
+  - suspending an organiser or an event (PA-9), and reopening a verified KYC when its details change
+  - amounts processed and commission earned on the overview (PA-5), which wait for payments
+  - Algotech's real price list
+
 **Notes on M1.4, done 12 Nov 2026:**
 - **Sending:** Zoho over SMTP (D7), from `Events <noreply@algotech.co.ke>`. Sign-in codes go straight out from the API; every other message goes through the outbox and the worker. `npm run mail:check` logs in without sending.
 - **The outbox is the queue:** a message is written in the same transaction as the change that causes it, as "queued". The worker claims batches with `FOR UPDATE SKIP LOCKED`, sends, and records "sent" with Zoho's message id. A failure is retried after 1, 5, 15, 60 and 240 minutes, then "failed"; a message with no one to send to fails at once. Commands only ever add messages; they never rewrite one the worker has sent.

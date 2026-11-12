@@ -148,6 +148,8 @@ describe("a Deal Room-only event, and rate cards", () => {
     const sent = v(submitEvent(withLead, verified, TODAY, NOW));
     expect(decideEvent(sent, verified, { to: "Approved", terms: { ...terms, dealRoom: { ...terms.dealRoom, enabled: false } } }, "Algotech", NOW).refusal).toMatch(/approved with its Deal Room/);
     expect(v(decideEvent(sent, verified, { to: "Approved", terms }, "Algotech", NOW)).history?.at(-1)?.what).toMatch(/the Deal Room at KES 450,000/);
+    // an event charged in dollars says so in its history
+    expect(v(decideEvent({ ...sent, currency: "USD" }, verified, { to: "Approved", terms }, "Algotech", NOW)).history?.at(-1)?.what).toMatch(/the Deal Room at USD 450,000/);
   });
 
   test("approval starts from the organiser's rate card, or the platform's until one is set", () => {

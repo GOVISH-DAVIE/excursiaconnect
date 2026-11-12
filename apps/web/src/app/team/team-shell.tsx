@@ -7,7 +7,7 @@
  * prototype store.
  */
 import Link from "next/link";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Rail, type NavItem } from "@/components/ui";
 import { useSession } from "@/features/auth/hooks/use-session";
@@ -40,8 +40,10 @@ export function TeamShell({ children }: { children: ReactNode }) {
 
   // not signed in (or an applicant, or half signed in): to the sign-in page, and back here afterwards
   // (the path is read in the browser, here, so the shell doesn't hold up prerendering on dynamic pages)
+  // signing out on purpose goes to a plain sign-in: the next person shouldn't be sent back to this one's page
+  const signingOut = useRef(false);
   useEffect(() => {
-    if (session.isSuccess && !allowed) router.replace(`/signin?next=${encodeURIComponent(window.location.pathname)}`);
+    if (session.isSuccess && !allowed && !signingOut.current) router.replace(`/signin?next=${encodeURIComponent(window.location.pathname)}`);
   }, [session.isSuccess, allowed, router]);
 
   const me = team.data?.me;
@@ -55,7 +57,10 @@ export function TeamShell({ children }: { children: ReactNode }) {
         </Link>
       )}
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="rounded bg-white/10 px-2.5 py-1 hover:bg-white/20" onClick={() => signOut.mutate(undefined, { onSuccess: () => router.replace("/signin") })}>
+        <button type="button" className="rounded bg-white/10 px-2.5 py-1 hover:bg-white/20" onClick={() => {
+            signingOut.current = true;
+            signOut.mutate(undefined, { onSuccess: () => router.replace("/signin"), onError: () => (signingOut.current = false) });
+          }}>
           {signOut.isPending ? "Signing out…" : "Sign out"}
         </button>
         {roles.dealRoom && (

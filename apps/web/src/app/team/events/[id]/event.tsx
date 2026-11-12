@@ -15,7 +15,10 @@ import { useEvent, useEventChange } from "@/features/onboarding/hooks/use-onboar
 import { Failed, Gaps, History, Loading, StateTone } from "../../bits";
 import { EventForm } from "../event-form";
 
-const kes = (n: number) => `KES ${n.toLocaleString("en-KE")}`;
+/** An amount in the event's own currency. */
+const money = (n: number, currency: string) => `${currency} ${n.toLocaleString("en-KE")}`;
+/** Rate cards are set in Kenya shillings; an event charged in another currency gets its fees typed in afresh. */
+const CARD_CURRENCY = "KES";
 
 export function EventScreen({ id }: { id: string }) {
   const event = useEvent(id);
@@ -55,11 +58,11 @@ export function EventScreen({ id }: { id: string }) {
               <KV
                 rows={[
                   ["Commission", `${e.terms.commissionPct}%`],
-                  ["Licence fee", kes(e.terms.licenceFee)],
-                  ["One-off fee", kes(e.terms.oneOffFee)],
+                  ["Licence fee", money(e.terms.licenceFee, e.currency)],
+                  ["One-off fee", money(e.terms.oneOffFee, e.currency)],
                   ["Gateway fees borne by", e.terms.gatewayFeesBorneBy],
                   ["On-site", `${e.terms.staffCount} staff, ${e.terms.stations} station${e.terms.stations === 1 ? "" : "s"} a day`],
-                  ["Deal Room", e.terms.dealRoom.enabled ? `${kes(e.terms.dealRoom.addOnPrice)}, ${e.terms.dealRoom.deskStaff} desk staff a day` : "Not included"],
+                  ["Deal Room", e.terms.dealRoom.enabled ? `${money(e.terms.dealRoom.addOnPrice, e.currency)}, ${e.terms.dealRoom.deskStaff} desk staff a day` : "Not included"],
                 ]}
               />
             </Section>
@@ -147,15 +150,18 @@ function AdminReview({ e }: { e: EventView }) {
   const decide = useEventChange((input: EventDecisionInput) => onboardingApi.decideEvent(e.id, input));
   // the organiser's rate card, for this kind of event (PA-4)
   const st = e.startTerms;
+  // the card's fees are in shillings: for an event charged in dollars they'd be wildly wrong, so they start empty
+  const fromCard = e.currency === CARD_CURRENCY;
+  const fee = (n: number) => (fromCard ? String(n) : "");
   const [t, setT] = useState({
     commissionPct: String(st.commissionPct),
-    oneOffFee: String(st.oneOffFee),
-    licenceFee: String(st.licenceFee),
+    oneOffFee: fee(st.oneOffFee),
+    licenceFee: fee(st.licenceFee),
     gatewayFeesBorneBy: st.gatewayFeesBorneBy,
     staffCount: String(st.staffCount),
     stations: String(st.stations),
     dealRoom: st.dealRoom.enabled,
-    addOnPrice: String(st.dealRoom.addOnPrice),
+    addOnPrice: fee(st.dealRoom.addOnPrice),
     deskStaff: String(st.dealRoom.deskStaff),
   });
   const [note, setNote] = useState("");
@@ -170,6 +176,9 @@ function AdminReview({ e }: { e: EventView }) {
     </div>
   );
   const verified = e.organiser.kycStatus === "Verified";
+  const c = e.currency;
+  const withDealRoom = t.dealRoom || dealroomOnly;
+  const feesMissing = [t.licenceFee, t.oneOffFee, ...(withDealRoom ? [t.addOnPrice] : [])].some((v) => v.trim() === "");
   return (
     <Section title="Algotech's review">
       <div className="space-y-4">
@@ -181,11 +190,17 @@ function AdminReview({ e }: { e: EventView }) {
             </Link>
           </p>
         )}
-        <p className="text-[13px] text-slate">Starting from {e.organiser.name}&apos;s rate card. Change any figure for this event.</p>
+        {fromCard ? (
+          <p className="text-[13px] text-slate">Starting from {e.organiser.name}&apos;s rate card. Change any figure for this event.</p>
+        ) : (
+          <p className="text-[13px] text-slate">
+            This event charges in {c}, and {e.organiser.name}&apos;s rate card is in {CARD_CURRENCY}: enter each fee in {c}. Commission and staffing start from the card.
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-3">
           {num("commissionPct", "Commission %")}
-          {num("licenceFee", "Licence fee (KES)")}
-          {num("oneOffFee", "One-off fee (KES)")}
+          {num("licenceFee", `Licence fee (${c})`)}
+          {num("oneOffFee", `One-off fee (${c})`)}
           <div>
             <label className="label" htmlFor="t-gw">
               Gateway fees borne by
@@ -209,7 +224,7 @@ function AdminReview({ e }: { e: EventView }) {
           )}
           {(t.dealRoom || dealroomOnly) && (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {num("addOnPrice", dealroomOnly ? "Deal Room price (KES)" : "Add-on price (KES)")}
+              {num("addOnPrice", dealroomOnly ? `Deal Room price (${c})` : `Add-on price (${c})`)}
               {num("deskStaff", "Desk staff a day")}
             </div>
           )}
@@ -230,7 +245,8 @@ function AdminReview({ e }: { e: EventView }) {
           </button>
           <button
             className="btn-primary"
-            disabled={!verified || decide.isPending}
+            disabled={!verified || feesMissing || decide.isPending}
+            title={feesMissing ? `Enter the fees in ${c}` : undefined}
             onClick={() =>
               decide.mutate({
                 to: "Approved",
@@ -242,7 +258,7 @@ function AdminReview({ e }: { e: EventView }) {
                   gatewayFeesBorneBy: t.gatewayFeesBorneBy,
                   staffCount: Number(t.staffCount),
                   stations: Number(t.stations),
-                  dealRoom: { enabled: t.dealRoom || dealroomOnly, addOnPrice: Number(t.addOnPrice), deskStaff: Number(t.deskStaff) },
+                  dealRoom: { enabled: withDealRoom, addOnPrice: Number(t.addOnPrice), deskStaff: Number(t.deskStaff) },
                 },
               })
             }
