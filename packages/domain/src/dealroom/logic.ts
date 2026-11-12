@@ -8,6 +8,7 @@ import type { Actor } from "../ctx";
 import type {
   DealRoomState,
   DrApplication,
+  DrPathway,
   DrConfig,
   DrDecisionEntry,
   DrMatch,
@@ -123,7 +124,8 @@ export const PARTNER_KINDS: ProviderKind[] = ["Corporate buyer", "Distributor or
  * The role a participant registered under. Storage keeps two sides (seeker and provider), so a partner, like a
  * challenge, is the provider side of a pair: the role is worked out from the provider's kind and its challenge.
  */
-export type DrRole = "seeker" | "capital" | "partner" | "challenge";
+/** The registration pathway a participant registered under (not a staff role). */
+export type DrRole = DrPathway;
 export const ROLES: DrRole[] = ["seeker", "capital", "partner", "challenge"];
 export const ROLE_LABEL: Record<DrRole, string> = { seeker: "Capital seeker", capital: "Capital provider", partner: "Commercial or strategic partner", challenge: "Institutional challenge" };
 export const ROLE_SHORT: Record<DrRole, string> = { seeker: "Seeker", capital: "Investor", partner: "Partner", challenge: "Challenge" };
@@ -155,8 +157,12 @@ export const isPartnerKind = (k?: ProviderKind) => !!k && (PARTNER_KINDS.include
 export function roleOf(a: DrApplication): DrRole {
   if (a.type === "seeker") return "seeker";
   if (a.challenge) return "challenge";
+  // a provider that hasn't chosen its kind yet keeps the pathway it was started on
+  if (!a.providerKind && a.pathway) return a.pathway;
   return isPartnerKind(a.providerKind) ? "partner" : "capital";
 }
+/** The organisation types each provider-side pathway offers; a challenge comes from a public institution or a corporate buyer. */
+export const KINDS_FOR: Record<Exclude<DrRole, "seeker">, ProviderKind[]> = { capital: CAPITAL_KINDS, partner: PARTNER_KINDS, challenge: CHALLENGE_KINDS };
 /* ---------- sessions: the paper's activity formats and four-day programme ---------- */
 
 export const SESSION_FORMATS: { format: SessionFormat; short: string; what: string; hostKind: "seeker" | "provider" | "partner" | "challenge" | "none" }[] = [

@@ -147,11 +147,16 @@ export interface Verification {
   decided?: { by: string; at: string; reason: string };
 }
 
+/** The four registration pathways. Storage keeps two sides (seeker and provider); capital, partner and challenge are the provider side. */
+export type DrPathway = "seeker" | "capital" | "partner" | "challenge";
+
 export interface DrApplication {
   id: string;
   eventId: string;
   ref?: string; // issued on submit: CA3-CS-00123, CA3-FP-00045
   type: DrType;
+  /** the registration pathway it was started on; older records work it out from the kind (roleOf) */
+  pathway?: DrPathway;
   providerKind?: ProviderKind;
   ownerKind?: OwnerKind; // a seeker's kind of organisation
   mission: string; // mission id

@@ -7,10 +7,14 @@
  * it) can't be set this way, so a crafted request can't award itself anything. Two devices editing different
  * fields both keep their edits; the same field twice, the later one wins.
  */
-import { CHALLENGE_KINDS } from "./logic";
-import type { DrApplication, DrChallenge } from "./types";
+import { KINDS_FOR, roleOf } from "./logic";
+import type { DrApplication, DrChallenge, DrPathway, ProviderKind } from "./types";
 
-export type ApplyMode = "seeker" | "provider" | "challenge";
+/** What an application is started as: one of the four registration pathways. */
+export type ApplyMode = DrPathway;
+export const APPLY_MODES: readonly ApplyMode[] = ["seeker", "capital", "partner", "challenge"];
+/** A `?type=` from a link: the old "provider" lands on capital provider; anything unknown is not a pathway. */
+export const modeFromLink = (t: string | null | undefined): ApplyMode | null => (t === "provider" ? "capital" : APPLY_MODES.includes(t as ApplyMode) ? (t as ApplyMode) : null);
 
 const COMMON = [
   "mission", "track", "source",
@@ -29,12 +33,16 @@ const CHALLENGE = (["title", "problem", "users", "constraints", "outcome", "budg
 export const DRAFT_PATHS = [...COMMON, ...SEEKER, ...PROVIDER, ...CHALLENGE] as const;
 export type DraftPath = (typeof DRAFT_PATHS)[number];
 
-export const modeOf = (app: Pick<DrApplication, "type" | "challenge">): ApplyMode => (app.type === "seeker" ? "seeker" : app.challenge ? "challenge" : "provider");
+/** The pathway an application is on. */
+export const modeOf = (app: DrApplication): ApplyMode => roleOf(app);
+
+/** The organisation types an application on this pathway may choose (none for a seeker, who picks an owner kind). */
+export const kindsFor = (mode: ApplyMode): ProviderKind[] => (mode === "seeker" ? [] : KINDS_FOR[mode]);
 
 /** The paths this application's kind may write. */
 export function writablePaths(app: Pick<DrApplication, "type" | "challenge">): ReadonlySet<string> {
-  const mode = modeOf(app);
-  return new Set<string>([...COMMON, ...(mode === "seeker" ? SEEKER : PROVIDER), ...(mode === "challenge" ? CHALLENGE : [])]);
+  const seeker = app.type === "seeker";
+  return new Set<string>([...COMMON, ...(seeker ? SEEKER : PROVIDER), ...(app.challenge ? CHALLENGE : [])]);
 }
 
 /**
@@ -50,9 +58,14 @@ export function patchDraft(app: DrApplication, changes: Partial<Record<DraftPath
       refused.push(path);
       continue;
     }
-    // a challenge comes from a public institution or a corporate buyer, nobody else
-    if (path === "providerKind" && app.challenge && !CHALLENGE_KINDS.includes(value as never)) {
+    // each pathway has its own organisation types: an investor can't register as a distributor on the capital
+    // pathway, and a challenge comes from a public institution or a corporate buyer, nobody else. Clearing it is fine.
+    if (path === "providerKind" && value !== "" && value !== undefined && !kindsFor(app.pathway ?? modeOf(app)).includes(value as ProviderKind)) {
       refused.push(path);
+      continue;
+    }
+    if (path === "providerKind" && (value === "" || value === undefined)) {
+      next = { ...next, providerKind: undefined };
       continue;
     }
     const [group, field] = path.split(".");
@@ -76,6 +89,7 @@ export function blankApplication(opts: { id: string; eventId: string; mode: Appl
     id,
     eventId,
     type,
+    pathway: mode,
     mission: "",
     source: "",
     owner: "st_lead",

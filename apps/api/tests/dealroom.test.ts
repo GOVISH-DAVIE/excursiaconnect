@@ -100,6 +100,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("the Deal Room's write path", ()
     const all = (await call("GET", `/v1/dealroom/${EV}/applications`, "st_lead")).json.map((a: unknown) => ApplicationSummary.parse(a));
     expect(all.length).toBeGreaterThan(20);
     expect(all.some((a: ApplicationSummary) => a.status === "Draft")).toBe(false);
+    // each says its registration pathway, worked out for records made before pathways were stored
+    const pathways = new Set(all.map((a: ApplicationSummary) => a.pathway));
+    for (const p of ["seeker", "capital", "partner", "challenge"]) expect(pathways).toContain(p);
+    expect(all.every((a: ApplicationSummary) => (a.type === "seeker") === (a.pathway === "seeker"))).toBe(true);
     const none = (await call("GET", `/v1/dealroom/${EV}/applications?assignee=none`, "st_lead")).json;
     expect(none.every((a: ApplicationSummary) => a.assigneeId === null)).toBe(true);
     expect(none.map((a: ApplicationSummary) => a.id)).toContain("dr_cs12");

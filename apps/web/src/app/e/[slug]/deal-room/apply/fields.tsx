@@ -5,7 +5,7 @@
  * portal (dr/[appId]/portal.tsx), so both show the same fields the same way.
  */
 import { useState, type ReactNode } from "react";
-import { CHALLENGE_ROUTES, PATHWAYS } from "@excursia/domain/dealroom/logic";
+import { CHALLENGE_ROUTES, PATHWAYS, roleOf } from "@excursia/domain/dealroom/logic";
 import type { ChallengeRoute, Currency, DrApplication, DrChallenge, Instrument, Stage } from "@excursia/domain/dealroom/types";
 
 export const INSTRUMENTS: Instrument[] = PATHWAYS;
@@ -87,13 +87,16 @@ export function ChallengeFields({ c, onChange }: { c: DrChallenge; onChange: (c:
   );
 }
 
-export function MandateFields({ app, sectors, countries, onChange }: { app: DrApplication; sectors: string[]; countries: string[]; onChange: (m: NonNullable<DrApplication["mandate"]>) => void }) {
+export function MandateFields({ app, partner: asPartner, sectors, countries, onChange }: { app: DrApplication; partner?: boolean; sectors: string[]; countries: string[]; onChange: (m: NonNullable<DrApplication["mandate"]>) => void }) {
   const m = app.mandate!;
   const ch = !!app.challenge;
+  // a partner buys, distributes or partners: its range is a contract size, not a ticket
+  const partner = !ch && (asPartner ?? roleOf(app) === "partner");
   // typed as free text and split on leaving the field, so a comma can be typed
   const [excl, setExcl] = useState(m.exclusions.join(", "));
   return (
-    <Card title={ch ? "Who could solve it" : "Your mandate"}>
+    <Card title={ch ? "Who could solve it" : partner ? "What you are looking for" : "Your mandate"}>
+      {partner && <p className="-mt-1 mb-3 text-[13px] text-slate">Matching uses these: the sectors, countries and stages of the businesses you want to work with, the pathways you offer and the contract size.</p>}
       {ch && <p className="-mt-1 mb-3 text-[13px] text-slate">Matching uses these: the sectors, countries and stages of the businesses you want to meet, the pathways open to them and the contract size.</p>}
       <div className="grid gap-4">
         <F label="Sectors">
@@ -115,10 +118,10 @@ export function MandateFields({ app, sectors, countries, onChange }: { app: DrAp
               <option>KES</option>
             </select>
           </F>
-          <F label={ch ? "Smallest contract or pilot" : "Smallest ticket"}>
+          <F label={ch ? "Smallest contract or pilot" : partner ? "Smallest contract" : "Smallest ticket"}>
             <input className="input" type="number" min={0} value={m.ticketMin || ""} onChange={(e) => onChange({ ...m, ticketMin: Number(e.target.value) })} />
           </F>
-          <F label={ch ? "Largest contract" : "Largest ticket"}>
+          <F label={ch || partner ? "Largest contract" : "Largest ticket"}>
             <input className="input" type="number" min={0} value={m.ticketMax || ""} onChange={(e) => onChange({ ...m, ticketMax: Number(e.target.value) })} />
           </F>
         </div>

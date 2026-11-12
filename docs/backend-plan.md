@@ -539,6 +539,12 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - **Fees in the wrong currency.** Approving a USD event offered the KES rate card's figures labelled KES (a USD 100,000 licence). Fees now show in the event's currency; when it isn't the card's (KES), they start empty and must be typed before approval. The approval's history line names the currency too.
   - **Stored times three hours early.** Prisma's pg adapter sends times without a zone, and a Postgres set to Africa/Nairobi read them as Nairobi time, so SQL's `now()` disagreed with every time the API wrote (the outbox's retry wait was skipped). Each connection now uses UTC. Rows written before the fix stay three hours early on local databases; a UTC server never had it.
   - A document under 1 KB showed as "0 KB".
+- **The four registration pathways on the API, 12 Nov 2026** (the form from `deal-room-pathways-test.md`, which the prototype had): capital seeker, capital provider, commercial or strategic partner, institutional challenge.
+  - Each application stores the pathway it was started on (`pathway` in its record; no migration). Older records work it out from their kind, as before. Storage keeps its two sides; capital, partner and challenge are the provider side.
+  - Each pathway offers only its own organisation types, and the server refuses another (an investor type on the partner pathway, say). A link with `?type=provider`, from before, starts a capital provider; an unknown type, or none, asks which pathway first.
+  - The form is in steps, as the prototype's: Organisation; then Your ask, Your mandate, What you are looking for, or The challenge and Who could solve it; Decision-maker and mission; Documents for a seeker; Review and submit, which lists what is missing under each step. A draft reopens on its first unfinished step.
+  - The review queue says each application's pathway and filters by it.
+  - Not yet: the eligibility check's answers (sector, country, kind) aren't carried into a new application on the API, as the prototype did.
 - **Still open from that walk:** rate cards exist only in KES (a USD or TZS card is a decision); an event's currency is KES or USD only (no TZS or UGX); the new event form starts the city at Nairobi whatever the organiser's country.
 - **Not yet:**
   - a live event can't be changed (OR-14), and organisers can't invite their own staff (OR-10)

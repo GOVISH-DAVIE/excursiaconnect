@@ -8,6 +8,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { ApplicationSummary, StaffMember } from "@excursia/contracts/dealroom";
+import { ROLES, ROLE_LABEL } from "@excursia/domain/dealroom/logic";
 import { PageHeader, Section } from "@/components/ui";
 import { useApplications } from "@/features/dealroom/hooks/use-applications";
 import { useAssignReviewer } from "@/features/dealroom/hooks/use-assign-reviewer";
@@ -21,6 +22,7 @@ const STATUSES = ["Submitted", "In review", "Information requested", "Decided"] 
 export function Queue({ eventId }: { eventId: string }) {
   const [status, setStatus] = useState("");
   const [assignee, setAssignee] = useState("");
+  const [pathway, setPathway] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [reviewer, setReviewer] = useState("");
   const team = useTeam(eventId);
@@ -29,7 +31,8 @@ export function Queue({ eventId }: { eventId: string }) {
 
   const staff = team.data?.staff ?? [];
   const name = (id: string | null) => (id ? (staff.find((s) => s.id === id)?.name ?? id) : "Not assigned");
-  const rows = queue.data ?? [];
+  // the pathway is narrowed here: the queue holds the event's submitted work, a few hundred rows at most
+  const rows = (queue.data ?? []).filter((r) => !pathway || r.pathway === pathway);
   const toggle = (id: string) => setPicked((p) => (p.has(id) ? new Set([...p].filter((x) => x !== id)) : new Set([...p, id])));
   const allPicked = rows.length > 0 && rows.every((r) => picked.has(r.id));
 
@@ -43,6 +46,14 @@ export function Queue({ eventId }: { eventId: string }) {
           <option value="">All submitted work</option>
           {STATUSES.map((s) => (
             <option key={s}>{s}</option>
+          ))}
+        </select>
+        <select className="input h-10 w-full text-[14px] sm:w-auto sm:min-w-40" aria-label="Pathway" value={pathway} onChange={(e) => setPathway(e.target.value)}>
+          <option value="">Every pathway</option>
+          {ROLES.map((r) => (
+            <option key={r} value={r}>
+              {ROLE_LABEL[r]}
+            </option>
           ))}
         </select>
         <select className="input h-10 w-full text-[14px] sm:w-auto sm:min-w-40" aria-label="Reviewer" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
@@ -105,7 +116,7 @@ function Row({ a, reviewer, pickable, picked, onPick }: { a: ApplicationSummary;
           {a.org}
         </Link>
         <span className="block text-[13px] text-slate">
-          {a.type === "seeker" ? "Raising capital" : "Investor or provider"}
+          {ROLE_LABEL[a.pathway]}
           {a.country ? `, ${a.country}` : ""}
         </span>
         {/* on a phone the status and reviewer columns fold in here */}

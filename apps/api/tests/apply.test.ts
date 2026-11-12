@@ -238,6 +238,20 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("applying to the Deal Room", () 
     expect((await upload("county", id, "Pitch deck")).start.status).toBe(400);
   });
 
+  test("each of the four pathways is recorded, with its own organisation types", async () => {
+    await applicant("distributor");
+    const partner = MyApplication.parse((await start("distributor", "partner")).json);
+    expect(partner.mode).toBe("partner"); // kept before any type is chosen
+    expect(errorOf(await save("distributor", partner.id, { providerKind: "Venture capital" })).fields).toEqual(["providerKind"]);
+    expect(MyApplication.parse((await save("distributor", partner.id, { providerKind: "Distributor or channel partner" })).json).mode).toBe("partner");
+    // a link from before the four pathways starts a capital provider
+    await applicant("oldlink");
+    const capital = MyApplication.parse((await start("oldlink", "provider")).json);
+    expect(capital.mode).toBe("capital");
+    expect(errorOf(await save("oldlink", capital.id, { providerKind: "Technology partner" })).fields).toEqual(["providerKind"]);
+    expect((await start("oldlink", "banana")).status).toBe(400);
+  });
+
   test("an invitation is taken up only by the email it was sent to", async () => {
     const invited = seed.dealRoom.apps.find((a) => a.id === "dr_cs05")!;
     await applicant("stranger");

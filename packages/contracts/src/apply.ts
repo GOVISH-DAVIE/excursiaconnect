@@ -4,7 +4,8 @@
  */
 import { z } from "zod";
 
-export const ApplyMode = z.enum(["seeker", "provider", "challenge"]);
+/** The four registration pathways: capital seeker, capital provider, commercial or strategic partner, institutional challenge. */
+export const ApplyMode = z.enum(["seeker", "capital", "partner", "challenge"]);
 export type ApplyMode = z.infer<typeof ApplyMode>;
 
 export const SlugParams = z.object({ slug: z.string().regex(/^[a-z0-9-]{2,80}$/, "an event's address") });
@@ -36,7 +37,8 @@ export const DraftChanges = z
   .strict();
 export type DraftChanges = z.infer<typeof DraftChanges>;
 
-export const StartApplication = z.object({ mode: ApplyMode, invite: z.string().max(80).optional() });
+// "provider", from links made before the four pathways, starts a capital provider application
+export const StartApplication = z.object({ mode: z.preprocess((v) => (v === "provider" ? "capital" : v), ApplyMode), invite: z.string().max(80).optional() });
 export const SaveDraft = z.object({ changes: DraftChanges });
 export const SubmitApplication = z.object({ changes: DraftChanges.optional() });
 

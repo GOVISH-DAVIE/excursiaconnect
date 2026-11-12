@@ -6,7 +6,7 @@ import type { ApplicationSummary, AssignReviewerInput, MessageRow, StaffMember, 
 import type { DocumentLink, RequestInfoInput, ReviewView, RfiExpiryInput, ScoreInput } from "@excursia/contracts/review";
 import type { Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor } from "@excursia/domain/ctx";
-import { drCan } from "@excursia/domain/dealroom/logic";
+import { drCan, roleOf } from "@excursia/domain/dealroom/logic";
 import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
 import type { DealRoomSettings, DealRoomSettingsInput } from "@excursia/contracts/onboarding";
 import type { DrApplication, DrStaff } from "@excursia/domain/dealroom/types";
@@ -27,6 +27,7 @@ const toSummary = (r: AppRow): ApplicationSummary => {
     id: r.id,
     ref: r.ref,
     type: r.type as ApplicationSummary["type"],
+    pathway: roleOf(app),
     org: app.org?.name ?? "(no name yet)",
     country: app.org?.country || null,
     status: r.status as ApplicationSummary["status"],

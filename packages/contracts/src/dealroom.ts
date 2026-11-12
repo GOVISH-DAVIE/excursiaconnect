@@ -18,6 +18,8 @@ export const ApplicationSummary = z.object({
   id: z.string(),
   ref: z.string().nullable(),
   type: z.enum(["seeker", "provider"]),
+  /** the registration pathway: the provider side is a capital provider, a partner or a challenge */
+  pathway: z.enum(["seeker", "capital", "partner", "challenge"]),
   org: z.string(),
   country: z.string().nullable(),
   status: AppStatus,

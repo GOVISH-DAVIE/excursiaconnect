@@ -5,7 +5,8 @@
 import { describe, expect, test } from "vitest";
 import { apply } from "@excursia/domain/core/reducer";
 import { fixedCtx } from "@excursia/domain/ctx";
-import { blankApplication, patchDraft, writablePaths } from "@excursia/domain/dealroom/apply";
+import { blankApplication, modeFromLink, modeOf, patchDraft, writablePaths } from "@excursia/domain/dealroom/apply";
+import { roleOf } from "@excursia/domain/dealroom/logic";
 import { seed } from "@excursia/domain/seed";
 
 const now = "2026-12-16 09:00";
@@ -31,7 +32,7 @@ describe("a draft is patched field by field", () => {
 
   test("a seeker can't write a provider's mandate, nor a provider a seeker's ask", () => {
     expect(patchDraft(seeker, { "mandate.ticketMin": 1 }).refused).toEqual(["mandate.ticketMin"]);
-    const provider = blankApplication({ id: "dr_t_prov", eventId: "ev_ca3", mode: "provider", email: "fund@example.com", now });
+    const provider = blankApplication({ id: "dr_t_prov", eventId: "ev_ca3", mode: "capital", email: "fund@example.com", now });
     expect(patchDraft(provider, { "ask.amount": 1 }).refused).toEqual(["ask.amount"]);
     expect(writablePaths(provider).has("challenge.title")).toBe(false);
   });
@@ -41,6 +42,17 @@ describe("a draft is patched field by field", () => {
     expect(patchDraft(challenge, { providerKind: "Corporate buyer", "challenge.title": "Water metering" }).refused).toEqual([]);
   });
 
+  test("each pathway offers its own organisation types", () => {
+    const capital = blankApplication({ id: "dr_t_cap", eventId: "ev_ca3", mode: "capital", email: "fund@example.com", now });
+    const partner = blankApplication({ id: "dr_t_par", eventId: "ev_ca3", mode: "partner", email: "buy@example.com", now });
+    expect(patchDraft(capital, { providerKind: "Distributor or channel partner" }).refused).toEqual(["providerKind"]);
+    expect(patchDraft(capital, { providerKind: "DFI" }).app.providerKind).toBe("DFI");
+    expect(patchDraft(partner, { providerKind: "Venture capital" }).refused).toEqual(["providerKind"]);
+    expect(patchDraft(partner, { providerKind: "Technology partner" }).app.providerKind).toBe("Technology partner");
+    // a type can be cleared again
+    expect(patchDraft(patchDraft(capital, { providerKind: "DFI" }).app, { providerKind: "" }).app.providerKind).toBeUndefined();
+  });
+
   test("two devices' edits to different fields both survive", () => {
     const phone = { "org.name": "Savanna Water Ltd" };
     const laptop = { "org.country": "Tanzania", "ask.useOfFunds": "Treatment plant" };
@@ -48,6 +60,29 @@ describe("a draft is patched field by field", () => {
     const both = patchDraft(once, laptop).app;
     expect(both.org).toMatchObject({ name: "Savanna Water Ltd", country: "Tanzania" });
     expect(both.ask?.useOfFunds).toBe("Treatment plant");
+  });
+});
+
+describe("the registration pathway", () => {
+  test("is kept from the start, before an organisation type is chosen", () => {
+    for (const mode of ["seeker", "capital", "partner", "challenge"] as const) {
+      const app = blankApplication({ id: `dr_t_${mode}`, eventId: "ev_ca3", mode, email: "x@example.com", now });
+      expect(app.pathway).toBe(mode);
+      expect(modeOf(app)).toBe(mode);
+    }
+  });
+
+  test("older records without one are worked out from their kind", () => {
+    const old = { ...blankApplication({ id: "dr_t_old", eventId: "ev_ca3", mode: "partner", email: "x@example.com", now }), pathway: undefined };
+    expect(roleOf(old)).toBe("capital"); // no kind, no pathway: the provider side's default
+    expect(roleOf({ ...old, providerKind: "Distributor or channel partner" })).toBe("partner");
+  });
+
+  test("links name it; the old provider link means capital provider", () => {
+    expect(modeFromLink("partner")).toBe("partner");
+    expect(modeFromLink("provider")).toBe("capital");
+    expect(modeFromLink("banana")).toBeNull();
+    expect(modeFromLink(null)).toBeNull();
   });
 });
 
