@@ -9,6 +9,8 @@ export type Queued = { id: string; eventId: string | null; ownerKind: string; ow
 type Note = { to: string; subject: string; link: string };
 
 const msgId = () => `msg_${randomBytes(8).toString("hex")}`;
+/** How a row that the scanner failed on is marked (its scan note), until a scan succeeds. */
+export const SCANNER_FAILED = "scanner failed: ";
 
 export function createFilesRepo(db: Db) {
   /** One audited change to a file, with any emails it sends. */
@@ -35,6 +37,10 @@ export function createFilesRepo(db: Db) {
 
     /** The upload hasn't arrived yet: look again shortly. */
     later: (id: string, ms: number) => db.file.update({ where: { id }, data: { nextScanAt: new Date(Date.now() + ms) } }),
+
+    /** The scanner failed on it: try again later, and say why on the row, so the health check sees uploads stuck. */
+    scannerFailed: (id: string, ms: number, why: string) =>
+      db.file.update({ where: { id }, data: { nextScanAt: new Date(Date.now() + ms), scanNote: `${SCANNER_FAILED}${why}`.slice(0, 300) } }),
 
     /** An upload that never arrived, long after its link expired: nothing refers to it, so the row goes. */
     dropAbandoned: (id: string) => db.file.deleteMany({ where: { id, state: "quarantine" } }),

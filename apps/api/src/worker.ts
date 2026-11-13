@@ -8,7 +8,7 @@ import { loadConfig } from "./config";
 import { loadLocalEnv } from "./env";
 import { mailerFor } from "./mail/mailer";
 import { createFilesRepo } from "./modules/files/files.repo";
-import { createFilesService } from "./modules/files/files.service";
+import { SCAN_BATCH, createFilesService } from "./modules/files/files.service";
 import { createOutboxRepo } from "./modules/outbox/outbox.repo";
 import { createOutboxService } from "./modules/outbox/outbox.service";
 import { clamdScanner, testScanner } from "./scan/scanner";
@@ -21,6 +21,8 @@ const db = createDb(config.DATABASE_URL, 3);
 const outbox = createOutboxService({ repo: createOutboxRepo(db), mailer: mailerFor(config), web: config.WEB_ORIGINS[0] });
 const scanner = config.CLAMD_ADDRESS ? clamdScanner(config.CLAMD_ADDRESS) : testScanner;
 const files = createFilesService({ repo: createFilesRepo(db), storage: createLocalStorage({ dir: uploadsDir(config), key: deriveKeys(config.AUTH_SECRET).upload }), scanner });
+/** How long one round may keep scanning while uploads are waiting; the outbox goes at its own, slower pace. */
+const SCAN_BUDGET_MS = 2_500;
 /** Retention is in days and months: looking once a minute is plenty. */
 const PURGE_EVERY_MS = 60_000;
 let purgedAt = 0;
@@ -37,7 +39,18 @@ async function tick() {
     console.error("[worker] outbox batch failed", e);
   }
   try {
-    const s = await files.scan();
+    // a full batch means more are waiting: keep scanning for a moment, so a burst of uploads (or a backlog after the
+    // worker was down) clears in seconds rather than five files a round
+    const s = { clean: 0, rejected: 0, dropped: 0, failed: 0 };
+    const until = Date.now() + SCAN_BUDGET_MS;
+    for (;;) {
+      const r = await files.scan();
+      s.clean += r.clean;
+      s.rejected += r.rejected;
+      s.dropped += r.dropped;
+      s.failed += r.failed;
+      if (stopping || r.claimed < SCAN_BATCH || r.failed || Date.now() > until) break;
+    }
     if (s.clean || s.rejected || s.dropped || s.failed) console.log(`[worker] scan: ${s.clean} clean, ${s.rejected} rejected, ${s.dropped} abandoned, ${s.failed} to retry`);
     if (Date.now() - purgedAt > PURGE_EVERY_MS) {
       purgedAt = Date.now();

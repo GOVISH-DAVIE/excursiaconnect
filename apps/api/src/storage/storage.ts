@@ -16,8 +16,8 @@ export interface Storage {
   downloadUrl(key: string, file: { name: string; contentType: string }): { url: string; expiresAt: Date };
   /** The file's bytes, or null if nothing is there. */
   read(key: string): Promise<Buffer | null>;
-  /** Deletes the file; nothing happens if it is already gone. */
-  remove(key: string): Promise<void>;
+  /** Deletes the file; says whether there was one to delete (nothing happens if it is already gone). */
+  remove(key: string): Promise<boolean>;
 }
 
 /** The types an applicant may upload, with the bytes each must start with (checked when the file arrives). */

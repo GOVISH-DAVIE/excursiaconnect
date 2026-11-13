@@ -34,3 +34,18 @@ export const Health = z.object({
   db: z.enum(["ok", "down"]).optional(),
 });
 export type Health = z.infer<typeof Health>;
+
+/**
+ * GET /health/queues: whether the worker keeps up. Counts and ages only, no personal data. 503 with the reasons when
+ * something is stuck, so an uptime monitor alerts on it like /health/ready.
+ */
+export const QueueHealth = z.object({
+  status: z.enum(["ok", "behind"]),
+  /** what is wrong, in words, when behind */
+  problems: z.array(z.string()),
+  outbox: z.object({ due: z.number().int(), oldestDueSeconds: z.number().int(), failedToday: z.number().int() }),
+  /** scannerFailing: uploads the scanner itself couldn't check (clamd down), retried every minute */
+  scans: z.object({ due: z.number().int(), oldestDueSeconds: z.number().int(), rejectedToday: z.number().int(), scannerFailing: z.number().int() }),
+  retention: z.object({ overdue: z.number().int() }),
+});
+export type QueueHealth = z.infer<typeof QueueHealth>;

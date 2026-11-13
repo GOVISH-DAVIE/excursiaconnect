@@ -64,7 +64,7 @@ Server B       warm standby: same release, same units, same nginx; DNS TTL 60 s;
   - The API refuses to start in production without https origins and a cookie domain.
   - On SIGTERM it stops taking connections, finishes open requests and closes its pool, and exits after 10 s at most.
 - **`excursia-worker`** runs `node dist/worker.js` in `apps/api` with `/etc/excursia/worker.env`: `WORKER_DATABASE_URL` (the `worker` role), `AUTH_SECRET`, `WEB_ORIGINS` (the first is the site the emails link to), the same email settings as the API, `STORAGE_DIR` (the API's) and `CLAMD_ADDRESS`.
-  - **Virus scan:** every 3 seconds it takes up to five new uploads and scans each through clamd (`CLAMD_ADDRESS=127.0.0.1:3310`, or the socket's path). A clean file may then be opened; an infected one is deleted at once, kept as a row with the signature found, and its owner is emailed to upload a clean copy, which the rules then need before submitting. An upload not there yet is looked at again in 15 seconds, and one that never arrived is forgotten after an hour. If clamd doesn't answer, the file waits a minute and the error is logged: nothing is cleared without a scan. The API and the worker refuse to start in production without `CLAMD_ADDRESS`.
+  - **Virus scan:** every 3 seconds it scans new uploads through clamd, five at a time and for up to 2.5 seconds while more are waiting, (`CLAMD_ADDRESS=127.0.0.1:3310`, or the socket's path). A clean file may then be opened; an infected one is deleted at once, kept as a row with the signature found, and its owner is emailed to upload a clean copy, which the rules then need before submitting. An upload not there yet is looked at again in 15 seconds, and one that never arrived is forgotten after an hour. If clamd doesn't answer, the file waits a minute, the error is logged and noted on the file, and `/health/queues` reports it once a file has waited two minutes: nothing is cleared without a scan. The API and the worker refuse to start in production without `CLAMD_ADDRESS`.
   - **ClamAV:** `apt install clamav-daemon clamav-freshclam`; in `/etc/clamav/clamd.conf` set `TCPSocket 3310`, `TCPAddr 127.0.0.1` and `StreamMaxLength 25M` (above `UPLOAD_MAX_MB`); `freshclam` keeps the signatures current (check `systemctl status clamav-freshclam`). clamd needs about 1.5 GB of memory for its signatures. Test it with the EICAR test file: it must come back rejected.
   - **Retention:** once a minute it deletes the bytes of files past their retention date, keeping each row and an audit entry. A Deal Room document's date is set when it is uploaded: the Deal Room's retention months (12 by default) after its conversion end. KYC documents have none: they are kept while the organiser works with Algotech.
   - It sends the outbox every 3 seconds: a batch claimed with `FOR UPDATE SKIP LOCKED`, so a second worker never sends the same message. A failure is retried after 1, 5, 15, 60 and 240 minutes, then marked failed; a message stuck "sending" by a worker that died goes back in the queue after 10 minutes. pg-boss joins it for timed jobs (reminders, STK queries) when those are built.
@@ -287,7 +287,26 @@ server {
 
 - **Database:** managed point-in-time recovery for 30 days (or WAL archiving every 60 seconds to object storage), with an HA standby.
 - **Files:** bucket versioning, with a lifecycle that expires old versions so that deletion at retention really deletes.
-- **Restore drills**, timed against the RTO: before Tue 15 Dec 2026, before Mon 15 Feb 2027, then monthly. Each drill is written up in a runbook.
+- **Nightly backup:** `scripts/ops/backup.sh`, a `pg_dump` archive and the uploads with SHA-256s, kept 30 days, encrypted to Algotech's key (`BACKUP_GPG_RECIPIENT`) and copied off the server. A systemd timer runs it at 02:30 Nairobi time:
+
+  ```ini
+  # /etc/systemd/system/excursia-backup.service
+  [Service]
+  Type=oneshot
+  User=excursia-backup
+  EnvironmentFile=/etc/excursia/backup.env   # BACKUP_DATABASE_URL, BACKUP_DIR, STORAGE_DIR, PG_BIN, BACKUP_GPG_RECIPIENT
+  ExecStart=/srv/excursia/current/scripts/ops/backup.sh
+
+  # /etc/systemd/system/excursia-backup.timer
+  [Timer]
+  OnCalendar=*-*-* 02:30 Africa/Nairobi
+  Persistent=true
+  [Install]
+  WantedBy=timers.target
+  ```
+
+  A failed run must alert (systemd's `OnFailure=` to the alert hook). The tools must match the server's major version (`PG_BIN`); the script refuses otherwise.
+- **Restore drills**, timed against the RTO: before Tue 15 Dec 2026, before Mon 15 Feb 2027, then monthly, by [restore-drill.md](restore-drill.md) with `scripts/ops/restore-drill.sh`. Each drill's report goes into its log.
 - **Failover to server B:** rehearsed in milestone M3.7.
 - **Backups age out** with the 30-day window, and this is written into the privacy notice.
 
@@ -295,7 +314,7 @@ server {
 
 - **Firewall:** open for 80 and 443, plus 22 from admin addresses only. SSH by key only.
 - `unattended-upgrades` on, and the clock kept with `chrony`.
-- Uptime alerts on both names, plus `/health/ready` polled from the server itself.
+- Uptime alerts on both names, plus, polled every minute from outside: `GET /health/ready` (the API and its database) and `GET /health/queues` (the worker: 503 with the reason when an email or a virus scan has waited over two minutes, more than 20 emails failed in a day, or a file is past its retention date). Counts only, no personal data.
 - Error alerts.
 - Structured logs with phone numbers masked.
 - Prisma query logging off in production.

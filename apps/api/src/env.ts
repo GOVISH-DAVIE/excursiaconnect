@@ -9,11 +9,14 @@ const DATABASE_URLS = ["DATABASE_URL", "WORKER_DATABASE_URL", "REPORTING_DATABAS
 
 export function loadLocalEnv() {
   if (process.env.NODE_ENV === "production") return;
-  try {
-    // src/env.ts and dist/*.js both sit two folders below the repository root
-    process.loadEnvFile(fileURLToPath(new URL("../../../.env.local", import.meta.url)));
-  } catch {
-    // no .env.local: the variables are already in the environment
+  // src/env.ts and dist/*.js sit two folders below the repository root, the built commands (dist/cli/*.js) three
+  for (const up of ["../../../.env.local", "../../../../.env.local"]) {
+    try {
+      process.loadEnvFile(fileURLToPath(new URL(up, import.meta.url)));
+      break;
+    } catch {
+      // not there: try one folder up; with none, the variables are already in the environment
+    }
   }
   pointAtLocalDatabase(process.env);
 }

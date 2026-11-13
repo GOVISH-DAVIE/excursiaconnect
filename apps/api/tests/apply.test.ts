@@ -291,8 +291,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("applying to the Deal Room", () 
     expect(fixed.documents.map((d) => d.scan)).toEqual(["clean"]);
     expect(fixed.documents[0].id).toBe(good.target!.fileId);
     expect(fixed.gaps.missing).not.toContain("Pitch deck");
-    // uploads are kept until the Deal Room's retention date
+    // uploads are kept until the Deal Room's retention date; after it, nobody can open them
     expect((await db.file.findUniqueOrThrow({ where: { id: good.target!.fileId } })).retentionUntil?.getTime()).toBeGreaterThan(clock.getTime());
+    await db.file.update({ where: { id: good.target!.fileId }, data: { retentionUntil: new Date(Date.now() - 60_000) } });
+    expect(await worker.purge()).toBeGreaterThanOrEqual(1);
+    const late = await call("GET", `/v1/dealroom/ev_ca3/applications/${id}/documents/${good.target!.fileId}`, "lead");
+    expect(late.status).toBe(409);
+    expect(errorOf(late).message).toMatch(/deleted at its retention date/);
+    expect(MyApplication.parse((await call("GET", mine(`/${id}`), "scanned")).json).documents.map((d) => d.scan)).toEqual(["deleted"]);
   });
 
   test("an invitation is taken up only by the email it was sent to", async () => {

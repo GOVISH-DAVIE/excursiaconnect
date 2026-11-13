@@ -12,11 +12,21 @@ import { createDb } from "@excursia/db";
 import { createFilesRepo } from "../src/modules/files/files.repo";
 import { createFilesService } from "../src/modules/files/files.service";
 import { clamdScanner, testScanner, type Scanner } from "../src/scan/scanner";
-import { createLocalStorage, type LocalStorage } from "../src/storage/local";
+import { existsSync } from "node:fs";
+import { createLocalStorage, uploadsDir, type LocalStorage } from "../src/storage/local";
 
 const run = Date.now().toString(36);
 const PDF = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(300, 0x20)]);
 const MARK = ["EICAR", "STANDARD", "ANTIVIRUS", "TEST", "FILE"].join("-");
+
+describe("where uploads are kept", () => {
+  test("STORAGE_DIR when set; else the repository's data/uploads, found the same from source and from the build", () => {
+    expect(uploadsDir({ STORAGE_DIR: "/srv/excursia/uploads" })).toBe("/srv/excursia/uploads");
+    const dir = uploadsDir({});
+    expect(dir).toMatch(/\/data\/uploads$/);
+    expect(existsSync(join(dir, "..", "..", "apps", "api", "package.json"))).toBe(true);
+  });
+});
 
 describe("clamd's INSTREAM protocol", () => {
   let server: Server;
@@ -132,6 +142,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("the worker's file jobs", () => 
     const r = await row(id);
     expect(r.state).toBe("quarantine");
     expect(r.nextScanAt!.getTime()).toBeGreaterThan(Date.now() + 30_000);
+    expect(r.scanNote).toBe("scanner failed: clamd is down"); // what the health check counts
     expect(await storage.read(r.storageKey)).not.toBeNull();
   });
 

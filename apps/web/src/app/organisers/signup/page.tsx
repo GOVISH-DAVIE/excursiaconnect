@@ -20,6 +20,12 @@ export default function OrganiserSignUpPage() {
           Sign in
         </Link>
       </p>
+      <p className="mt-2 max-w-md text-center text-[13px] text-slate">
+        How we handle your data:{" "}
+        <Link href="/privacy" className="underline underline-offset-4">
+          the privacy notice
+        </Link>
+      </p>
     </main>
   );
 }

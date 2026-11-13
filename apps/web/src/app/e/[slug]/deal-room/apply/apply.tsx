@@ -170,6 +170,13 @@ function Page({ slug, form, linked, invite }: { slug: string; form: ApplyForm; l
           )}
         </div>
         {body}
+        <p className="text-[13px] text-slate">
+          What happens to what you send, who sees your documents and for how long:{" "}
+          <Link href="/privacy" className="underline underline-offset-4">
+            the privacy notice
+          </Link>
+          . Nothing is shared with an investor or partner without your consent, document by document.
+        </p>
       </main>
     </div>
   );

@@ -5,6 +5,7 @@
  * a bucket replaces it when D6 is decided.
  */
 import { createHmac } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,8 +20,19 @@ type Grant = { k: string; s: number; t: string; e: number };
 /** A download grant: the key, the name and type to serve it under, the expiry, and "d" so it can't pass as an upload. */
 type DownloadGrant = { d: 1; k: string; n: string; t: string; e: number };
 
-/** Where uploads are kept: STORAGE_DIR, else data/uploads in the repository. The API and the worker share it. */
-export const uploadsDir = (config: { STORAGE_DIR?: string }) => config.STORAGE_DIR ?? fileURLToPath(new URL("../../../../data/uploads", import.meta.url));
+/**
+ * Where uploads are kept: STORAGE_DIR, else data/uploads in the repository. The API and the worker share it. The
+ * repository is found by looking up for apps/api, because this file runs from src/storage/ in development and is
+ * bundled into dist/ (and dist/cli/) when built: a fixed "../.." would point somewhere else in each.
+ */
+export function uploadsDir(config: { STORAGE_DIR?: string }): string {
+  if (config.STORAGE_DIR) return config.STORAGE_DIR;
+  for (const up of ["../../../", "../../../../"]) {
+    const root = fileURLToPath(new URL(up, import.meta.url));
+    if (existsSync(join(root, "apps", "api", "package.json"))) return join(root, "data", "uploads");
+  }
+  throw new Error("Can't find the repository to keep uploads in: set STORAGE_DIR");
+}
 
 export class UploadRefused extends Error {
   constructor(message: string) {
@@ -75,7 +87,12 @@ export function createLocalStorage(opts: { dir: string; key: Buffer; now?: () =>
 
     read: (key) => readFile(pathOf(key)).catch(() => null),
 
-    remove: (key) => rm(pathOf(key), { force: true }),
+    async remove(key) {
+      const path = pathOf(key);
+      const there = await stat(path).then(() => true, () => false);
+      await rm(path, { force: true });
+      return there;
+    },
 
     async stat(key) {
       try {

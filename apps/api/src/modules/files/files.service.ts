@@ -9,7 +9,8 @@ import type { Scanner } from "../../scan/scanner";
 import type { Storage } from "../../storage/storage";
 import type { FilesRepo } from "./files.repo";
 
-const BATCH = 5;
+/** Files claimed at once; a full batch tells the worker more are waiting. */
+export const SCAN_BATCH = 5;
 /** How long a scan may hold a file before another worker may try it. */
 const LEASE_MS = 10 * 60_000;
 /** How soon to look again for an upload that hasn't arrived. */
@@ -22,8 +23,10 @@ const SCANNER_DOWN_MS = 60_000;
 export function createFilesService({ repo, storage, scanner, log = console }: { repo: FilesRepo; storage: Storage; scanner: Scanner; log?: Pick<Console, "error"> }) {
   return {
     async scan() {
-      const out = { clean: 0, rejected: 0, waiting: 0, dropped: 0, failed: 0 };
-      for (const f of await repo.claim(BATCH, LEASE_MS)) {
+      const out = { claimed: 0, clean: 0, rejected: 0, waiting: 0, dropped: 0, failed: 0 };
+      const batch = await repo.claim(SCAN_BATCH, LEASE_MS);
+      out.claimed = batch.length;
+      for (const f of batch) {
         const bytes = await storage.read(f.storageKey);
         if (!bytes || bytes.length !== f.size) {
           if (Date.now() - f.createdAt.getTime() > ABANDONED_MS) {
@@ -41,7 +44,7 @@ export function createFilesService({ repo, storage, scanner, log = console }: { 
           result = await scanner.scan(bytes);
         } catch (e) {
           log.error(`[worker] scan of ${f.id} failed`, e);
-          await repo.later(f.id, SCANNER_DOWN_MS);
+          await repo.scannerFailed(f.id, SCANNER_DOWN_MS, (e as Error).message);
           out.failed++;
           continue;
         }
@@ -64,7 +67,9 @@ export function createFilesService({ repo, storage, scanner, log = console }: { 
     async purge() {
       let deleted = 0;
       for (const f of await repo.dueForDeletion(50)) {
-        await storage.remove(f.storageKey);
+        // a file that isn't where it should be is still recorded as deleted, but loudly: STORAGE_DIR may be wrong,
+        // and then its bytes are somewhere else, not deleted
+        if (!(await storage.remove(f.storageKey))) log.error(`[worker] retention: ${f.id} wasn't at ${f.storageKey}; check STORAGE_DIR`);
         await repo.deleted(f);
         deleted++;
       }

@@ -14,6 +14,7 @@
     "import": "tsx src/cli/import-reference.ts",
     "admin": "tsx src/cli/create-admin.ts",
     "mail:check": "tsx src/cli/check-mail.ts",
+    "load:apply": "tsx src/cli/load-apply.ts",
     "worker": "tsx watch src/worker.ts",
     "start:worker": "node dist/worker.js"
   },
