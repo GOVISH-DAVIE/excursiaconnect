@@ -6,6 +6,8 @@
  * Every change runs through runCommand as `{ kind: "applicant", appId }`, with the prototype's own rules:
  * dr/saveDraft with a draft the server builds from the stored one plus only the fields an applicant may write
  * (patchDraft), dr/submit for the reference and the confirmation message, dr/addDoc once an upload has arrived.
+ * The autosave, most of all writes, and attaching an upload run on their one application (`only`), so they don't
+ * wait for the whole Deal Room; submitting takes it all, for the event's reference counter and the message.
  */
 import { randomBytes } from "node:crypto";
 import type { ApplyForm, ApplyMode, DraftChanges, MyApplication, MyApplications, RespondInput, ScanState, UploadTarget } from "@excursia/contracts/apply";
@@ -197,6 +199,7 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
         userId: session.user.id,
         ip,
         owned: owns(appId, email),
+        only: appId,
         actions: (s) => [{ type: "dr/saveDraft", app: patched(withoutGone(appIn(s, appId), scans), changes) }],
       });
       return after(state, appId, e.cfg);
@@ -266,6 +269,7 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
         userId: session.user.id,
         ip,
         owned: owns(appId, email),
+        only: appId,
         actions: (s, ctx): Action[] => {
           const app = appIn(s, appId);
           if (app.documents.some((d) => d.id === fileId)) return [];

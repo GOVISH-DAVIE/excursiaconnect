@@ -24,6 +24,8 @@ import { createFilesService } from "../src/modules/files/files.service";
 import { testScanner } from "../src/scan/scanner";
 import { createLocalStorage, type LocalStorage } from "../src/storage/local";
 import { toInstant } from "../src/persistence/time";
+import { createCommands } from "../src/modules/dealroom/dealroom.commands";
+import { createDealRoomRepo } from "../src/modules/dealroom/dealroom.repo";
 
 const WEB = "https://events.example.co.ke";
 const SLUG = "connected-africa-3";
@@ -324,4 +326,83 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("applying to the Deal Room", () 
     const first = seed.dealRoom.seq.fp + 1;
     expect(refs).toEqual([0, 1, 2, 3].map((n) => `CA3-FP-${String(first + n).padStart(5, "0")}`));
   }, 30_000);
+
+  /**
+   * The autosave locks only its own application (the event's lock shared), so a Deal Room with a thousand
+   * applications doesn't make every keystroke wait for all of them; the team's writes still take the whole Deal Room.
+   */
+  describe("autosave runs on its own application", () => {
+    const appRow = (id: string) => db.drApplication.findUniqueOrThrow({ where: { id }, select: { version: true, status: true, record: true } });
+    const saves = (id: string) => db.auditEntry.count({ where: { entity: "dr_application", entityId: id, action: "dr/saveDraft" } });
+    const FIELDS = {
+      "org.name": "Busy Capital", "org.country": "Kenya", providerKind: "Venture capital", "mandate.ticketMin": 100_000, "mandate.ticketMax": 900_000,
+      "decisionMaker.name": "Achieng Otieno", "decisionMaker.title": "Partner", "decisionMaker.email": "achieng@busy.example",
+    };
+
+    test("saves to one application at once queue on it: every field lands, every save counted", async () => {
+      await applicant("busy");
+      const id = MyApplication.parse((await start("busy", "provider")).json).id;
+      const before = await appRow(id);
+      const auditsBefore = await saves(id);
+      const results = await Promise.all(Object.entries(FIELDS).map(([k, v]) => save("busy", id, { [k]: v })));
+      expect(results.map((r) => r.status)).toEqual(Array(8).fill(200));
+      const app = MyApplication.parse((await call("GET", mine(`/${id}`), "busy")).json);
+      expect(app.form).toMatchObject({ org: { name: "Busy Capital", country: "Kenya" }, providerKind: "Venture capital", mandate: { ticketMin: 100_000, ticketMax: 900_000 } });
+      expect(app.form.decisionMaker).toMatchObject({ name: "Achieng Otieno", title: "Partner", email: "achieng@busy.example" });
+      expect((await appRow(id)).version).toBe(before.version + 8);
+      expect(await saves(id)).toBe(auditsBefore + 8);
+    }, 30_000);
+
+    test("many applications save side by side while the team's writes go one at a time, none lost", async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 8; i++) {
+        await applicant(`side${i}`);
+        ids.push(MyApplication.parse((await start(`side${i}`, "provider")).json).id);
+      }
+      const versions = await Promise.all(ids.map(async (id) => (await appRow(id)).version));
+      const reviewed = await appRow("dr_cs13");
+      const results = await Promise.all([
+        ...ids.flatMap((id, i) => [save(`side${i}`, id, { "org.name": `Fund ${i}` }), save(`side${i}`, id, { "org.country": "Kenya" }), save(`side${i}`, id, { providerKind: "Venture capital" })]),
+        ...["st_rev1", "st_rev2", "st_rev1", "st_rev2"].map((staffId) => call("POST", "/v1/dealroom/ev_ca3/applications/assign", "lead", { appIds: ["dr_cs13"], staffId })),
+      ]);
+      expect(results.map((r) => r.status)).toEqual(Array(28).fill(200));
+      for (const [i, id] of ids.entries()) {
+        const r = await appRow(id);
+        expect(r.version).toBe(versions[i] + 3);
+        expect(r.record).toMatchObject({ org: { name: `Fund ${i}`, country: "Kenya" }, providerKind: "Venture capital" });
+      }
+      expect((await appRow("dr_cs13")).version).toBe(reviewed.version + 4);
+    }, 30_000);
+
+    test("an archived Deal Room refuses the save with the rule's reason, and nothing is written", async () => {
+      await applicant("late");
+      const id = MyApplication.parse((await start("late", "provider")).json).id;
+      const cfg = await db.drConfig.findUniqueOrThrow({ where: { eventId: "ev_ca3" } });
+      const before = await appRow(id);
+      await db.drConfig.update({ where: { eventId: "ev_ca3" }, data: { record: { ...(cfg.record as object), archivedAt: "2027-06-30 23:59" } } });
+      try {
+        const r = await save("late", id, { "org.name": "Too late" });
+        expect(r.status).toBe(409);
+        expect(errorOf(r).message).toBe("The Deal Room is archived and read-only");
+      } finally {
+        await db.drConfig.update({ where: { eventId: "ev_ca3" }, data: { record: cfg.record as object } });
+      }
+      expect((await appRow(id)).version).toBe(before.version);
+    });
+
+    test("only a one-application rule runs on one application, and only its own changes are written", async () => {
+      await applicant("guard");
+      const id = MyApplication.parse((await start("guard", "provider")).json).id;
+      const commands = createCommands({ repo: createDealRoomRepo(db), now: () => clock });
+      const base = { eventId: "ev_ca3", actor: { kind: "applicant" as const, appId: id }, userId: users.at(-1)!, ip: null, only: id };
+      // the counter and the outbox weren't loaded: a submission there would write them from nothing
+      await expect(commands.run({ ...base, actions: () => [{ type: "dr/submit", appId: id }] })).rejects.toThrow(/can't run on one application alone/);
+      const stray = `dr_fp_stray${run}`;
+      await expect(commands.run({ ...base, actions: (s) => [{ type: "dr/saveDraft", app: { ...s.dealRoom.apps[0], id: stray } }] })).rejects.toThrow(/changed more than/);
+      expect(await db.drApplication.findUnique({ where: { id: stray } })).toBeNull();
+      // another event's application isn't there to save
+      const other = await commands.run({ ...base, eventId: "ev_ca3", only: "dr_no_such_app", actions: () => [] });
+      expect(other.dealRoom.apps).toEqual([]);
+    });
+  });
 });

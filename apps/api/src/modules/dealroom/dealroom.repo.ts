@@ -5,6 +5,11 @@
  * Writes go through `inEventLock` (backend-plan.md, "How a write runs on the server"): a transaction holding
  * pg_advisory_xact_lock for the event, so two writes to one Deal Room never interleave, while writes to different
  * events run side by side. Inside it, `load` reads the rows and `save` writes back only the rows that changed.
+ *
+ * An applicant's autosave reads and writes only their own application, so it needn't wait for the whole Deal Room:
+ * with `{ appId }` the transaction takes the event's lock *shared* and that application's row lock, and loads only
+ * that row and the config. Autosaves to different applications then run side by side; two to the same application
+ * queue on its row; and every other write still takes the event's lock alone, so it never interleaves with one.
  */
 import { randomUUID } from "node:crypto";
 import type { Db, Prisma } from "@excursia/db";
@@ -55,6 +60,16 @@ async function loadWith(c: Client, eventId: string): Promise<EventStored | null>
     dealRoom: { config, staff, apps, matches, meetings, sessions, opportunities, exceptions, incidents, consents, access, outbox, counters },
     core: { organisers, events: [event], tiers, delegates },
   };
+}
+
+/** One application of the event and what its own rules read with it (the config, the event): nothing else. */
+async function loadOneWith(c: Client, eventId: string, appId: string): Promise<EventStored | null> {
+  const config = await c.drConfig.findUnique({ where: { eventId } });
+  const event = await c.event.findUnique({ where: { id: eventId } });
+  if (!config || !event) return null;
+  const [apps, organisers] = await Promise.all([c.drApplication.findMany({ where: { eventId, id: appId } }), c.organiser.findMany({ where: { id: event.organiserId } })]);
+  const none = { staff: [], matches: [], meetings: [], sessions: [], opportunities: [], exceptions: [], incidents: [], consents: [], access: [], outbox: [], counters: [] };
+  return { dealRoom: { config, apps, ...none }, core: { organisers, events: [event], tiers: [], delegates: [] } };
 }
 
 /** Upserts by id; an application's version goes up with every save, for optimistic checks outside the lock. */
@@ -132,7 +147,8 @@ export function createDealRoomRepo(db: Db) {
 
     /**
      * Runs `work` in one transaction holding the event's lock. `work` gets the aggregate's rows as they are now,
-     * and a way to save what changed and to audit it; it all commits together, or not at all.
+     * and a way to save what changed and to audit it; it all commits together, or not at all. With `scope.appId`,
+     * the lock is shared and the rows are that one application's (see the top of this file).
      */
     inEventLock<T>(
       eventId: string,
@@ -144,11 +160,20 @@ export function createDealRoomRepo(db: Db) {
         queue: (notes: { to: string; subject: string; link: string; eventId: string }[]) => Promise<void>;
         revokeStaff: (staffIds: string[]) => Promise<void>;
       }) => Promise<T>,
+      scope?: { appId: string },
     ): Promise<T> {
+      const key = `dr:${eventId}`;
       return db.$transaction(
         async (tx) => {
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`dr:${eventId}`}, 0))`;
-          const stored = await loadWith(tx, eventId);
+          let stored: EventStored | null;
+          if (scope) {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${key}, 0))`;
+            await tx.$executeRaw`SELECT 1 FROM dr_application WHERE id = ${scope.appId} AND event_id = ${eventId} FOR UPDATE`;
+            stored = await loadOneWith(tx, eventId, scope.appId);
+          } else {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+            stored = await loadWith(tx, eventId);
+          }
           return work({
             stored,
             save: (ch) => saveWith(tx, eventId, ch),

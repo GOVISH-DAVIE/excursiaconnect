@@ -129,6 +129,12 @@ The hook then invalidates or updates its TanStack Query keys.
 
 **When to break a hot path out of the aggregate:** when the load test shows a Deal Room write over its budget (below). Meeting arrivals and outcomes on summit day are the likeliest, and the busy-slot table already makes bookings safe outside the aggregate.
 
+**Done for the applicant's autosave and upload (14 Nov 2026):** a command with `only: appId` takes the event's lock **shared** (`pg_advisory_xact_lock_shared`) and that application's row lock (`FOR UPDATE`), loads only that row and the config, and runs the same rule through the same save and audit.
+- Autosaves to different applications run side by side; two to the same application wait for each other on its row, so a save never overwrites another one's fields.
+- Every other write still takes the event's lock exclusively, so it never interleaves with one. PostgreSQL queues a new shared request behind a waiting exclusive one, so a burst of autosaves can't starve the team's writes.
+- Only `dr/saveDraft` and `dr/addDoc` may run so (they read and write one application). Anything else there is refused before it runs, and a result that changed anything but that application is never written.
+- No version check from the browser: an autosave sends only the fields that changed and is merged into the stored draft, so two devices' edits still merge (M1.1).
+
 **Prototype-only actions get no server command:** `reset`, `hydrate`, `setCurrentDelegate`, `dr/clock`, `dr/actAs`, `expo/clock`, `expo/actAs`, `dr/offline` and `dr/sync`. Scanner sign-in becomes real sign-in. `dr/payFee` is never sent from a browser: only the payment webhook path calls it.
 
 ### How a read runs
@@ -569,7 +575,20 @@ Each milestone from here on builds its feature the same way, as in [architecture
 
     Nothing failed at any load: requests wait for a database connection in the API rather than time out (the app role's 5 s statement timeout was never reached). But every write to one event's Deal Room takes the event's lock and loads **all its applications**, so it slows as the event fills: about 20 ms a write with a handful of applications, **about 100 ms with 1,000**, so **about 10 writes a second per event** once it is full. Applicants autosave every few seconds while typing, so with 1,000 applications in, **25 people typing at once already wait 2 to 3 seconds** a save. Waiting writes hold connections, so reads slow too (the form took 0.6 s at that point).
 
-    **Before applications open, decide:** a Deal Room expecting a few hundred applications will be fine; one expecting 1,000 or more needs the **targeted autosave** first: lock and patch only the application's own row, checked by its `version` (as the schema anticipates; M1.1 notes), instead of the event's whole aggregate, since a draft's autosave touches nothing else. Submissions, uploads and the team's actions can stay on the event lock; the autosaves are three quarters of the writes.
+    **Fixed 14 Nov 2026: autosave runs on its own application** (above, "Done for the applicant's autosave and upload"). The same runs, with 1,000 applications in:
+
+    | Applicants at once | Submitted | Errors | Autosave median / p95 | Attach an upload median / p95 | Whole run |
+    | --- | --- | --- | --- | --- | --- |
+    | 1 | 8 of 8 | 0 | **11 / 17 ms** (was 100 / 117) | 11 / 20 ms (was 108 / 137) | 2.7 s (was 4.2) |
+    | 25 | 100 of 100 | 0 | **315 / 941 ms** (was 2.2 / 3.0 s) | 415 ms / 1.1 s (was 1.0 / 2.1 s) | 22 s (was 39) |
+    | 150, all starting in the same second | 300 of 300 | 0 | 360 ms / 7.5 s | 344 ms / 6.1 s | 70 s |
+    | 150, with 3 s between saves | 300 of 300 | 0 | 207 ms / 3.4 s | 485 ms / 3.2 s | 85 s |
+
+    References came out distinct with no gaps every time.
+
+    **What is left:** starting an application and submitting still take the whole Deal Room, about 100 ms each with 1,000 in, so about 10 a second per event. Autosaves queue behind them while they wait, which is what the 150-at-once rows show: 150 people starting **in the same second** wait up to 13 s to start, and their saves' p95 follows. Spread over a minute, as even an email to every lead would be, that is far below 10 a second. If staging shows starts arriving faster, these two move next:
+    - **start:** the email's own applications, the invitation by its token, and the lead
+    - **submit:** the counter's row lock, and the message
   - **Found and fixed by the testing:**
     - The built API and worker kept uploads outside the repository (the default folder's path was relative to a file the build moves); a deletion at retention then found nothing and still recorded the file as deleted. The folder is found by looking for the repository now, and a deletion that finds no file is logged ("check STORAGE_DIR"). Production sets `STORAGE_DIR`, so it was never affected.
     - The built commands (`dist/cli/*.js`) didn't read `.env.local` locally; the load test wasn't in the build.

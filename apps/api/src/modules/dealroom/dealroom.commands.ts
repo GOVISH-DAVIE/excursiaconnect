@@ -9,6 +9,10 @@
  *
  * Who the actor is, and that they may act at all, is the caller's to settle first (the team check for staff, the
  * owning email for an applicant). Action objects exist only on the server; clients send use-case inputs.
+ *
+ * A command with `only: appId` loads and locks just that application (dealroom.repo.ts): for rules that read and
+ * write one application and nothing else: the applicant's autosave, and attaching an upload. Any other rule there is refused before
+ * it runs, and a result that changed anything but that application is never written.
  */
 import { randomUUID } from "node:crypto";
 import { apply, type Action } from "@excursia/domain/core/reducer";
@@ -80,6 +84,22 @@ function changesBetween(eventId: string, before: AppState, after: AppState, now:
   };
 }
 
+/** The rules that read and write one application only, and so may run with `only`. */
+const ONE_APPLICATION = new Set<Action["type"]>(["dr/saveDraft", "dr/addDoc"]);
+
+/** Whether the changes are to the one application and nothing else. */
+function onlyTouches(ch: Changes, appId: string): boolean {
+  const { config, apps, ...rest } = ch.dealRoom;
+  return (
+    !config &&
+    !apps.remove.length &&
+    apps.upsert.every((r) => r.id === appId) &&
+    Object.values(rest).every((d) => !d.upsert.length && !d.remove.length) &&
+    !ch.core.delegates.upsert.length &&
+    !ch.core.badges.upsert.length
+  );
+}
+
 /** The action as the audit log keeps it: small, and never a whole application or file. */
 function auditDetail(action: Action) {
   const text = JSON.stringify(action);
@@ -92,6 +112,11 @@ export type Command = {
   /** the signed-in user, for the audit log */
   userId: string;
   ip: string | null;
+  /**
+   * The one application this command reads and writes, when that is all it does: only it is loaded and locked, so
+   * it doesn't wait for the rest of the Deal Room (the autosave). Only the rules in ONE_APPLICATION may run so.
+   */
+  only?: string;
   /** Throws (404, 403) unless every record the input names is this actor's to touch, in this event. */
   owned?: (state: AppState) => void;
   /** The rule actions to run, in order, built from the state as it is under the lock. */
@@ -111,6 +136,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
     newId,
     /** Runs a command; returns the state after it, as committed. */
     run(cmd: Command): Promise<AppState> {
+      const scope = cmd.only ? { appId: cmd.only } : undefined;
       return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff, queue, revokeStaff }) => {
         if (!stored) throw new HttpError("not_found", "This event has no Deal Room.");
         const at = nairobiNow(now());
@@ -119,12 +145,16 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
         cmd.owned?.(before);
         let state = before;
         const actions = cmd.actions(before, ctx);
+        if (cmd.only && (cmd.accounts || cmd.notify || cmd.revoke || actions.some((a) => !ONE_APPLICATION.has(a.type))))
+          throw new Error(`${actions.map((a) => a.type).join(", ")} can't run on one application alone`);
         for (const action of actions) {
           const r = apply(state, action, ctx);
           if (r.refusal) throw new HttpError("conflict", r.refusal);
           state = r.state;
         }
         const changes = changesBetween(cmd.eventId, before, state, at);
+        // the rest of the Deal Room wasn't loaded: a change to it would be written from nothing
+        if (cmd.only && !onlyTouches(changes, cmd.only)) throw new Error(`A one-application command changed more than ${cmd.only}`);
         await save(changes);
         if (cmd.accounts) {
           const refused = await linkStaff(cmd.accounts(state));
@@ -146,7 +176,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
         if (cmd.notify) await queue(cmd.notify(state).map((n) => ({ ...n, eventId: cmd.eventId })));
         if (cmd.revoke) await revokeStaff(cmd.revoke);
         return state;
-      });
+      }, scope);
     },
   };
 }
