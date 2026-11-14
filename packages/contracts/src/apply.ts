@@ -3,6 +3,7 @@
  * the field-by-field draft changes the form autosaves, and document uploads.
  */
 import { z } from "zod";
+import { PaymentView } from "./pay";
 
 /** The four registration pathways: capital seeker, capital provider, commercial or strategic partner, institutional challenge. */
 export const ApplyMode = z.enum(["seeker", "capital", "partner", "challenge"]);
@@ -143,8 +144,21 @@ export const MyApplication = z.object({
   /** a seeker's decision, once one is in force (M1.6) */
   decision: MyDecision.nullable(),
   readiness: z.enum(["Not ready", "In preparation", "Deal Room Ready"]),
-  /** the participation fee asked for with an approval; paying it comes with M1.7 */
-  fee: z.object({ amount: z.number(), currency: z.string(), paid: z.boolean(), waived: z.boolean() }).nullable(),
+  /**
+   * The participation fee asked for with an approval (M1.7): in the Deal Room's currency, what it comes to in
+   * shillings for M-Pesa, how it can be paid now (none until a provider is live), and the latest attempt.
+   */
+  fee: z
+    .object({
+      amount: z.number(),
+      currency: z.string(),
+      paid: z.boolean(),
+      waived: z.boolean(),
+      kes: z.number().int(),
+      methods: z.array(z.enum(["M-Pesa"])),
+      payment: PaymentView.nullable(),
+    })
+    .nullable(),
   /** a provider's verification, once submitted (M1.6) */
   verification: MyVerification.nullable(),
 });

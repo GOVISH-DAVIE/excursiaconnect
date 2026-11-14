@@ -8,8 +8,8 @@ import { createApplyRepo } from "./apply.repo";
 import { applyRoutes } from "./apply.routes";
 import { createApplyService } from "./apply.service";
 
-export function applyModule(deps: { db: Db; now: () => Date; storage: Storage; uploadMaxBytes: number }) {
+export function applyModule(deps: { db: Db; now: () => Date; storage: Storage; uploadMaxBytes: number; payMethods?: () => "M-Pesa"[] }) {
   const commands = createCommands({ repo: createDealRoomRepo(deps.db), now: deps.now });
-  const service = createApplyService({ repo: createApplyRepo(deps.db), commands, storage: deps.storage, uploadMaxBytes: deps.uploadMaxBytes });
+  const service = createApplyService({ repo: createApplyRepo(deps.db), commands, storage: deps.storage, uploadMaxBytes: deps.uploadMaxBytes, payMethods: deps.payMethods });
   return applyRoutes(createApplyController(service));
 }

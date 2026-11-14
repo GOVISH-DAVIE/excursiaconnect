@@ -111,8 +111,8 @@ function auditDetail(action: Action) {
 export type Command = {
   eventId: string;
   actor: Actor;
-  /** the signed-in user, for the audit log */
-  userId: string;
+  /** the signed-in user, for the audit log; null for the system (jobs, payment confirmations) */
+  userId: string | null;
   ip: string | null;
   /**
    * The one application this command reads and writes, when that is all it does: only it is loaded and locked, so
@@ -129,6 +129,8 @@ export type Command = {
   notify?: (after: AppState) => { to: string; subject: string; link: string }[];
   /** Staff whose sign-in loses this Deal Room with the change (DA-3). */
   revoke?: string[];
+  /** A provider's payment this change settles: confirmed in the same transaction, once (backend-plan.md, Payments). */
+  payment?: { id: string; receipt: string; raw: object };
 };
 
 export type CommandDeps = { repo: DealRoomRepo; now: () => Date; newId?: (prefix: string) => string };
@@ -139,7 +141,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
     /** Runs a command; returns the state after it, as committed. */
     run(cmd: Command): Promise<AppState> {
       const scope = cmd.only ? { appId: cmd.only } : undefined;
-      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff, queue, revokeStaff }) => {
+      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff, queue, revokeStaff, confirmPayment }) => {
         if (!stored) throw new HttpError("not_found", "This event has no Deal Room.");
         const at = nairobiNow(now());
         const ctx: Ctx = { now: at, newId, actor: cmd.actor };
@@ -177,6 +179,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
         await audit(rows);
         if (cmd.notify) await queue(cmd.notify(state).map((n) => ({ ...n, eventId: cmd.eventId })));
         if (cmd.revoke) await revokeStaff(cmd.revoke);
+        if (cmd.payment && !(await confirmPayment(cmd.payment))) throw new HttpError("conflict", "This payment is already settled.");
         return state;
       }, scope);
     },

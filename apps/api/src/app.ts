@@ -25,6 +25,8 @@ import { publicModule } from "./modules/public";
 import { dealRoomModule } from "./modules/dealroom";
 import { healthModule } from "./modules/health";
 import { uploadsModule } from "./modules/uploads";
+import { paymentsModule } from "./modules/payments";
+import { mpesaFor, type Mpesa } from "./payments/mpesa";
 import { deriveKeys } from "./security/secrets";
 import { createLocalStorage, uploadsDir, type LocalStorage } from "./storage/local";
 
@@ -37,6 +39,10 @@ export type AppDeps = {
   storage?: LocalStorage;
   /** The clock; tests move it to expire sessions and codes. */
   now?: () => Date;
+  /** M-Pesa; by default as the settings say (Daraja, the test one, or none). Tests pass their own. */
+  mpesa?: Mpesa | null;
+  /** The address payment providers call back; PUBLIC_API_URL, else this API on loopback. */
+  callbackBase?: () => string;
   /** Where unexpected errors are reported; console by default. */
   logError?: (err: unknown, req: { method: string; path: string }) => void;
 };
@@ -46,7 +52,7 @@ const defaultLogError: NonNullable<AppDeps["logError"]> = (err, req) => {
   console.error(`[api] ${req.method} ${req.path} failed:`, err);
 };
 
-export function createApp({ config, db, mailer, now, storage, logError = defaultLogError }: AppDeps): Express {
+export function createApp({ config, db, mailer, now, storage, mpesa, callbackBase, logError = defaultLogError }: AppDeps): Express {
   const app = express();
 
   app.disable("x-powered-by");
@@ -74,12 +80,21 @@ export function createApp({ config, db, mailer, now, storage, logError = default
 
   app.use("/health", healthModule({ db }));
 
-  // everything under /v1: writes must come from the web app (CSRF), and the session cookie is read once
+  // the rules' clock: the test's clock, else RULES_CLOCK on local and staging, else the real one
+  const rulesNow = now ?? rulesClock(config);
+  // payment providers' callbacks carry no cookie and no Origin: before the Origin check, verified in the service
+  const payments = paymentsModule({
+    db,
+    now: rulesNow,
+    mpesa: mpesa === undefined ? mpesaFor(config) : mpesa,
+    callbackBase: callbackBase ?? (() => config.PUBLIC_API_URL ?? `http://127.0.0.1:${config.API_PORT}`),
+  });
+  app.use("/v1/hooks", payments.hooks);
+
+  // everything else under /v1: writes must come from the web app (CSRF), and the session cookie is read once
   const auth = authModule({ db, config, mailer: mailer ?? mailerFor(config), now });
   app.use("/v1", originCheck(config), loadSession(config, auth.service));
   app.use("/v1", auth.routes);
-  // the rules' clock: the test's clock, else RULES_CLOCK on local and staging, else the real one
-  const rulesNow = now ?? rulesClock(config);
   const uploadMaxBytes = config.UPLOAD_MAX_MB * 1_048_576;
   const files =
     storage ??
@@ -87,7 +102,8 @@ export function createApp({ config, db, mailer, now, storage, logError = default
   // the worker's scan clears files within seconds; away from production one not yet scanned may still be opened
   const allowUnscanned = config.APP_ENV ? config.APP_ENV !== "production" : config.NODE_ENV !== "production";
   app.use("/v1/dealroom", dealRoomModule({ db, now: rulesNow, storage: files, allowUnscanned }));
-  app.use("/v1/apply", applyModule({ db, now: rulesNow, storage: files, uploadMaxBytes }));
+  app.use("/v1/apply", applyModule({ db, now: rulesNow, storage: files, uploadMaxBytes, payMethods: payments.service.methods }));
+  app.use("/v1/pay", payments.pay);
   const organisers = organisersModule({ db, config, auth: auth.service, storage: files, now: rulesNow, uploadMaxBytes, allowUnscanned });
   app.use("/v1", organisers.routes);
   app.use("/v1/admin", platformModule({ db, repo: organisers.repo, organisers: organisers.service, now: rulesNow }));

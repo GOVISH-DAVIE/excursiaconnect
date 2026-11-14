@@ -27,6 +27,7 @@ import {
   verificationBlockers,
 } from "./logic";
 import type {
+  DealRoomState,
   Decision,
   DocKind,
   DrApplication,
@@ -68,6 +69,8 @@ export type DrAction =
   | { type: "dr/readiness"; appId: string; readiness: Readiness }
   | { type: "dr/payFee"; appId: string; method: "M-Pesa" | "Card"; reference: string }
   | { type: "dr/waiveFee"; appId: string; reason: string }
+  /** the server's job: the one payment reminder, once it is due (the prototype's clock does the same) */
+  | { type: "dr/feeReminder"; appId: string }
   | { type: "dr/updateProfile"; appId: string; patch: Partial<Pick<DrApplication, "org" | "contact" | "decisionMaker" | "ask" | "traction" | "mandate" | "teaser" | "challenge">> }
   | { type: "dr/completeProfile"; appId: string }
   | { type: "dr/approveTeaser"; appId: string }
@@ -148,6 +151,20 @@ const STAFF_ACTIONS = new Set([
   "dr/verify", "dr/merge", "dr/grantSupport", "dr/exception", "dr/waiveFee",
 ]);
 
+/* ---------- the fee's reminder ---------- */
+
+/** When an owed fee's one reminder is due: the configured days after the payment link went out; none once sent. */
+export function feeReminderDue(app: DrApplication, cfg: DrConfig | undefined): string | undefined {
+  if (!cfg || !feeOwed(app) || app.fee!.reminderAt) return undefined;
+  return addMinutes(app.fee!.sentAt, cfg.seekerFee.reminderDays * 1440);
+}
+
+/** Sends the reminder, with the payment link, and notes it: once. */
+function remindFee(ctx: Ctx, dr: DealRoomState, app: DrApplication): DealRoomState {
+  const next = patchApp(dr, app.id, (x) => note({ ...x, fee: { ...x.fee!, reminderAt: ctx.now } }, "system", "Payment reminder sent", ctx.now));
+  return send(ctx, next, app.eventId, app.id, `Reminder: pay the ${feeLabel(app.fee!)} Deal Room fee to be matched and get your badge`, `/dr/${app.id}?pay=1`, "Email and SMS");
+}
+
 /* ---------- the reducer ---------- */
 
 export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState {
@@ -180,13 +197,8 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       }
       // an approved seeker who has not paid gets one reminder, the configured days after the link went out
       for (const a of next.apps) {
-        const c = next.configs[a.eventId];
-        if (!c || !feeOwed(a) || a.fee!.reminderAt) continue;
-        const due = addMinutes(a.fee!.sentAt, c.seekerFee.reminderDays * 1440);
-        if (dr.clock < due && action.clock >= due) {
-          next = patchApp(next, a.id, (x) => note({ ...x, fee: { ...x.fee!, reminderAt: due } }, "system", "Payment reminder sent", due));
-          next = send({ ...ctx, now: due }, next, a.eventId, a.id, `Reminder: pay the ${feeLabel(a.fee!)} Deal Room fee to be matched and get your badge`, `/dr/${a.id}?pay=1`, "Email and SMS");
-        }
+        const due = feeReminderDue(a, next.configs[a.eventId]);
+        if (due && dr.clock < due && action.clock >= due) next = remindFee({ ...ctx, now: due }, next, a);
       }
       // after the summit: the seeded opportunities move on, owners get weekly digests, the lead a monthly report
       next = playForward(ctx, next, state.events, dr.clock, action.clock);
@@ -444,6 +456,15 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       dr = patchApp(dr, app.id, (a) => note({ ...a, fee: { ...a.fee!, paid: { at, method: action.method, reference: action.reference.trim().slice(0, 40), kes } } }, "applicant", `Paid ${feeLabel(app.fee!)} by ${action.method}, ref ${action.reference.trim()}`, at));
       dr = send(ctx, dr, app.eventId, app.id, `Payment received, ${feeLabel(app.fee!)}: your Deal Room badge is ready`, `/dr/${app.id}`, "Email and SMS");
       return issueBadge(ctx, withDr(state, dr), dr.apps.find((a) => a.id === app.id)!);
+    }
+
+    case "dr/feeReminder": {
+      if (ctx.actor?.kind !== "system") return no(ctx, state, "Reminders are sent by the system");
+      if (!app || !cfg) return no(ctx, state, "No such application");
+      const due = feeReminderDue(app, cfg);
+      if (!due) return no(ctx, state, "No reminder is waiting");
+      if (at < due) return no(ctx, state, `The reminder is due ${due}`);
+      return withDr(state, remindFee(ctx, dr, app));
     }
 
     case "dr/waiveFee": {

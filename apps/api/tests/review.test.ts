@@ -121,7 +121,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("reviewing an application", () =
     const r = ReviewView.parse((await one("st_rev2")).json);
     expect(r.application).toMatchObject({ id: appId, status: "Submitted" });
     expect(r.config.rubric.assessment.length).toBeGreaterThan(0);
-    expect(r.can).toEqual({ review: true, assign: false, decideExpiry: false, decide: false, readiness: true });
+    expect(r.can).toEqual({ review: true, assign: false, decideExpiry: false, decide: false, readiness: true, waiveFee: false });
     expect(ReviewView.parse((await one("st_lead")).json).can.decideExpiry).toBe(true);
     expect((await one("st_ops1")).status).toBe(403);
     expect((await one("applicant")).status).toBe(403);

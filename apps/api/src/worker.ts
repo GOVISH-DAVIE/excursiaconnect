@@ -1,7 +1,7 @@
 /**
  * The worker process (deploy.md, excursia-worker), as the worker database role, every few seconds: sends the
- * outbox, scans new uploads for viruses, and deletes files past their retention date. Stops cleanly on SIGTERM,
- * finishing the batch in hand.
+ * outbox, scans new uploads for viruses, deletes files past their retention date, confirms M-Pesa payments with
+ * Daraja and settles them, and sends the fee's one reminder. Stops cleanly on SIGTERM, finishing the batch in hand.
  */
 import { createDb } from "@excursia/db";
 import { loadConfig } from "./config";
@@ -11,6 +11,9 @@ import { createFilesRepo } from "./modules/files/files.repo";
 import { SCAN_BATCH, createFilesService } from "./modules/files/files.service";
 import { createOutboxRepo } from "./modules/outbox/outbox.repo";
 import { createOutboxService } from "./modules/outbox/outbox.service";
+import { paymentsService } from "./modules/payments";
+import { mpesaFor } from "./payments/mpesa";
+import { rulesClock } from "./clock";
 import { clamdScanner, testScanner } from "./scan/scanner";
 import { deriveKeys } from "./security/secrets";
 import { createLocalStorage, uploadsDir } from "./storage/local";
@@ -21,6 +24,12 @@ const db = createDb(config.DATABASE_URL, 3);
 const outbox = createOutboxService({ repo: createOutboxRepo(db), mailer: mailerFor(config), web: config.WEB_ORIGINS[0] });
 const scanner = config.CLAMD_ADDRESS ? clamdScanner(config.CLAMD_ADDRESS) : testScanner;
 const files = createFilesService({ repo: createFilesRepo(db), storage: createLocalStorage({ dir: uploadsDir(config), key: deriveKeys(config.AUTH_SECRET).upload }), scanner });
+const mpesa = mpesaFor(config);
+// the worker never pushes, so it needs no callback address
+const payments = paymentsService({ db, now: rulesClock(config), mpesa, callbackBase: () => "" });
+/** Fee reminders are due by the day: looking every ten minutes is plenty. */
+const REMIND_EVERY_MS = 10 * 60_000;
+let remindedAt = 0;
 /** How long one round may keep scanning while uploads are waiting; the outbox goes at its own, slower pace. */
 const SCAN_BUDGET_MS = 2_500;
 /** Retention is in days and months: looking once a minute is plenty. */
@@ -60,9 +69,21 @@ async function tick() {
   } catch (e) {
     console.error("[worker] file batch failed", e);
   }
+  try {
+    const p = await payments.confirm();
+    if (p.paid || p.failed) console.log(`[worker] M-Pesa: ${p.paid} paid, ${p.failed} failed`);
+    if (Date.now() - remindedAt > REMIND_EVERY_MS) {
+      remindedAt = Date.now();
+      const n = await payments.remindFees();
+      if (n) console.log(`[worker] fees: ${n} reminder${n === 1 ? "" : "s"} sent`);
+    }
+  } catch (e) {
+    console.error("[worker] payments round failed", e);
+  }
   if (!stopping) timer = setTimeout(tick, EVERY_MS);
 }
 
+console.log(`[worker] M-Pesa: ${mpesa ? (mpesa.name === "test" ? "the test M-Pesa (no MPESA_ keys)" : `Daraja, ${config.MPESA_ENV}`) : "off (no MPESA_ keys)"}`);
 if (!config.CLAMD_ADDRESS) console.log("[worker] no CLAMD_ADDRESS: uploads are checked by the test scanner, which catches only the EICAR test file");
 console.log(`[worker] sending the outbox every ${EVERY_MS / 1000} s (${config.MAIL_TRANSPORT}${config.MAIL_TRANSPORT === "smtp" && config.APP_ENV !== "production" ? `, real mail only to MAIL_ALLOW: ${config.MAIL_ALLOW.join(", ") || "nobody"}` : ""})`);
 void tick();

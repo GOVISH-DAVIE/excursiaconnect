@@ -3,7 +3,7 @@
  * replaces the cached one; the queue is asked again too, since status and reviewer show there.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CheckKycInput, DecideInput, ReadinessInput, RecommendInput, RequestInfoInput, ReviewView, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput } from "@excursia/contracts/review";
+import type { CheckKycInput, DecideInput, ReadinessInput, RecommendInput, RequestInfoInput, ReviewView, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput, WaiveFeeInput } from "@excursia/contracts/review";
 import { dealRoomApi } from "../api";
 import { dealRoomKeys, reviewQuery } from "../queries";
 
@@ -22,7 +22,8 @@ export type ReviewAction =
   | { kind: "readiness"; input: ReadinessInput }
   | { kind: "checkKyc"; input: CheckKycInput }
   | { kind: "sanctions"; input: SanctionsInput }
-  | { kind: "verify"; input: VerifyInput };
+  | { kind: "verify"; input: VerifyInput }
+  | { kind: "waiveFee"; input: WaiveFeeInput };
 
 /** One call per action; each answers with the review's new view. */
 function send(eventId: string, appId: string, a: ReviewAction): Promise<ReviewView> {
@@ -53,6 +54,8 @@ function send(eventId: string, appId: string, a: ReviewAction): Promise<ReviewVi
       return dealRoomApi.sanctions(eventId, appId, a.input);
     case "verify":
       return dealRoomApi.verify(eventId, appId, a.input);
+    case "waiveFee":
+      return dealRoomApi.waiveFee(eventId, appId, a.input);
   }
 }
 

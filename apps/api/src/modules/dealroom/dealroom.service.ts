@@ -3,7 +3,7 @@
  * rules then check their role. Every change goes through runCommand (dealroom.commands.ts).
  */
 import type { ApplicationSummary, AssignReviewerInput, MessageRow, StaffMember, TeamView } from "@excursia/contracts/dealroom";
-import type { CheckKycInput, DecideInput, DocumentLink, ReadinessInput, RecommendInput, RequestInfoInput, ReviewView, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput } from "@excursia/contracts/review";
+import type { CheckKycInput, DecideInput, DocumentLink, ReadinessInput, RecommendInput, RequestInfoInput, ReviewView, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput, WaiveFeeInput } from "@excursia/contracts/review";
 import type { Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor } from "@excursia/domain/ctx";
 import { decisionOf, drCan, roleOf } from "@excursia/domain/dealroom/logic";
@@ -79,7 +79,7 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
       now: nairobiNow(now()),
       me: toStaff(staff),
       staff: all.map((s) => toStaff(s.record as unknown as DrStaff)),
-      can: { review: drCan(staff, "review"), assign: drCan(staff, "assign"), decideExpiry: staff.role === "Lead" && staff.active, decide: drCan(staff, "decide"), readiness: drCan(staff, "readiness") },
+      can: { review: drCan(staff, "review"), assign: drCan(staff, "assign"), decideExpiry: staff.role === "Lead" && staff.active, decide: drCan(staff, "decide"), readiness: drCan(staff, "readiness"), waiveFee: staff.role === "Lead" && staff.active },
     };
   }
 
@@ -172,6 +172,10 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
 
     readiness: (session: Resolved, eventId: string, appId: string, input: ReadinessInput, ip: string | null) =>
       act(session, eventId, appId, ip, (app) => (app.readiness === input.readiness ? [] : [{ type: "dr/readiness", appId, readiness: input.readiness }])),
+
+    /** The lead waives the fee, with a reason: the badge is issued at once (M1.7). */
+    waiveFee: (session: Resolved, eventId: string, appId: string, input: WaiveFeeInput, ip: string | null) =>
+      act(session, eventId, appId, ip, () => [{ type: "dr/waiveFee", appId, reason: input.reason }]),
 
     /* ----- M1.6: a provider's verification ----- */
 

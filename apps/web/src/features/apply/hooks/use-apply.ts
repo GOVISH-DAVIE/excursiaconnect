@@ -15,8 +15,13 @@ export const useMyApplications = (slug: string, enabled: boolean) => useQuery({ 
 
 /** One application, loaded into the form. */
 // while a document is still being checked for viruses, look again every few seconds: the worker takes seconds
+// and while an M-Pesa payment waits for the payer's PIN and the provider's confirmation, every three
 export const useMyApplication = (slug: string, id: string | null) =>
-  useQuery({ ...myApplicationQuery(slug, id ?? ""), enabled: !!id, refetchInterval: (q) => (q.state.data?.documents.some((d) => d.scan === "checking") ? 4000 : false) });
+  useQuery({
+    ...myApplicationQuery(slug, id ?? ""),
+    enabled: !!id,
+    refetchInterval: (q) => (q.state.data?.fee?.payment?.status === "pending" ? 3000 : q.state.data?.documents.some((d) => d.scan === "checking") ? 4000 : false),
+  });
 
 function useKeepCurrent(slug: string) {
   const queryClient = useQueryClient();
@@ -64,4 +69,13 @@ export function useUploadKyc(slug: string, id: string) {
 export function useSignNda(slug: string, id: string) {
   const keep = useKeepCurrent(slug);
   return useMutation({ mutationFn: (input: { name: string; title: string }) => applyApi.signNda(slug, id, input), onSuccess: keep });
+}
+
+/** Sends the M-Pesa request; the application is then asked again until the payment is settled or fails. */
+export function usePayMpesa(slug: string, id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (phone: string) => applyApi.payMpesa(slug, id, phone),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: applyKeys.one(slug, id) }),
+  });
 }

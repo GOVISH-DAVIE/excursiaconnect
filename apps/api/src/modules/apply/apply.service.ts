@@ -13,7 +13,9 @@ import { randomBytes } from "node:crypto";
 import { KYC_DOC, KYC_ITEMS, type ApplyForm, type ApplyMode, type DraftChanges, type KycInput, type MyApplication, type MyApplications, type RespondInput, type ScanState, type SignNdaInput, type UploadTarget } from "@excursia/contracts/apply";
 import type { Action } from "@excursia/domain/core/reducer";
 import { blankApplication, modeOf, patchDraft, retentionDate } from "@excursia/domain/dealroom/apply";
-import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, decisionOf, formGaps, openRfi, rfiDue } from "@excursia/domain/dealroom/logic";
+import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, decisionOf, feeInKes, formGaps, openRfi, rfiDue } from "@excursia/domain/dealroom/logic";
+import type { PaymentView } from "@excursia/contracts/pay";
+import { paymentView } from "../payments/payments.service";
 import type { DrApplication, DrConfig } from "@excursia/domain/dealroom/types";
 import type { AppState } from "@excursia/domain/types";
 import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
@@ -33,7 +35,7 @@ const MAX_PER_EMAIL = 5;
 /** Uploads started for one application in an hour. */
 const MAX_UPLOADS_PER_HOUR = 30;
 
-export type ApplyDeps = { repo: ApplyRepo; commands: Commands; storage: Storage; uploadMaxBytes: number };
+export type ApplyDeps = { repo: ApplyRepo; commands: Commands; storage: Storage; uploadMaxBytes: number; payMethods?: () => "M-Pesa"[] };
 
 type Scans = Map<string, ScanState>;
 /** Documents that failed the virus scan, or were deleted, no longer count: the applicant uploads them again. */
@@ -41,8 +43,12 @@ const gone = (s: ScanState | undefined) => s === "failed" || s === "deleted";
 const withoutGone = (app: DrApplication, scans: Scans): DrApplication =>
   app.documents.some((d) => gone(scans.get(d.id))) ? { ...app, documents: app.documents.filter((d) => !gone(scans.get(d.id))) } : app;
 
+/** How the fee can be paid now, and the latest attempt (M1.7). */
+type Pay = { methods: "M-Pesa"[]; payment: PaymentView | null };
+const NO_PAY: Pay = { methods: [], payment: null };
+
 /** The application as its applicant sees it. */
-function view(app: DrApplication, cfg: DrConfig, version: number, scans: Scans): MyApplication {
+function view(app: DrApplication, cfg: DrConfig, version: number, scans: Scans, pay: Pay = NO_PAY): MyApplication {
   const dm = app.decisionMaker;
   const decisionMaker = { name: dm.name, title: dm.title, email: dm.email, phone: dm.phone };
   return {
@@ -74,7 +80,7 @@ function view(app: DrApplication, cfg: DrConfig, version: number, scans: Scans):
     gaps: formGaps(withoutGone(app, scans), cfg),
     decision: decisionOfApplicant(app),
     readiness: app.readiness,
-    fee: app.fee ? { amount: app.fee.amount, currency: app.fee.currency, paid: !!app.fee.paid, waived: !!app.fee.waived } : null,
+    fee: app.fee ? { amount: app.fee.amount, currency: app.fee.currency, paid: !!app.fee.paid, waived: !!app.fee.waived, kes: feeInKes(app.fee), ...pay } : null,
     verification: app.type === "provider" && app.ref ? verificationOf(app, scans) : null,
   };
 }
@@ -111,7 +117,13 @@ const KYC_KINDS = Object.values(KYC_DOC) as string[];
 /** A file name as it may be stored and shown: no folders, no control characters, not too long. */
 const cleanName = cleanFileName;
 
-export function createApplyService({ repo, commands, storage, uploadMaxBytes }: ApplyDeps) {
+export function createApplyService({ repo, commands, storage, uploadMaxBytes, payMethods = () => [] }: ApplyDeps) {
+  /** The fee's ways to pay and the latest attempt, for one application's view. */
+  async function payOf(appId: string): Promise<Pay> {
+    const p = await repo.latestPayment(appId);
+    return { methods: payMethods(), payment: p ? paymentView(p) : null };
+  }
+
   async function event(slug: string) {
     const e = await repo.eventBySlug(slug);
     if (!e) throw new HttpError("not_found", "This event doesn't take Deal Room applications.");
@@ -138,7 +150,7 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
 
   /** The application as it now is, after a command. */
   async function after(state: AppState, appId: string, cfg: DrConfig) {
-    return view(appIn(state, appId), cfg, await repo.versionOf(appId), await repo.fileStates([appId]));
+    return view(appIn(state, appId), cfg, await repo.versionOf(appId), await repo.fileStates([appId]), await payOf(appId));
   }
 
   /** Reads go to the summary row, not the whole aggregate: only the owner's own record. */
@@ -191,7 +203,7 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
       const email = applicant(session);
       const e = await event(slug);
       const { app, version } = await ownRow(e.id, appId, email);
-      return view(app, e.cfg, version, await repo.fileStates([appId]));
+      return view(app, e.cfg, version, await repo.fileStates([appId]), await payOf(appId));
     },
 
     /** A new draft of one kind; or, with an invitation sent to this email, the invited application. */

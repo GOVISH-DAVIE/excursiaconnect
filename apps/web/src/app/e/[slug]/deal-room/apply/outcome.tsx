@@ -9,7 +9,7 @@
 import { useState } from "react";
 import type { KycItem, MyApplication } from "@excursia/contracts/apply";
 import { fmtStamp } from "@excursia/domain/time";
-import { useSignNda, useUploadKyc } from "@/features/apply/hooks/use-apply";
+import { usePayMpesa, useSignNda, useUploadKyc } from "@/features/apply/hooks/use-apply";
 import { Card } from "./fields";
 
 const TYPES = "application/pdf,image/png,image/jpeg";
@@ -25,12 +25,12 @@ const HEADLINE = {
 const money = (amount: number, currency: string) => `${currency} ${amount.toLocaleString("en")}`;
 
 export function Outcome({ slug, app, maxBytes }: { slug: string; app: MyApplication; maxBytes: number }) {
-  if (app.decision) return <Decision app={app} />;
+  if (app.decision) return <Decision slug={slug} app={app} />;
   if (app.verification) return <Verification slug={slug} app={app} maxBytes={maxBytes} />;
   return null;
 }
 
-function Decision({ app }: { app: MyApplication }) {
+function Decision({ slug, app }: { slug: string; app: MyApplication }) {
   const d = app.decision!;
   const approved = d.decision === "Qualified" || d.decision === "Conditional";
   const owed = app.fee && !app.fee.paid && !app.fee.waived;
@@ -52,22 +52,66 @@ function Decision({ app }: { app: MyApplication }) {
           <p className="mt-2 text-[13px] text-slate">Send what each condition asks for to the review team by its date; they mark it met.</p>
         </div>
       )}
-      {approved && app.fee && (
-        <p className="mt-4 text-[14px]">
-          {owed ? (
-            <>
-              The participation fee, <strong className="font-medium">{money(app.fee.amount, app.fee.currency)}</strong>, is due before you are matched and get your Deal Room badge. Paying it online
-              opens on this page shortly; we will email you when it does.
-            </>
-          ) : app.fee.waived ? (
-            "Your participation fee is waived."
-          ) : (
-            "Your participation fee is paid."
-          )}
+      {approved && app.fee && owed && <PayFee slug={slug} app={app} />}
+      {approved && app.fee && !owed && (
+        <p className="mt-4 text-[14px] text-ok">
+          {app.fee.waived ? "Your participation fee is waived: your Deal Room badge comes by email." : `Your participation fee is paid${app.fee.payment?.status === "confirmed" ? ` (${app.fee.payment.message.replace(/^Paid, |\.$/g, "")})` : ""}: your Deal Room badge comes by email.`}
         </p>
       )}
       {approved && app.readiness === "Deal Room Ready" && <p className="mt-3 text-[14px] text-ok">You are Deal Room Ready: matching starts when the Deal Room opens.</p>}
     </Card>
+  );
+}
+
+/** The fee, by M-Pesa: the number, the request to the phone, then the wait for the PIN and the provider's word. */
+function PayFee({ slug, app }: { slug: string; app: MyApplication }) {
+  const fee = app.fee!;
+  const pay = usePayMpesa(slug, app.id);
+  const [phone, setPhone] = useState(app.form.contact.phone);
+  const last = fee.payment;
+  const waiting = last?.status === "pending";
+  const kes = `KES ${fee.kes.toLocaleString("en")}`;
+  return (
+    <div className="mt-4 rounded-lg border border-line p-4">
+      <p className="text-[14px]">
+        The participation fee, <strong className="font-medium">{money(fee.amount, fee.currency)}</strong>
+        {fee.currency !== "KES" ? ` (${kes} by M-Pesa)` : ""}, is due before you are matched and get your Deal Room badge.
+      </p>
+      {!fee.methods.includes("M-Pesa") ? (
+        <p className="mt-2 text-[14px] text-slate">Paying online opens on this page shortly; we will email you when it does.</p>
+      ) : waiting ? (
+        <p role="status" className="mt-3 rounded-md bg-warn-50 px-3 py-2 text-[14px]">
+          {last.message} This page updates by itself once M-Pesa confirms it.
+        </p>
+      ) : (
+        <form
+          className="mt-3 space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (phone.trim()) pay.mutate(phone);
+          }}
+        >
+          {last?.status === "failed" && (
+            <p role="alert" className="rounded-md bg-bad-50 px-3 py-2 text-[14px] text-bad">
+              {last.message}
+            </p>
+          )}
+          <label className="block">
+            <span className="label">Your M-Pesa number</span>
+            <input className="input" type="tel" inputMode="tel" autoComplete="tel" placeholder="0712 345 678" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </label>
+          {pay.error && (
+            <p role="alert" className="rounded-md bg-bad-50 px-3 py-2 text-[14px] text-bad">
+              {pay.error.message}
+            </p>
+          )}
+          <button className="btn btn-primary w-full sm:w-auto" disabled={pay.isPending || !phone.trim()}>
+            {pay.isPending ? "Sending the request…" : `Pay ${kes} by M-Pesa`}
+          </button>
+          <p className="text-[13px] text-slate">A payment request comes to your phone: enter your M-Pesa PIN to pay. Nothing is taken until you do.</p>
+        </form>
+      )}
+    </div>
   );
 }
 

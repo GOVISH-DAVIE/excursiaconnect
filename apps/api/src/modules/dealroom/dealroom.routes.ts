@@ -32,5 +32,7 @@ export function dealRoomRoutes(c: DealRoomController): Router {
   r.post(`${one}/kyc/check`, requireSession({ staff: true }), c.checkKyc);
   r.post(`${one}/sanctions`, requireSession({ staff: true }), c.sanctions);
   r.post(`${one}/verification`, requireSession({ staff: true }), c.verify);
+  // the fee (M1.7): only the lead waives it; paying is the applicant's, settled by the provider
+  r.post(`${one}/fee/waive`, requireSession({ staff: true }), c.waiveFee);
   return r;
 }

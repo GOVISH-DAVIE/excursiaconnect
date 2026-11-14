@@ -38,6 +38,9 @@ export function createApplyRepo(db: Db) {
 
     fileOf: (id: string, appId: string) => db.file.findFirst({ where: { id, ownerKind: "dr_application", ownerId: appId } }),
 
+    /** The latest attempt to pay an application's fee (M1.7). */
+    latestPayment: (appId: string) => db.payment.findFirst({ where: { subjectId: appId, purpose: "dr_fee" }, orderBy: { createdAt: "desc" } }),
+
     /** Files started for one application and not yet finished, to cap how many can be in flight. */
     pendingFiles: (appId: string, since: Date) => db.file.count({ where: { ownerKind: "dr_application", ownerId: appId, createdAt: { gt: since } } }),
   };

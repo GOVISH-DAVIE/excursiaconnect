@@ -479,7 +479,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | M1.4 | **Email** (by Fri 11 Dec): the outbox and worker, templates for every onboarding message, delivery status, the Notifications screen reading the outbox | Messages arrive in a real inbox with delivery status **Done 12 Nov 2026**, sending through Zoho; delivery reports and SMS remain. Notes below |
 | M1.5 | **Go-live** (Mon 14 Dec): production database with point-in-time recovery and a restore drill timed against the RTO, monitoring and alerts, privacy notice, load test of apply and upload | **Applications open Tue 15 Dec 2026.** The privacy notice, the queue check, the backup and drill scripts and the load test are built (12 Nov 2026); the production database, ClamAV, alerting and the drills on real backups remain. Notes below |
 | M1.6 | **Review, second half** (by Tue 22 Dec): recommendations, decisions, second decider, readiness, conditions; provider and challenge verification (KYC, NDA, sanctions, decision-maker) | The first decisions are recorded on production; no record is verified with a step missing **Built 14 Nov 2026** on the API and both screens; production waits for M1.5's infrastructure. Notes below |
-| M1.7 | **Fee and SMS** (by Fri 8 Jan): one payment method first (M-Pesa if Daraja is approved, otherwise card), then the second; webhooks as specified; the 3-day reminder job; the lead's waiver; badge on payment, with minimal tier and badge records; SMS through Africa's Talking once the sender ID is approved | A sandbox payment issues a badge; a repeated callback changes nothing; approvals made before 8 Jan get their payment link then |
+| M1.7 | **Fee and SMS** (by Fri 8 Jan): one payment method first (M-Pesa if Daraja is approved, otherwise card), then the second; webhooks as specified; the 3-day reminder job; the lead's waiver; badge on payment, with minimal tier and badge records; SMS through Africa's Talking once the sender ID is approved | A sandbox payment issues a badge; a repeated callback changes nothing; approvals made before 8 Jan get their payment link then **M-Pesa, the reminder and the waiver built 14 Nov 2026** against a stand-in Daraja and the test M-Pesa; Daraja's sandbox needs Algotech's keys; the card waits for D4, SMS for the sender ID. Notes below |
 
 **Notes on M1.1, done 11 Nov 2026** (with the core of M1.2):
 - **Who owns an application:** an applicant signs in with an emailed code, and an application belongs to the verified email that started it, which can't be changed. That is also the resume: signing in with the same email on another device opens the draft. An invitation link opens the invited application only for the email it was sent to.
@@ -605,6 +605,25 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - suspending an organiser or an event (PA-9), and reopening a verified KYC when its details change
   - amounts processed and commission earned on the overview (PA-5), which wait for payments
   - Algotech's real price list
+
+**Notes on M1.7, M-Pesa first, built 14 Nov 2026:**
+- **Paying:** an approved seeker's status page shows the fee (USD 250 is KES 32,500 by M-Pesa) and a "Pay by M-Pesa" button with their number. The STK push puts the request on the phone; the page then shows "Check your phone" and updates by itself.
+- **As the spec says (Webhooks):**
+  - The shillings are locked on the payment row when the push starts.
+  - The callback address carries a random token, stored hashed; the callback is acknowledged whatever it says and kept as a hint, and settles nothing.
+  - The worker asks Daraja (STK push query). Paid, and the callback's amount, phone and receipt match: `dr/payFee` as the system, the payment's confirmation (pending to confirmed, once), the badge and the emails, all in one transaction.
+  - Cancelled or failed: marked failed, and the payer sees why and can send another. No answer after 15 minutes: given up.
+  - Paid with no callback, or a callback that doesn't match: held and logged for the team. Paid after a waiver: recorded, not applied, logged for a refund.
+  - A second request within two minutes sends nothing new; five an hour at most.
+- **M-Pesa's settings:** Daraja (sandbox or production) with the `MPESA_` keys and `PUBLIC_API_URL`; all of them or none. Without them, production doesn't offer M-Pesa, and local and staging get a test M-Pesa that pays three seconds after the push (a number ending 0001 cancels). Production refuses Daraja's sandbox.
+- **The lead's waiver** (on the Decision tab, with a reason) issues the badge at once; only the lead may.
+- **The reminder:** a rule of its own now (`dr/feeReminder`, the prototype's clock uses the same), sent by the worker once, `reminderDays` after the link; only while a payment method is live, so approvals made before payments open get it, with the link, as soon as they do.
+- **Tested:** 10 tests of the client against a stand-in Daraja (the token reused, the password and fields, paybill and till, the query's three answers, Daraja's errors as messages, the settings) and 10 end to end (nothing owed before approval, a bad number, the request once, the hashed token, the callback settling nothing, the worker settling the fee, the badge and the email once however often the callback comes, a cancel and a retry, a mismatch held, the waiver and who may give it, paid after a waiver, the one reminder). Walked in the browser on the walk-through event with the test M-Pesa: the lead approved Kilimo Fresh, Neema pressed Pay, and within ten seconds the page said paid with the receipt; the badge and the email followed.
+- **Open:**
+  - **Daraja:** Algotech's sandbox app's consumer key and secret to try the real sandbox (the shortcode 174379 and its passkey are public), and the production application (M0.1) with the paybill or till. The callback needs a public https address, so the sandbox is tried on staging.
+  - **Card (D4):** Paystack or Pesapal, whichever Algotech has; the payment module takes it as a second method.
+  - **SMS:** the rules already mark the payment messages "Email and SMS"; sending SMS waits for Africa's Talking's sender ID.
+  - The daily reconciliation against the M-Pesa statement, and refunds, are M2.5's.
 
 **Notes on M1.6, built 14 Nov 2026:**
 - **The reviewer's screen** (`/team/applications/[id]`) gains a **Decision** tab for seekers and a **Verification** tab for providers (capital, partner and challenge alike), ported from the prototype's, on the API.

@@ -4,8 +4,8 @@
  * One application, for its reviewers, on the API (backend-plan.md, M1.3: the first half of review). The prototype's
  * own review screen, ported: the same tabs, rubric and wording, but every number comes from the server and every
  * button is a use case the server checks against the same rules. M1.6 adds the Decision tab (recommend or decide,
- * the second decider, conditions, readiness) and, for providers, the Verification tab. The fee's waiver and payment
- * come with M1.7; the teaser and what happens in the Deal Room come later.
+ * the second decider, conditions, readiness) and, for providers, the Verification tab; M1.7 the fee: paid by the
+ * applicant, settled by the provider, or waived by the lead. The teaser and what happens in the Deal Room come later.
  */
 import { createContext, useContext, useState, type ReactNode } from "react";
 import type { ReviewView } from "@excursia/contracts/review";
@@ -658,10 +658,12 @@ function DecisionTab() {
   );
 }
 
-/** The participation fee asked for with the approval. Paying and the lead's waiver come with M1.7. */
+/** The participation fee asked for with the approval: paid by the applicant, or waived by the lead with a reason. */
 function FeeNote() {
-  const { app, dr } = useCtx();
+  const { app, dr, can, act, pending } = useCtx();
+  const [reason, setReason] = useState("");
   const f = app.fee!;
+  const owed = feeOwed(app);
   return (
     <Section title="Participation fee" action={<Pill tone={feeOwed(app) ? "warn" : "ok"}>{f.paid ? "Paid" : f.waived ? "Waived" : "Not paid"}</Pill>}>
       <p className="text-[14px]">
@@ -670,8 +672,23 @@ function FeeNote() {
           ? `Paid by ${f.paid.method} on ${fmtStamp(f.paid.at)}, reference ${f.paid.reference}.`
           : f.waived
             ? `Waived by ${staffName(dr as DealRoomState, f.waived.by)} on ${fmtStamp(f.waived.at)}: ${f.waived.reason}`
-            : `Not paid yet: no badge, and no matching or introductions until it is. By M-Pesa it would be KES ${feeInKes(f).toLocaleString("en")}.`}
+            : `Not paid yet: no badge, and no matching or introductions until it is. By M-Pesa it is KES ${feeInKes(f).toLocaleString("en")}.`}
       </p>
+      {owed && can.waiveFee && (
+        <form
+          className="mt-3 flex flex-wrap gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (reason.trim()) act({ kind: "waiveFee", input: { reason } }, () => setReason(""));
+          }}
+        >
+          <input className="input h-9 min-w-56 flex-1 text-[13px]" aria-label="Why it is waived" placeholder="Why it is waived, for example a sponsored place" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <button className="btn-secondary btn-sm" disabled={pending || !reason.trim()}>
+            Waive the fee
+          </button>
+        </form>
+      )}
+      {owed && !can.waiveFee && <p className="mt-2 text-[13px] text-slate">Only the lead can waive it.</p>}
     </Section>
   );
 }

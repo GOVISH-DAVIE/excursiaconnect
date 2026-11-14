@@ -4,7 +4,7 @@
 import type { RequestHandler } from "express";
 import { ApplicationsQuery, AssignReviewerInput, EventParams, type ApplicationSummary, type TeamView } from "@excursia/contracts/dealroom";
 import {
-  AppIdParams, CheckKycInput, ConditionParams, DecideInput, DocParams, ReadinessInput, RecommendInput, RequestInfoInput, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput,
+  AppIdParams, CheckKycInput, ConditionParams, DecideInput, DocParams, ReadinessInput, RecommendInput, RequestInfoInput, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput, WaiveFeeInput,
 } from "@excursia/contracts/review";
 import { DealRoomSettingsInput } from "@excursia/contracts/onboarding";
 import { sessionOf } from "../../http/session";
@@ -81,6 +81,11 @@ export function createDealRoomController(service: DealRoomService) {
     verify: (async (req, res) => {
       const { eventId, appId } = AppIdParams.parse(req.params);
       res.json(await service.verify(sessionOf(res), eventId, appId, VerifyInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    waiveFee: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.waiveFee(sessionOf(res), eventId, appId, WaiveFeeInput.parse(req.body), ip(req)));
     }) satisfies RequestHandler,
 
     documentLink: (async (req, res) => {

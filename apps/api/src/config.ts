@@ -70,6 +70,21 @@ const Env = z
       .string()
       .regex(/^(\/\S+|[\w.-]+:\d{1,5})$/, "must be host:port or a socket path")
       .optional(),
+    /** The API's public address, which payment providers call back (https://api.example.co.ke). */
+    PUBLIC_API_URL: z.url().optional(),
+    /**
+     * M-Pesa through Daraja (D5): its environment, the app's consumer key and secret, the shortcode (paybill or
+     * till's store number) and the Lipa na M-Pesa Online passkey. Unset away from production, a test M-Pesa stands
+     * in, which "pays" a few seconds after the push; unset in production, M-Pesa is simply not offered.
+     */
+    MPESA_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
+    MPESA_CONSUMER_KEY: z.string().optional(),
+    MPESA_CONSUMER_SECRET: z.string().optional(),
+    MPESA_SHORTCODE: z.string().regex(/^\d{5,7}$/, "must be the 5 to 7 digit shortcode").optional(),
+    MPESA_PASSKEY: z.string().optional(),
+    /** "paybill" (CustomerPayBillOnline) or "till" (CustomerBuyGoodsOnline, paid to MPESA_TILL) */
+    MPESA_TYPE: z.enum(["paybill", "till"]).default("paybill"),
+    MPESA_TILL: z.string().regex(/^\d{5,8}$/).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.RULES_CLOCK && (env.APP_ENV === "production" || (env.NODE_ENV === "production" && env.APP_ENV !== "staging")))
@@ -77,6 +92,14 @@ const Env = z
     if (env.MAIL_TRANSPORT === "smtp")
       for (const key of ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "EMAIL_FROM"] as const)
         if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "is required when MAIL_TRANSPORT is smtp" });
+    const mpesa = ["MPESA_CONSUMER_KEY", "MPESA_CONSUMER_SECRET", "MPESA_SHORTCODE", "MPESA_PASSKEY"] as const;
+    if (mpesa.some((k) => env[k])) {
+      for (const k of [...mpesa, "PUBLIC_API_URL"] as const) if (!env[k]) ctx.addIssue({ code: "custom", path: [k], message: "is required for M-Pesa, with the other MPESA_ settings" });
+      if (env.MPESA_TYPE === "till" && !env.MPESA_TILL) ctx.addIssue({ code: "custom", path: ["MPESA_TILL"], message: "is required when MPESA_TYPE is till" });
+      if (env.APP_ENV === "production" && env.MPESA_ENV !== "production") ctx.addIssue({ code: "custom", path: ["MPESA_ENV"], message: "must be production in production" });
+      if (env.PUBLIC_API_URL && env.NODE_ENV === "production" && !env.PUBLIC_API_URL.startsWith("https://"))
+        ctx.addIssue({ code: "custom", path: ["PUBLIC_API_URL"], message: "must be https: M-Pesa calls back there" });
+    }
     if (env.APP_ENV === "production" && !env.CLAMD_ADDRESS) ctx.addIssue({ code: "custom", path: ["CLAMD_ADDRESS"], message: "required in production: uploads are scanned before anyone can open them" });
     if (env.NODE_ENV !== "production") return;
     if (env.WEB_ORIGINS.some((o) => !o.startsWith("https://")))
@@ -92,4 +115,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (parsed.success) return parsed.data;
   const problems = parsed.error.issues.map((i) => `${i.path.join(".") || "environment"}: ${i.message}`);
   throw new Error(`The API's environment is not valid:\n  ${problems.join("\n  ")}`);
+}
+
+/** How M-Pesa is reached: Daraja with real keys; the test M-Pesa away from production when none are set; else not at all. */
+export function mpesaMode(config: Config): "daraja" | "test" | "off" {
+  if (config.MPESA_CONSUMER_KEY) return "daraja";
+  const production = config.APP_ENV ? config.APP_ENV === "production" : config.NODE_ENV === "production";
+  return production ? "off" : "test";
 }

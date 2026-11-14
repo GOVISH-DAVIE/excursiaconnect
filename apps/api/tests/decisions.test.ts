@@ -271,7 +271,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("decisions and verification", ()
     expect((await call("POST", one(appId, "/decisions/confirm"), "st_lead")).status).toBe(200);
     const view = MyApplication.parse((await call("GET", mine(), "seeker")).json);
     expect(view.decision).toMatchObject({ decision: "Qualified", reason: "Bankable", conditions: [] });
-    expect(view.fee).toEqual({ amount: 250, currency: "USD", paid: false, waived: false });
+    expect(view.fee).toMatchObject({ amount: 250, currency: "USD", paid: false, waived: false, kes: 32_500, payment: null });
     expect(view.verification).toBeNull();
   });
 });

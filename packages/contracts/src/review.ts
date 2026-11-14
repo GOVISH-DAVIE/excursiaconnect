@@ -32,7 +32,7 @@ export const ReviewView = z.object({
   now: z.string(),
   me: StaffMember,
   staff: z.array(StaffMember),
-  can: z.object({ review: z.boolean(), assign: z.boolean(), decideExpiry: z.boolean(), decide: z.boolean(), readiness: z.boolean() }),
+  can: z.object({ review: z.boolean(), assign: z.boolean(), decideExpiry: z.boolean(), decide: z.boolean(), readiness: z.boolean(), waiveFee: z.boolean() }),
 });
 export type ReviewView = z.infer<typeof ReviewView>;
 
@@ -93,3 +93,7 @@ export type SanctionsInput = z.infer<typeof SanctionsInput>;
 
 export const VerifyInput = z.object({ outcome: z.enum(["Verified", "Declined"]), reason: Reason });
 export type VerifyInput = z.infer<typeof VerifyInput>;
+
+/** The lead waives an approved seeker's fee, a sponsored place say: always with a reason (M1.7). */
+export const WaiveFeeInput = z.object({ reason: Reason });
+export type WaiveFeeInput = z.infer<typeof WaiveFeeInput>;

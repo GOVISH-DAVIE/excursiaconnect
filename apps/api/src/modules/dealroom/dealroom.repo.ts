@@ -161,6 +161,7 @@ export function createDealRoomRepo(db: Db) {
         linkStaff: (links: StaffLink[]) => Promise<string[]>;
         queue: (notes: { to: string; subject: string; link: string; eventId: string }[]) => Promise<void>;
         revokeStaff: (staffIds: string[]) => Promise<void>;
+        confirmPayment: (p: { id: string; receipt: string; raw: object }) => Promise<boolean>;
       }) => Promise<T>,
       scope?: { appId: string },
     ): Promise<T> {
@@ -187,6 +188,9 @@ export function createDealRoomRepo(db: Db) {
             revokeStaff: async (staffIds) => {
               if (staffIds.length) await tx.membership.updateMany({ where: { id: { in: staffIds.map((x) => `mem_${x}`) }, revokedAt: null }, data: { revokedAt: new Date() } });
             },
+            // a payment is confirmed once: the row moves from pending in the same transaction as the fee it settles
+            confirmPayment: async (p) =>
+              (await tx.payment.updateMany({ where: { id: p.id, status: "pending" }, data: { status: "confirmed", receipt: p.receipt, rawPayload: p.raw as never, confirmedAt: new Date() } })).count === 1,
             queue: async (notes) => {
               if (notes.length)
                 await tx.outboxMessage.createMany({
