@@ -18,5 +18,8 @@ export function applyRoutes(c: ApplyController): Router {
   r.post("/:slug/mine/:appId/respond", signedIn, c.respond);
   r.post("/:slug/mine/:appId/documents", signedIn, c.startUpload);
   r.post("/:slug/mine/:appId/documents/:fileId/complete", signedIn, c.completeUpload);
+  // a provider's verification, once submitted (M1.6)
+  r.post("/:slug/mine/:appId/kyc", signedIn, c.kyc);
+  r.post("/:slug/mine/:appId/nda", signedIn, c.signNda);
   return r;
 }

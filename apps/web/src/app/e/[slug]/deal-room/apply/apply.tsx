@@ -21,6 +21,7 @@ import { useApplyForm, useMyApplication, useMyApplications, useStartApplication 
 import { Answer } from "./answer";
 import { Editor } from "./editor";
 import { Card } from "./fields";
+import { Outcome } from "./outcome";
 
 const OPEN = ["Lead", "Invited", "Draft"];
 const TITLE: Record<ApplyMode, string> = {
@@ -111,6 +112,7 @@ function Page({ slug, form, linked, invite }: { slug: string; form: ApplyForm; l
       <>
         <Answer slug={slug} app={loaded.data} maxBytes={form.upload.maxBytes} onSent={() => setChosen(current)} />
         <Submitted app={loaded.data} />
+        <Outcome slug={slug} app={loaded.data} maxBytes={form.upload.maxBytes} />
       </>
     );
   // once submitted, it stays on screen as received rather than falling back to the chooser

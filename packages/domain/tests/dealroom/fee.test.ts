@@ -55,4 +55,16 @@ ok("providers have no fee", !prov.fee && feeSettled(prov));
 let z: AppState = { ...seed, dealRoom: { ...seed.dealRoom, actingStaffId: "st_lead", configs: { ...seed.dealRoom.configs, ev_ca3: { ...seed.dealRoom.configs.ev_ca3, seekerFee: { amount: 0, currency: "USD", reminderDays: 3 } } } } };
 z = r(z, { type: "dr/decide", appId: target.id, decision: "Qualified", reason: "Fit", conditions: [] });
 ok("with the fee set to 0, approval issues the badge at once", !z.dealRoom.apps.find((a) => a.id === target.id)!.fee && !!z.delegates.find((d) => d.id === z.dealRoom.apps.find((a) => a.id === target.id)!.delegateId && !d.cancelled));
+// the badge on a real event: its own Deal Room tier, made with the first badge, and a code that isn't the id's
+{
+  const other = { ...target, id: "dr_cs_other", eventId: "ev_other" };
+  let y: AppState = { ...z, tiers: z.tiers.filter((t) => t.id !== "t_other_dr"), events: [...z.events, { ...z.events.find((e) => e.id === "ev_ca3")!, id: "ev_other", currency: "USD" }] };
+  y = { ...y, dealRoom: { ...y.dealRoom, apps: [other, ...y.dealRoom.apps], configs: { ...y.dealRoom.configs, ev_other: { ...y.dealRoom.configs.ev_ca3, eventId: "ev_other" } } } };
+  y = r(y, { type: "dr/decide", appId: other.id, decision: "Qualified", reason: "Fit", conditions: [] });
+  const d = y.delegates.find((x) => x.id === y.dealRoom.apps.find((a) => a.id === other.id)!.delegateId)!;
+  const tier = y.tiers.find((t) => t.id === "t_other_dr");
+  ok("an event's first Deal Room badge makes its own tier: invitation only, free, in the event's currency", d.tierId === "t_other_dr" && tier?.sold === 1 && tier.price === 0 && tier.visibility === "invite" && tier.currency === "USD");
+  const first = z.delegates.find((x) => x.id === z.dealRoom.apps.find((a) => a.id === target.id)!.delegateId)!;
+  ok("badge codes come from the random ids, so two badges never share one", /^EXC-DR-[0-9A-Z_]{8}$/.test(d.badgeCode) && d.badgeCode !== first.badgeCode);
+}
 ok("the invariants hold at the end", validateDealRoom(s).length === 0);

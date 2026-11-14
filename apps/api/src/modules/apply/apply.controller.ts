@@ -1,6 +1,6 @@
 /** Applying's handlers: parse with the contracts, call the service, answer. */
 import type { RequestHandler } from "express";
-import { AppParams, FileParams, RespondInput, SaveDraft, SlugParams, StartApplication, SubmitApplication, UploadRequest } from "@excursia/contracts/apply";
+import { AppParams, FileParams, KycInput, RespondInput, SaveDraft, SignNdaInput, SlugParams, StartApplication, SubmitApplication, UploadRequest } from "@excursia/contracts/apply";
 import { sessionOf } from "../../http/session";
 import type { ApplyService } from "./apply.service";
 
@@ -44,6 +44,16 @@ export function createApplyController(service: ApplyService) {
     respond: (async (req, res) => {
       const { slug, appId } = AppParams.parse(req.params);
       res.json(await service.respond(sessionOf(res), slug, appId, RespondInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    kyc: (async (req, res) => {
+      const { slug, appId } = AppParams.parse(req.params);
+      res.json(await service.kyc(sessionOf(res), slug, appId, KycInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    signNda: (async (req, res) => {
+      const { slug, appId } = AppParams.parse(req.params);
+      res.json(await service.signNda(sessionOf(res), slug, appId, SignNdaInput.parse(req.body), ip(req)));
     }) satisfies RequestHandler,
 
     startUpload: (async (req, res) => {

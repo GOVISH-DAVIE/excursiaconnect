@@ -10,10 +10,10 @@
  * wait for the whole Deal Room; submitting takes it all, for the event's reference counter and the message.
  */
 import { randomBytes } from "node:crypto";
-import type { ApplyForm, ApplyMode, DraftChanges, MyApplication, MyApplications, RespondInput, ScanState, UploadTarget } from "@excursia/contracts/apply";
+import { KYC_DOC, KYC_ITEMS, type ApplyForm, type ApplyMode, type DraftChanges, type KycInput, type MyApplication, type MyApplications, type RespondInput, type ScanState, type SignNdaInput, type UploadTarget } from "@excursia/contracts/apply";
 import type { Action } from "@excursia/domain/core/reducer";
 import { blankApplication, modeOf, patchDraft, retentionDate } from "@excursia/domain/dealroom/apply";
-import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, formGaps, openRfi, rfiDue } from "@excursia/domain/dealroom/logic";
+import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, decisionOf, formGaps, openRfi, rfiDue } from "@excursia/domain/dealroom/logic";
 import type { DrApplication, DrConfig } from "@excursia/domain/dealroom/types";
 import type { AppState } from "@excursia/domain/types";
 import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
@@ -71,8 +71,41 @@ function view(app: DrApplication, cfg: DrConfig, version: number, scans: Scans):
     documents: app.documents.map((d) => ({ id: d.id, kind: d.kind, name: d.name, size: d.size, at: d.at, scan: scans.get(d.id) ?? "clean" })),
     requests: app.rfis.map((r) => ({ id: r.id, questions: r.questions, docs: r.docs, at: r.at, due: rfiDue(r, cfg), answeredAt: r.response?.at ?? null, open: !r.response && !r.expiry })),
     gaps: formGaps(withoutGone(app, scans), cfg),
+    decision: decisionOfApplicant(app),
+    readiness: app.readiness,
+    fee: app.fee ? { amount: app.fee.amount, currency: app.fee.currency, paid: !!app.fee.paid, waived: !!app.fee.waived } : null,
+    verification: app.type === "provider" && app.ref ? verificationOf(app, scans) : null,
   };
 }
+
+/** A seeker's decision in force, as its applicant is told it: one waiting for a second decider isn't one yet. */
+function decisionOfApplicant(app: DrApplication): MyApplication["decision"] {
+  const d = app.type === "seeker" ? decisionOf(app) : undefined;
+  return d ? { decision: d.decision, reason: d.reason, at: d.second?.at ?? d.at, conditions: d.conditions.map((c) => ({ id: c.id, text: c.text, due: c.due, met: !!c.met })) } : null;
+}
+
+/** What a provider uploads and signs to be verified, and where each stands; the screening is the team's own. */
+function verificationOf(app: DrApplication, scans: Scans): NonNullable<MyApplication["verification"]> {
+  const v = app.verification;
+  return {
+    state: v?.state ?? "Verification pending",
+    kyc: KYC_ITEMS.map((item) => {
+      const it = v?.kyc[item];
+      const doc = it && app.documents.find((d) => d.id === it.docId);
+      return { item, doc: doc ? { id: doc.id, name: doc.name, at: doc.at, scan: scans.get(doc.id) ?? "clean" } : null, checked: !!it?.checked };
+    }),
+    nda: v?.nda ? { version: v.nda.version, name: v.nda.name, title: v.nda.title, at: v.nda.at } : null,
+    decided: !!v?.decided,
+  };
+}
+
+/** A submitted provider, not yet verified or declined: the one who uploads KYC documents and signs the NDA. */
+function verifying(app: DrApplication) {
+  if (app.type !== "provider") throw new HttpError("bad_request", "Verification is for capital providers, partners and challenge owners.");
+  if (OPEN.includes(app.status)) throw new HttpError("conflict", "Submit the application first; verification follows.");
+  if (app.verification?.decided) throw new HttpError("conflict", `This organisation is already ${app.verification.state.toLowerCase()}.`);
+}
+const KYC_KINDS = Object.values(KYC_DOC) as string[];
 
 /** A file name as it may be stored and shown: no folders, no control characters, not too long. */
 const cleanName = cleanFileName;
@@ -232,9 +265,12 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
       const email = applicant(session);
       const e = await event(slug);
       const { app } = await ownRow(e.id, appId, email);
-      // while a request is open, the documents it asks for; before submitting, the seeker's own
+      // while a request is open, the documents it asks for; before submitting, the seeker's own; once a provider has
+      // submitted, its KYC documents (attached with `kyc`)
       const rfi = app.status === "Information requested" ? openRfi(app) : undefined;
-      if (rfi) {
+      const kyc = app.type === "provider" && !OPEN.includes(app.status) && KYC_KINDS.includes(req.kind) && !(rfi?.docs as string[] | undefined)?.includes(req.kind);
+      if (kyc) verifying(app);
+      else if (rfi) {
         if (!(rfi.docs as string[]).includes(req.kind)) throw new HttpError("bad_request", "The review team didn't ask for that document.", ["kind"]);
       } else {
         if (!OPEN.includes(app.status)) throw new HttpError("conflict", "Documents can be added only before the application is submitted, or when the review team asks for them.");
@@ -277,6 +313,56 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes }: 
           if (app.status === "Information requested") return [];
           if (!OPEN.includes(app.status)) throw new HttpError("conflict", "Documents can be added only before the application is submitted.");
           return [{ type: "dr/addDoc", appId, doc: { id: fileId, name: file.name, kind: file.kind as DrApplication["documents"][number]["kind"], size: file.size, at: ctx.now, download: true } }];
+        },
+      });
+      return after(state, appId, e.cfg);
+    },
+
+    /** A KYC document that has arrived goes onto the application as that item; one already checked stays. */
+    async kyc(session: Resolved, slug: string, appId: string, input: KycInput, ip: string | null): Promise<MyApplication> {
+      const email = applicant(session);
+      const e = await event(slug);
+      const file = await repo.fileOf(input.fileId, appId);
+      if (!file) throw new HttpError("not_found", "No such upload.");
+      if (file.kind !== KYC_DOC[input.item]) throw new HttpError("bad_request", `That upload isn't a ${KYC_DOC[input.item].toLowerCase()}.`, ["fileId"]);
+      if (file.state === "rejected") throw new HttpError("conflict", `${file.name} failed the virus check. Upload a clean copy.`);
+      const arrived = await storage.stat(file.storageKey);
+      if (!arrived || arrived.size !== file.size) throw new HttpError("conflict", "The file hasn't arrived yet. Try uploading it again.");
+      const state = await commands.run({
+        eventId: e.id,
+        actor: { kind: "applicant", appId },
+        userId: session.user.id,
+        ip,
+        owned: owns(appId, email),
+        only: appId,
+        actions: (s, ctx): Action[] => {
+          const app = appIn(s, appId);
+          verifying(app);
+          const now = app.verification?.kyc[input.item];
+          if (now?.docId === file.id) return [];
+          if (now?.checked) throw new HttpError("conflict", `The ${input.item.toLowerCase()} document is already checked.`);
+          return [{ type: "dr/kyc", appId, item: input.item, doc: { id: file.id, name: file.name, kind: file.kind as DrApplication["documents"][number]["kind"], size: file.size, at: ctx.now, download: true } }];
+        },
+      });
+      return after(state, appId, e.cfg);
+    },
+
+    /** The Deal Room's NDA, signed online by a person for the organisation; once is enough. */
+    async signNda(session: Resolved, slug: string, appId: string, input: SignNdaInput, ip: string | null): Promise<MyApplication> {
+      const email = applicant(session);
+      const e = await event(slug);
+      const state = await commands.run({
+        eventId: e.id,
+        actor: { kind: "applicant", appId },
+        userId: session.user.id,
+        ip,
+        owned: owns(appId, email),
+        only: appId,
+        actions: (s): Action[] => {
+          const app = appIn(s, appId);
+          verifying(app);
+          if (app.verification?.nda) throw new HttpError("conflict", "The NDA is already signed.");
+          return [{ type: "dr/signNda", appId, name: input.name, title: input.title }];
         },
       });
       return after(state, appId, e.cfg);

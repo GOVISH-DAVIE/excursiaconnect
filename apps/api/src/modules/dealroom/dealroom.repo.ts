@@ -28,7 +28,7 @@ export type Changes = {
     config: DealRoomRows["config"] | null;
     busy: { upsert: BusyRow[]; remove: string[] };
   };
-  core: { delegates: { upsert: CoreRows["delegates"] }; badges: { upsert: CoreRows["badges"] } };
+  core: { tiers: { upsert: CoreRows["tiers"] }; delegates: { upsert: CoreRows["delegates"] }; badges: { upsert: CoreRows["badges"] } };
 };
 
 export type AuditRow = { actorKind: string; actorId: string | null; eventId: string; entity: string; entityId: string; action: string; detail: Prisma.InputJsonValue; ip: string | null };
@@ -137,6 +137,8 @@ async function saveWith(tx: Prisma.TransactionClient, eventId: string, ch: Chang
       ON CONFLICT (id) DO UPDATE SET slot = EXCLUDED.slot, active = EXCLUDED.active, confirm_by = EXCLUDED.confirm_by`;
   }
 
+  // the Deal Room's tier first: an event's first badge makes it (drTierOf)
+  await each(ch.core.tiers.upsert, (r) => tx.tier.upsert({ where: { id: r.id }, create: r, update: r }));
   await each(ch.core.delegates.upsert, (r) => tx.delegate.upsert({ where: { id: r.id }, create: r, update: r }));
   for (const b of ch.core.badges.upsert) await tx.badge.upsert({ where: { code: b.code }, create: b, update: b });
 }

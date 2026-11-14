@@ -3,7 +3,7 @@
  * submit, and upload, and keep the cached application (status, gaps, documents) current.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ApplyMode, DraftChanges, MyApplication } from "@excursia/contracts/apply";
+import type { ApplyMode, DraftChanges, KycItem, MyApplication } from "@excursia/contracts/apply";
 import { applyApi } from "../api";
 import { applyFormQuery, applyKeys, myApplicationQuery, myApplicationsQuery } from "../queries";
 
@@ -52,4 +52,16 @@ export function useUploadDocument(slug: string, id: string) {
 export function useRespond(slug: string, id: string) {
   const keep = useKeepCurrent(slug);
   return useMutation({ mutationFn: (input: { text: string; fileIds: string[] }) => applyApi.respond(slug, id, input), onSuccess: keep });
+}
+
+/** A provider's KYC document, uploaded and attached as its item. */
+export function useUploadKyc(slug: string, id: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: ({ item, file }: { item: KycItem; file: File }) => applyApi.uploadKyc(slug, id, item, file), onSuccess: keep });
+}
+
+/** Signs the Deal Room's NDA online, for the organisation. */
+export function useSignNda(slug: string, id: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: (input: { name: string; title: string }) => applyApi.signNda(slug, id, input), onSuccess: keep });
 }

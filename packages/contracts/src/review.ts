@@ -1,9 +1,12 @@
 /**
- * Reviewing an application (backend-plan.md, M1.3): the reviewer's view of one application, and the first half of
- * review's use cases — start, score against the rubric with evidence, request information, and the lead's call on
- * a request that expired unanswered. The applicant's answer is in apply.ts.
+ * Reviewing an application (backend-plan.md, M1.3 and M1.6): the reviewer's view of one application, and review's
+ * use cases — start, score against the rubric with evidence, request information, the lead's call on a request
+ * that expired unanswered; then recommendations, decisions and the second decider, conditions, readiness, and a
+ * provider's verification (KYC checked, sanctions screening, the decision-maker, verify or decline). The applicant's
+ * side is in apply.ts.
  */
 import { z } from "zod";
+import { KycItem } from "./apply";
 import { StaffMember } from "./dealroom";
 
 export const AppIdParams = z.object({ eventId: z.string().regex(/^ev_[a-z0-9_]+$/), appId: z.string().regex(/^dr_[a-z0-9_]{2,60}$/) });
@@ -22,12 +25,14 @@ export const ReviewView = z.object({
     rfiDays: z.number(),
     missions: z.array(z.object({ id: z.string(), code: z.string(), name: z.string() })),
     tracks: z.array(z.object({ id: z.string(), code: z.string(), name: z.string(), missionId: z.string() })),
+    /** when a decision needs a second, different decider: every decline, and asks above this many USD */
+    secondReview: z.object({ decline: z.boolean(), askAbove: z.number() }),
   }),
   /** the time the rules take as now, so due dates read the same on the screen as on the server */
   now: z.string(),
   me: StaffMember,
   staff: z.array(StaffMember),
-  can: z.object({ review: z.boolean(), assign: z.boolean(), decideExpiry: z.boolean() }),
+  can: z.object({ review: z.boolean(), assign: z.boolean(), decideExpiry: z.boolean(), decide: z.boolean(), readiness: z.boolean() }),
 });
 export type ReviewView = z.infer<typeof ReviewView>;
 
@@ -55,3 +60,36 @@ export type RfiExpiryInput = z.infer<typeof RfiExpiryInput>;
 /** A short-lived link to open one document. */
 export const DocumentLink = z.object({ url: z.string(), expiresAt: z.string() });
 export type DocumentLink = z.infer<typeof DocumentLink>;
+
+/* ---------- M1.6: decisions, readiness, verification ---------- */
+
+export const DECISIONS = ["Qualified", "Conditional", "Referred", "Declined"] as const;
+const Reason = z.string().trim().min(1, "give a reason").max(2000);
+const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date, YYYY-MM-DD");
+
+export const ConditionParams = AppIdParams.extend({ conditionId: z.string().regex(/^[a-z0-9_]{2,60}$/) });
+
+/** A reviewer without the decide right recommends; a decider decides. */
+export const RecommendInput = z.object({ decision: z.enum(DECISIONS), reason: Reason });
+export type RecommendInput = z.infer<typeof RecommendInput>;
+
+/** A decision, with its reason (shown to the applicant); a conditional one with what must be met, and by when. */
+export const DecideInput = z.object({
+  decision: z.enum(DECISIONS),
+  reason: Reason,
+  conditions: z.array(z.object({ text: z.string().trim().min(1, "say what must be met").max(500), due: Day })).max(10).default([]),
+});
+export type DecideInput = z.infer<typeof DecideInput>;
+
+export const ReadinessInput = z.object({ readiness: z.enum(["Not ready", "In preparation", "Deal Room Ready"]) });
+export type ReadinessInput = z.infer<typeof ReadinessInput>;
+
+export const CheckKycInput = z.object({ item: KycItem });
+export type CheckKycInput = z.infer<typeof CheckKycInput>;
+
+/** The result of screening against the sanctions lists, entered by the reviewer who ran it. */
+export const SanctionsInput = z.object({ result: z.enum(["Clear", "Match found"]), note: z.string().trim().max(1000).default("") });
+export type SanctionsInput = z.infer<typeof SanctionsInput>;
+
+export const VerifyInput = z.object({ outcome: z.enum(["Verified", "Declined"]), reason: Reason });
+export type VerifyInput = z.infer<typeof VerifyInput>;

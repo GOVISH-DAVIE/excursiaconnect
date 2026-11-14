@@ -1,5 +1,5 @@
 /** Applying's calls to the API: the only file in the web app that knows these paths. */
-import { ApplyForm, MyApplication, MyApplications, UploadTarget, type ApplyMode, type DraftChanges } from "@excursia/contracts/apply";
+import { ApplyForm, KYC_DOC, MyApplication, MyApplications, UploadTarget, type ApplyMode, type DraftChanges, type KycItem } from "@excursia/contracts/apply";
 import { http } from "../http";
 
 const base = (slug: string) => `/v1/apply/${slug}`;
@@ -25,4 +25,15 @@ export const applyApi = {
     const app = await http.post(`${base(slug)}/mine/${id}/documents/${target.fileId}/complete`, { schema: MyApplication });
     return { fileId: target.fileId, name: file.name, app };
   },
+  /** A provider's KYC document (M1.6): uploaded the same way, then attached as that item. */
+  async uploadKyc(slug: string, id: string, item: KycItem, file: File) {
+    const target = await http.post(`${base(slug)}/mine/${id}/documents`, {
+      body: { kind: KYC_DOC[item], name: file.name, contentType: file.type, size: file.size },
+      schema: UploadTarget,
+    });
+    await http.upload(target.url, target.headers, file);
+    return http.post(`${base(slug)}/mine/${id}/kyc`, { body: { item, fileId: target.fileId }, schema: MyApplication });
+  },
+  signNda: (slug: string, id: string, input: { name: string; title: string }) =>
+    http.post(`${base(slug)}/mine/${id}/nda`, { body: { ...input, accept: true }, schema: MyApplication }),
 };

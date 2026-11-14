@@ -3,7 +3,7 @@
  * replaces the cached one; the queue is asked again too, since status and reviewer show there.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { RequestInfoInput, ReviewView, RfiExpiryInput, ScoreInput } from "@excursia/contracts/review";
+import type { CheckKycInput, DecideInput, ReadinessInput, RecommendInput, RequestInfoInput, ReviewView, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput } from "@excursia/contracts/review";
 import { dealRoomApi } from "../api";
 import { dealRoomKeys, reviewQuery } from "../queries";
 
@@ -13,19 +13,53 @@ export type ReviewAction =
   | { kind: "start" }
   | { kind: "score"; input: ScoreInput }
   | { kind: "request"; input: RequestInfoInput }
-  | { kind: "expiry"; input: RfiExpiryInput };
+  | { kind: "expiry"; input: RfiExpiryInput }
+  | { kind: "recommend"; input: RecommendInput }
+  | { kind: "decide"; input: DecideInput }
+  | { kind: "confirmSecond" }
+  | { kind: "meetCondition"; conditionId: string }
+  | { kind: "confirmDecisionMaker" }
+  | { kind: "readiness"; input: ReadinessInput }
+  | { kind: "checkKyc"; input: CheckKycInput }
+  | { kind: "sanctions"; input: SanctionsInput }
+  | { kind: "verify"; input: VerifyInput };
+
+/** One call per action; each answers with the review's new view. */
+function send(eventId: string, appId: string, a: ReviewAction): Promise<ReviewView> {
+  switch (a.kind) {
+    case "start":
+      return dealRoomApi.startReview(eventId, appId);
+    case "score":
+      return dealRoomApi.score(eventId, appId, a.input);
+    case "request":
+      return dealRoomApi.requestInfo(eventId, appId, a.input);
+    case "expiry":
+      return dealRoomApi.rfiExpiry(eventId, appId, a.input);
+    case "recommend":
+      return dealRoomApi.recommend(eventId, appId, a.input);
+    case "decide":
+      return dealRoomApi.decide(eventId, appId, a.input);
+    case "confirmSecond":
+      return dealRoomApi.confirmSecond(eventId, appId);
+    case "meetCondition":
+      return dealRoomApi.meetCondition(eventId, appId, a.conditionId);
+    case "confirmDecisionMaker":
+      return dealRoomApi.confirmDecisionMaker(eventId, appId);
+    case "readiness":
+      return dealRoomApi.readiness(eventId, appId, a.input);
+    case "checkKyc":
+      return dealRoomApi.checkKyc(eventId, appId, a.input);
+    case "sanctions":
+      return dealRoomApi.sanctions(eventId, appId, a.input);
+    case "verify":
+      return dealRoomApi.verify(eventId, appId, a.input);
+  }
+}
 
 export function useReviewAction(eventId: string, appId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (a: ReviewAction): Promise<ReviewView> =>
-      a.kind === "start"
-        ? dealRoomApi.startReview(eventId, appId)
-        : a.kind === "score"
-          ? dealRoomApi.score(eventId, appId, a.input)
-          : a.kind === "request"
-            ? dealRoomApi.requestInfo(eventId, appId, a.input)
-            : dealRoomApi.rfiExpiry(eventId, appId, a.input),
+    mutationFn: (a: ReviewAction) => send(eventId, appId, a),
     onSuccess: (view) => {
       queryClient.setQueryData(dealRoomKeys.review(eventId, appId), view);
       void queryClient.invalidateQueries({ queryKey: dealRoomKeys.applications(eventId) });

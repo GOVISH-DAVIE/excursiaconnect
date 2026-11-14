@@ -350,7 +350,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
         "org.name": "Kilimo Fresh Ltd", "org.regNo": "PVT-2020-1", "org.country": "Kenya", "org.sector": "Agritech & Food Technology",
         "ask.amount": 2_500_000, "ask.instrument": "Debt and credit", "ask.useOfFunds": "Cold-chain hubs", "ask.stage": "Growth",
         "traction.revenueBand": "USD 1m to 5m",
-        "decisionMaker.name": "Neema Achieng", "decisionMaker.title": "CEO", "decisionMaker.email": at("applicant"), "decisionMaker.phone": "+254700000000",
+        "contact.name": "Neema Achieng", "decisionMaker.name": "Neema Achieng", "decisionMaker.title": "CEO", "decisionMaker.email": at("applicant"), "decisionMaker.phone": "+254700000000",
         mission: "m1", source: "Partner",
       },
     });

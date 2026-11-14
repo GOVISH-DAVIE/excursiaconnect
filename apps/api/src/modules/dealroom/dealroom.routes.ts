@@ -21,5 +21,16 @@ export function dealRoomRoutes(c: DealRoomController): Router {
   r.post("/:eventId/applications/:appId/requests", requireSession({ staff: true }), c.requestInfo);
   r.post("/:eventId/applications/:appId/requests/expiry", requireSession({ staff: true }), c.rfiExpiry);
   r.get("/:eventId/applications/:appId/documents/:docId", requireSession({ staff: true }), c.documentLink);
+  // decisions, readiness and verification (M1.6)
+  const one = "/:eventId/applications/:appId";
+  r.post(`${one}/recommendations`, requireSession({ staff: true }), c.recommend);
+  r.post(`${one}/decisions`, requireSession({ staff: true }), c.decide);
+  r.post(`${one}/decisions/confirm`, requireSession({ staff: true }), c.confirmSecond);
+  r.post(`${one}/conditions/:conditionId/met`, requireSession({ staff: true }), c.meetCondition);
+  r.post(`${one}/decision-maker/confirm`, requireSession({ staff: true }), c.confirmDecisionMaker);
+  r.post(`${one}/readiness`, requireSession({ staff: true }), c.readiness);
+  r.post(`${one}/kyc/check`, requireSession({ staff: true }), c.checkKyc);
+  r.post(`${one}/sanctions`, requireSession({ staff: true }), c.sanctions);
+  r.post(`${one}/verification`, requireSession({ staff: true }), c.verify);
   return r;
 }

@@ -34,6 +34,8 @@ import type {
 
 export const EV_CA3 = "ev_ca3";
 export const DR_TIER = "t_ca3_dr";
+/** The tier an event's Deal Room badges are issued on: one per event, made with its first badge (the demo's is DR_TIER). */
+export const drTierOf = (eventId: string) => `t_${eventId.replace(/^ev_/, "")}_dr`;
 export const DR_ZONE = "z_ca3_dr";
 
 /* ---------- people and permissions ---------- */
@@ -398,6 +400,8 @@ export function formGaps(app: DrApplication, cfg: DrConfig) {
     if (!empty) continue;
     (cfg.fields[f.key] === "advisory" ? advisory : missing).push(f.label);
   }
+  // the applicant's own name, always: an approval or a verification issues a badge in that name
+  if (!app.contact.name.trim()) missing.push("Your name");
   if (app.challenge) {
     const c = app.challenge;
     for (const [v, label] of [[c.title, "Challenge title"], [c.problem, "The problem"], [c.users, "Who has it"], [c.outcome, "What success looks like"], [c.route, "Procurement route"], [c.decisionProcess, "How the decision is made"]] as const) if (!v.trim()) missing.push(label);

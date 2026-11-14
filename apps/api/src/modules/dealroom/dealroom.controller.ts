@@ -3,7 +3,9 @@
  */
 import type { RequestHandler } from "express";
 import { ApplicationsQuery, AssignReviewerInput, EventParams, type ApplicationSummary, type TeamView } from "@excursia/contracts/dealroom";
-import { AppIdParams, DocParams, RequestInfoInput, RfiExpiryInput, ScoreInput } from "@excursia/contracts/review";
+import {
+  AppIdParams, CheckKycInput, ConditionParams, DecideInput, DocParams, ReadinessInput, RecommendInput, RequestInfoInput, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput,
+} from "@excursia/contracts/review";
 import { DealRoomSettingsInput } from "@excursia/contracts/onboarding";
 import { sessionOf } from "../../http/session";
 import type { DealRoomService } from "./dealroom.service";
@@ -34,6 +36,51 @@ export function createDealRoomController(service: DealRoomService) {
     rfiExpiry: (async (req, res) => {
       const { eventId, appId } = AppIdParams.parse(req.params);
       res.json(await service.rfiExpiry(sessionOf(res), eventId, appId, RfiExpiryInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    recommend: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.recommend(sessionOf(res), eventId, appId, RecommendInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    decide: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.decide(sessionOf(res), eventId, appId, DecideInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    confirmSecond: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.confirmSecond(sessionOf(res), eventId, appId, ip(req)));
+    }) satisfies RequestHandler,
+
+    meetCondition: (async (req, res) => {
+      const { eventId, appId, conditionId } = ConditionParams.parse(req.params);
+      res.json(await service.meetCondition(sessionOf(res), eventId, appId, conditionId, ip(req)));
+    }) satisfies RequestHandler,
+
+    confirmDecisionMaker: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.confirmDecisionMaker(sessionOf(res), eventId, appId, ip(req)));
+    }) satisfies RequestHandler,
+
+    readiness: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.readiness(sessionOf(res), eventId, appId, ReadinessInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    checkKyc: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.checkKyc(sessionOf(res), eventId, appId, CheckKycInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    sanctions: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.sanctions(sessionOf(res), eventId, appId, SanctionsInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    verify: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.verify(sessionOf(res), eventId, appId, VerifyInput.parse(req.body), ip(req)));
     }) satisfies RequestHandler,
 
     documentLink: (async (req, res) => {

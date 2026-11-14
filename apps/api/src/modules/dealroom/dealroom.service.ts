@@ -3,10 +3,10 @@
  * rules then check their role. Every change goes through runCommand (dealroom.commands.ts).
  */
 import type { ApplicationSummary, AssignReviewerInput, MessageRow, StaffMember, TeamView } from "@excursia/contracts/dealroom";
-import type { DocumentLink, RequestInfoInput, ReviewView, RfiExpiryInput, ScoreInput } from "@excursia/contracts/review";
+import type { CheckKycInput, DecideInput, DocumentLink, ReadinessInput, RecommendInput, RequestInfoInput, ReviewView, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput } from "@excursia/contracts/review";
 import type { Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor } from "@excursia/domain/ctx";
-import { drCan, roleOf } from "@excursia/domain/dealroom/logic";
+import { decisionOf, drCan, roleOf } from "@excursia/domain/dealroom/logic";
 import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
 import type { DealRoomSettings, DealRoomSettingsInput } from "@excursia/contracts/onboarding";
 import type { DrApplication, DrStaff } from "@excursia/domain/dealroom/types";
@@ -17,6 +17,9 @@ import { HttpError } from "../../http/errors";
 import type { Resolved } from "../auth/auth.service";
 import type { Commands } from "./dealroom.commands";
 import type { DealRoomRepo } from "./dealroom.repo";
+
+/** Still with the applicant: nothing is decided or verified on these. */
+const OPEN = ["Lead", "Invited", "Draft"];
 
 const toStaff = (s: DrStaff): StaffMember => ({ id: s.id, name: s.name, role: s.role, canDecide: s.canDecide, canReview: s.active && s.role !== "Operations" });
 
@@ -72,11 +75,11 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
     const cfg = (found.config as unknown as DrConfigRecord).config;
     return {
       application: found.record as unknown as ReviewView["application"],
-      config: { rubric: cfg.rubric, rfiDays: cfg.rules.rfiDays, missions: cfg.missions, tracks: cfg.tracks },
+      config: { rubric: cfg.rubric, rfiDays: cfg.rules.rfiDays, missions: cfg.missions, tracks: cfg.tracks, secondReview: cfg.secondReview },
       now: nairobiNow(now()),
       me: toStaff(staff),
       staff: all.map((s) => toStaff(s.record as unknown as DrStaff)),
-      can: { review: drCan(staff, "review"), assign: drCan(staff, "assign"), decideExpiry: staff.role === "Lead" && staff.active },
+      can: { review: drCan(staff, "review"), assign: drCan(staff, "assign"), decideExpiry: staff.role === "Lead" && staff.active, decide: drCan(staff, "decide"), readiness: drCan(staff, "readiness") },
     };
   }
 
@@ -129,6 +132,67 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
     /** The lead's call on a request that expired unanswered. */
     rfiExpiry: (session: Resolved, eventId: string, appId: string, input: RfiExpiryInput, ip: string | null) =>
       act(session, eventId, appId, ip, () => [{ type: "dr/rfiExpiry", appId, how: input.how, note: input.note }]),
+
+    /* ----- M1.6: recommendations, decisions, conditions, readiness ----- */
+
+    /** A reviewer who doesn't decide recommends; the rules keep it on record for the decider. */
+    recommend: (session: Resolved, eventId: string, appId: string, input: RecommendInput, ip: string | null) =>
+      act(session, eventId, appId, ip, () => [{ type: "dr/recommend", appId, decision: input.decision, reason: input.reason }]),
+
+    /**
+     * A decision with its reason. A decline, or an ask over the lead's threshold, waits for a second decider; any
+     * other takes effect at once, emails the applicant and, for an approval, asks for the fee or issues the badge.
+     */
+    decide: (session: Resolved, eventId: string, appId: string, input: DecideInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (_app, s) => {
+        const today = s.dealRoom.clock.slice(0, 10);
+        const conditions = input.decision === "Conditional" ? input.conditions : [];
+        if (conditions.some((c) => c.due < today)) throw new HttpError("bad_request", "A condition's due date can't be in the past.", ["conditions"]);
+        return [{ type: "dr/decide", appId, decision: input.decision, reason: input.reason, conditions }];
+      }),
+
+    /** A second, different decider confirms the decision waiting for one; it then takes effect. */
+    confirmSecond: (session: Resolved, eventId: string, appId: string, ip: string | null) => act(session, eventId, appId, ip, () => [{ type: "dr/confirmSecond", appId }]),
+
+    /** One condition of the decision in force is met. */
+    meetCondition: (session: Resolved, eventId: string, appId: string, conditionId: string, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        const c = decisionOf(app)?.conditions.find((x) => x.id === conditionId);
+        if (!c) throw new HttpError("not_found", "No such condition on the decision in force.");
+        return c.met ? [] : [{ type: "dr/meetCondition", appId, conditionId }];
+      }),
+
+    /** The person who will take part in meetings is who they say: needed for readiness and for verification. */
+    confirmDecisionMaker: (session: Resolved, eventId: string, appId: string, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        if (OPEN.includes(app.status)) throw new HttpError("conflict", "The applicant is still drafting.");
+        if (!app.decisionMaker.name.trim()) throw new HttpError("conflict", "The application names no decision-maker.");
+        return app.decisionMaker.confirmed ? [] : [{ type: "dr/confirmDecisionMaker", appId }];
+      }),
+
+    readiness: (session: Resolved, eventId: string, appId: string, input: ReadinessInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => (app.readiness === input.readiness ? [] : [{ type: "dr/readiness", appId, readiness: input.readiness }])),
+
+    /* ----- M1.6: a provider's verification ----- */
+
+    /** One KYC document, looked at and found in order. */
+    checkKyc: (session: Resolved, eventId: string, appId: string, input: CheckKycInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => (app.verification?.kyc[input.item]?.checked ? [] : [{ type: "dr/checkKyc", appId, item: input.item }])),
+
+    /** The sanctions screening's result, entered by the reviewer who ran it; a new result replaces the last. */
+    sanctions: (session: Resolved, eventId: string, appId: string, input: SanctionsInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        if (OPEN.includes(app.status)) throw new HttpError("conflict", "The applicant is still drafting.");
+        return [{ type: "dr/sanctions", appId, result: input.result, note: input.note }];
+      }),
+
+    /** Verified (every KYC item checked, screening clear, NDA signed, decision-maker confirmed) or declined. */
+    verify: (session: Resolved, eventId: string, appId: string, input: VerifyInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        if (OPEN.includes(app.status)) throw new HttpError("conflict", "The applicant is still drafting.");
+        if (app.verification?.state === input.outcome) throw new HttpError("conflict", `This organisation is already ${input.outcome.toLowerCase()}.`);
+        return [{ type: "dr/verify", appId, outcome: input.outcome, reason: input.reason }];
+      }),
 
     /** A two-minute link to one of the application's documents; every opening is in the audit log. */
     async documentLink(session: Resolved, eventId: string, appId: string, docId: string, ip: string | null): Promise<DocumentLink> {

@@ -87,14 +87,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("applying to the Deal Room", () 
     "org.name": "Zambezi Pay Ltd", "org.regNo": "PVT-2019-0042", "org.country": "Zambia", "org.sector": "Fintech",
     "ask.amount": 2_000_000, "ask.instrument": "Equity", "ask.useOfFunds": "Expansion into Malawi", "ask.stage": "Growth",
     "traction.revenueBand": "USD 1m to 5m",
-    "decisionMaker.name": "Mutale Banda", "decisionMaker.title": "CEO", "decisionMaker.email": "mutale@zambezipay.example", "decisionMaker.phone": "+260977000000",
+    "contact.name": "Mutale Banda", "decisionMaker.name": "Mutale Banda", "decisionMaker.title": "CEO", "decisionMaker.email": "mutale@zambezipay.example", "decisionMaker.phone": "+260977000000",
     mission: "m1", source: "Referral",
   };
   const PROVIDER_FILLED = {
     "org.name": "Rift Capital", "org.country": "Kenya", providerKind: "Venture capital",
     "mandate.sectors": ["Fintech"], "mandate.countries": ["Kenya"], "mandate.stages": ["Growth"], "mandate.ticketMin": 250_000, "mandate.ticketMax": 2_000_000,
     "mandate.instruments": ["Equity"],
-    "decisionMaker.name": "Wanjiku Mwangi", "decisionMaker.title": "Partner", "decisionMaker.email": "w@rift.example", "decisionMaker.phone": "+254700000000",
+    "contact.name": "Wanjiku Mwangi", "decisionMaker.name": "Wanjiku Mwangi", "decisionMaker.title": "Partner", "decisionMaker.email": "w@rift.example", "decisionMaker.phone": "+254700000000",
     mission: "m1", source: "Partner",
   };
 

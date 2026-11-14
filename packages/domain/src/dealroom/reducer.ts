@@ -4,10 +4,10 @@
  * a refused action returns the state unchanged and the screen explains why beforehand.
  */
 import { no, type Ctx } from "../ctx";
-import type { AppState, Delegate } from "../types";
+import type { AppState, Delegate, Tier } from "../types";
 import { addMinutes } from "../time";
 import {
-  DR_TIER,
+  drTierOf,
   feeInKes,
   feeLabel,
   feeOwed,
@@ -93,7 +93,9 @@ function issueBadge(ctx: Ctx, state: AppState, app: DrApplication): AppState {
     return { ...state, delegates: state.delegates.map((d) => (d.id === app.delegateId ? { ...d, status: d.accredited ? "Checked in" : "Confirmed", cancelled: false } : d)) };
   }
   const id = `d_dr_${app.id}`;
-  const code = `EXC-DR-${(1000 + (app.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) * 37) % 9000).toString()}`;
+  // the badge's code is what its QR carries, so it comes from the random ids, never from the application's id
+  const code = `EXC-DR-${ctx.newId("b").slice(-8).toUpperCase()}`;
+  const tierId = drTierOf(app.eventId);
   const d: Delegate = {
     id,
     eventId: app.eventId,
@@ -104,7 +106,7 @@ function issueBadge(ctx: Ctx, state: AppState, app: DrApplication): AppState {
     jobTitle: app.decisionMaker.name === app.contact.name ? app.decisionMaker.title : app.type === "seeker" ? "Capital seeker" : app.providerKind ?? ROLE_LABEL[roleOf(app)],
     country: app.org.country,
     category: "Deal Room",
-    tierId: DR_TIER,
+    tierId,
     status: "Confirmed",
     accredited: false,
     checkIns: [],
@@ -113,10 +115,21 @@ function issueBadge(ctx: Ctx, state: AppState, app: DrApplication): AppState {
     bookable: false,
     badgeCode: code,
   };
+  // an event's first Deal Room badge makes its tier: invitation only, not on sale, free
+  const currency = state.events.find((e) => e.id === app.eventId)?.currency ?? "KES";
+  const tiers: Tier[] = state.tiers.some((t) => t.id === tierId)
+    ? state.tiers.map((t) => (t.id === tierId ? { ...t, sold: t.sold + 1 } : t))
+    : [
+        {
+          id: tierId, eventId: app.eventId, name: "Deal Room participant", price: 0, currency, cap: 10_000, sold: 1, visibility: "invite", approval: "organiser",
+          entitlements: ["all-days"], description: "Issued with a Deal Room approval or verification; not on sale.",
+        },
+        ...state.tiers,
+      ];
   return {
     ...state,
     delegates: [d, ...state.delegates],
-    tiers: state.tiers.map((t) => (t.id === DR_TIER ? { ...t, sold: t.sold + 1 } : t)),
+    tiers,
     dealRoom: patchApp(state.dealRoom, app.id, (a) => ({ ...a, delegateId: id })),
   };
 }
@@ -536,7 +549,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       return withDr(
         state,
         patchApp(dr, app.id, (a) =>
-          note({ ...a, documents: docs, verification: { ...(a.verification ?? { state: "Verification pending", kyc: {} }), nda: { version: "CA3-NDA v1.2", name: action.name, title: action.title, at, uploaded: !!action.uploaded } } }, "applicant", `NDA signed by ${action.name}, ${action.title}`, at),
+          note({ ...a, documents: docs, verification: { ...(a.verification ?? { state: "Verification pending", kyc: {} }), nda: { version: `${cfg?.refPrefix ?? "CA3"}-NDA v1.2`, name: action.name, title: action.title, at, uploaded: !!action.uploaded } } }, "applicant", `NDA signed by ${action.name}, ${action.title}`, at),
         ),
       );
     }

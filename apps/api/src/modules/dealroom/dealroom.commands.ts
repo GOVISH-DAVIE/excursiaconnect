@@ -11,7 +11,7 @@
  * owning email for an applicant). Action objects exist only on the server; clients send use-case inputs.
  *
  * A command with `only: appId` loads and locks just that application (dealroom.repo.ts): for rules that read and
- * write one application and nothing else: the applicant's autosave, and attaching an upload. Any other rule there is refused before
+ * write one application and nothing else: the applicant's autosave, attaching an upload, a KYC document, the NDA. Any other rule there is refused before
  * it runs, and a result that changed anything but that application is never written.
  */
 import { randomUUID } from "node:crypto";
@@ -58,8 +58,8 @@ function changesBetween(eventId: string, before: AppState, after: AppState, now:
   const b = dealRoomToRows(before.dealRoom, eventId, now);
   const a = dealRoomToRows(after.dealRoom, eventId, now);
   const id = (r: { id: string }) => r.id;
-  const bc = coreToRows({ organisers: [], events: [], tiers: [], delegates: before.delegates }, { demo: false });
-  const ac = coreToRows({ organisers: [], events: [], tiers: [], delegates: after.delegates }, { demo: false });
+  const bc = coreToRows({ organisers: [], events: [], tiers: before.tiers, delegates: before.delegates }, { demo: false });
+  const ac = coreToRows({ organisers: [], events: [], tiers: after.tiers, delegates: after.delegates }, { demo: false });
   return {
     dealRoom: {
       config: JSON.stringify(b.config) === JSON.stringify(a.config) ? null : a.config,
@@ -78,6 +78,7 @@ function changesBetween(eventId: string, before: AppState, after: AppState, now:
       busy: diff(b.busy, a.busy, id),
     },
     core: {
+      tiers: { upsert: diff(bc.tiers, ac.tiers, id).upsert },
       delegates: { upsert: diff(bc.delegates, ac.delegates, id).upsert },
       badges: { upsert: diff(bc.badges, ac.badges, (x) => x.code).upsert },
     },
@@ -85,7 +86,7 @@ function changesBetween(eventId: string, before: AppState, after: AppState, now:
 }
 
 /** The rules that read and write one application only, and so may run with `only`. */
-const ONE_APPLICATION = new Set<Action["type"]>(["dr/saveDraft", "dr/addDoc"]);
+const ONE_APPLICATION = new Set<Action["type"]>(["dr/saveDraft", "dr/addDoc", "dr/kyc", "dr/signNda"]);
 
 /** Whether the changes are to the one application and nothing else. */
 function onlyTouches(ch: Changes, appId: string): boolean {
@@ -95,6 +96,7 @@ function onlyTouches(ch: Changes, appId: string): boolean {
     !apps.remove.length &&
     apps.upsert.every((r) => r.id === appId) &&
     Object.values(rest).every((d) => !d.upsert.length && !d.remove.length) &&
+    !ch.core.tiers.upsert.length &&
     !ch.core.delegates.upsert.length &&
     !ch.core.badges.upsert.length
   );

@@ -36,7 +36,7 @@ const stepLabel = (k: StepKey, mode: ApplyMode) =>
   })[k];
 /** Which step each item the rules name as missing is filled in on; anything else is listed on the review. */
 const GAP_STEP: Record<string, StepKey> = {
-  "Legal name": "org", "Registration number": "org", Country: "org", Sector: "org", Website: "org", Organisation: "org", "Organisation type": "org", Headquarters: "org",
+  "Legal name": "org", "Registration number": "org", Country: "org", Sector: "org", Website: "org", Organisation: "org", "Organisation type": "org", Headquarters: "org", "Your name": "org",
   "Amount sought": "ask", "Transaction pathway": "ask", "Use of funds": "ask", Stage: "ask", "Revenue band": "ask", Customers: "ask",
   Sectors: "mandate", Countries: "mandate", Stages: "mandate", "Ticket or contract range": "mandate", "Transaction pathways": "mandate", Exclusions: "mandate", "Decision timeline": "mandate",
   "Challenge title": "challenge", "The problem": "challenge", "Who has it": "challenge", "What success looks like": "challenge", "Procurement route": "challenge", "How the decision is made": "challenge", Constraints: "challenge", "Budget range": "challenge", Timeline: "challenge",

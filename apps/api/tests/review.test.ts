@@ -98,7 +98,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("reviewing an application", () =
         "org.name": "Kivu Solar Ltd", "org.regNo": "RW-2021-77", "org.country": "Rwanda", "org.sector": "Energy Technology & Climate Innovation",
         "ask.amount": 1_500_000, "ask.instrument": "Debt and credit", "ask.useOfFunds": "Mini-grids in the Western Province", "ask.stage": "Growth",
         "traction.revenueBand": "USD 1m to 5m",
-        "decisionMaker.name": "Aline Uwase", "decisionMaker.title": "CEO", "decisionMaker.email": "aline@kivusolar.example", "decisionMaker.phone": "+250788000000",
+        "contact.name": "Aline Uwase", "decisionMaker.name": "Aline Uwase", "decisionMaker.title": "CEO", "decisionMaker.email": "aline@kivusolar.example", "decisionMaker.phone": "+250788000000",
         mission: "m1", source: "Referral",
       },
     });
@@ -121,7 +121,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("reviewing an application", () =
     const r = ReviewView.parse((await one("st_rev2")).json);
     expect(r.application).toMatchObject({ id: appId, status: "Submitted" });
     expect(r.config.rubric.assessment.length).toBeGreaterThan(0);
-    expect(r.can).toEqual({ review: true, assign: false, decideExpiry: false });
+    expect(r.can).toEqual({ review: true, assign: false, decideExpiry: false, decide: false, readiness: true });
     expect(ReviewView.parse((await one("st_lead")).json).can.decideExpiry).toBe(true);
     expect((await one("st_ops1")).status).toBe(403);
     expect((await one("applicant")).status).toBe(403);
