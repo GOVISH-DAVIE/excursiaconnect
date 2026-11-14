@@ -69,7 +69,8 @@ function view(app: DrApplication, cfg: DrConfig, version: number, scans: Scans):
     },
     // a document with no file row is the demo's, which never went through a scan
     documents: app.documents.map((d) => ({ id: d.id, kind: d.kind, name: d.name, size: d.size, at: d.at, scan: scans.get(d.id) ?? "clean" })),
-    requests: app.rfis.map((r) => ({ id: r.id, questions: r.questions, docs: r.docs, at: r.at, due: rfiDue(r, cfg), answeredAt: r.response?.at ?? null, open: !r.response && !r.expiry })),
+    // a request is answerable only while the review waits on it: a decision made meanwhile closes it for the applicant
+    requests: app.rfis.map((r) => ({ id: r.id, questions: r.questions, docs: r.docs, at: r.at, due: rfiDue(r, cfg), answeredAt: r.response?.at ?? null, open: !r.response && !r.expiry && app.status === "Information requested" })),
     gaps: formGaps(withoutGone(app, scans), cfg),
     decision: decisionOfApplicant(app),
     readiness: app.readiness,

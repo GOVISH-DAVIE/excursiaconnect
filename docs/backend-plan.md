@@ -478,7 +478,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | M1.3 | **Review, first half** (by Fri 11 Dec): queue, assignment, rubric scoring with evidence, information requests with expiry | The review rules' tests pass on the server **Done 11 Nov 2026**. Notes below |
 | M1.4 | **Email** (by Fri 11 Dec): the outbox and worker, templates for every onboarding message, delivery status, the Notifications screen reading the outbox | Messages arrive in a real inbox with delivery status **Done 12 Nov 2026**, sending through Zoho; delivery reports and SMS remain. Notes below |
 | M1.5 | **Go-live** (Mon 14 Dec): production database with point-in-time recovery and a restore drill timed against the RTO, monitoring and alerts, privacy notice, load test of apply and upload | **Applications open Tue 15 Dec 2026.** The privacy notice, the queue check, the backup and drill scripts and the load test are built (12 Nov 2026); the production database, ClamAV, alerting and the drills on real backups remain. Notes below |
-| M1.6 | **Review, second half** (by Tue 22 Dec): recommendations, decisions, second decider, readiness, conditions; provider and challenge verification (KYC, NDA, sanctions, decision-maker) | The first decisions are recorded on production; no record is verified with a step missing |
+| M1.6 | **Review, second half** (by Tue 22 Dec): recommendations, decisions, second decider, readiness, conditions; provider and challenge verification (KYC, NDA, sanctions, decision-maker) | The first decisions are recorded on production; no record is verified with a step missing **Built 14 Nov 2026** on the API and both screens; production waits for M1.5's infrastructure. Notes below |
 | M1.7 | **Fee and SMS** (by Fri 8 Jan): one payment method first (M-Pesa if Daraja is approved, otherwise card), then the second; webhooks as specified; the 3-day reminder job; the lead's waiver; badge on payment, with minimal tier and badge records; SMS through Africa's Talking once the sender ID is approved | A sandbox payment issues a badge; a repeated callback changes nothing; approvals made before 8 Jan get their payment link then |
 
 **Notes on M1.1, done 11 Nov 2026** (with the core of M1.2):
@@ -605,6 +605,31 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - suspending an organiser or an event (PA-9), and reopening a verified KYC when its details change
   - amounts processed and commission earned on the overview (PA-5), which wait for payments
   - Algotech's real price list
+
+**Notes on M1.6, built 14 Nov 2026:**
+- **The reviewer's screen** (`/team/applications/[id]`) gains a **Decision** tab for seekers and a **Verification** tab for providers (capital, partner and challenge alike), ported from the prototype's, on the API.
+- **Decisions:**
+  - A reviewer without the decide right **recommends**; a decider (the lead, or a reviewer marked "may decide") **decides**, always with a reason, which the applicant reads.
+  - A conditional decision needs at least one condition, each with a due date no earlier than today; conditions are marked met one by one.
+  - Every decline, and any ask over the lead's threshold (USD 10 million by default), waits for a **second, different decider**. Until then nothing takes effect, nothing is sent, and the applicant sees no decision.
+  - A decision that takes effect emails the applicant; an approval asks for the fee (when the Deal Room charges one) and the badge waits for payment (M1.7), or issues the badge at once when the fee is 0.
+- **Readiness:** Deal Room Ready is refused, with the list, until every readiness criterion is scored, the decision-maker is confirmed and no condition is open; the applicant is then told.
+- **Verification:**
+  - Once submitted, the applicant uploads the three KYC documents (registration, beneficial owners, the signatory's ID: scanned like any upload) and signs the NDA online, from their status page.
+  - The team checks each document, enters the sanctions screening's result (a match blocks), confirms the decision-maker, and verifies or declines with a reason. Verifying needs all of it; the applicant is emailed and the badge is issued.
+  - After a verification or decline nothing more is uploaded or signed.
+- **The applicant's page** shows the decision in force (reason, conditions, fee due) or the verification steps, under "Application received". A request still open when a decision is made is closed for the applicant (the rules already refuse its answer).
+- **The badge, fixed in the rules:**
+  - It was issued on the demo's tier (`t_ca3_dr`) for every event, which a real event doesn't have: the first decision on a real event would have failed. Each event now gets its own Deal Room tier with its first badge (invitation only, free, in the event's currency), saved with the delegate.
+  - Its code was a hash of the application id with 9,000 possible values, and it is the badge table's key: two badges would soon have collided. It now comes from the server's random ids (`EXC-DR-` and eight characters). M2.1 still owns the badge's final form.
+  - The NDA's version is named after the event (`EAGC-NDA v1.2`), not the demo.
+- **The applicant's own name is now required to submit:** a badge is issued in that name, and the walk-through's partner had submitted without one (its badge has no name).
+- **KYC uploads, the NDA and autosave** run on their one application (the autosave's lock, 14 Nov).
+- **Tested:** 13 API tests (who may decide, recommendations, conditions and their dates, the second decider for a large ask and for a decline, readiness and its blockers, a provider from submission through KYC uploads, the NDA, the checks, a sanctions match, verification and its badge, the applicant's view) and 2 rules tests (the event's own tier, random codes). Walked in the browser on the walk-through database's real event: Savanna Freight submitted as a partner, uploaded its KYC and signed; the lead checked, screened, confirmed and verified it, and the event's tier and the badge appeared; the lead approved Kilimo Fresh on a condition, and Neema saw the decision at phone width.
+- **Open:**
+  - **The NDA's text.** The applicant accepts "the agreement" by name and version; Algotech must supply the agreement itself (a PDF linked from that card) before providers sign for real.
+  - The lead's fee waiver, and paying, are M1.7.
+  - The teaser, re-review after a material change and the matching profile are later milestones.
 
 **Notes on M1.4, done 12 Nov 2026:**
 - **Sending:** Zoho over SMTP (D7), from `Events <noreply@algotech.co.ke>`. Sign-in codes go straight out from the API; every other message goes through the outbox and the worker. `npm run mail:check` logs in without sending.

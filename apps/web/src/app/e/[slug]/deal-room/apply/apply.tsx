@@ -234,7 +234,11 @@ function Submitted({ app }: { app: Pick<MyApplication, "ref" | "submittedAt" | "
         {app.form.org.name || "Your application"} is in, with reference <strong className="font-mono">{app.ref}</strong>
         {app.submittedAt ? `, submitted ${fmtStamp(app.submittedAt)}` : ""}.
       </p>
-      <p className="mt-2 text-[14px] text-slate">Status: {app.status}. The Deal Room team reviews applications in the order they arrive and writes to you by email; keep the reference for any question.</p>
+      <p className="mt-2 text-[14px] text-slate">
+        {app.status === "Decided"
+          ? "Status: decided, below. Keep the reference for any question."
+          : `Status: ${app.status}. The Deal Room team reviews applications in the order they arrive and writes to you by email; keep the reference for any question.`}
+      </p>
       {answered?.answeredAt && <p className="mt-2 text-[14px] text-slate">You answered the review team&rsquo;s request on {fmtStamp(answered.answeredAt)}.</p>}
     </Card>
   );
