@@ -18,6 +18,7 @@ import { originCheck } from "./http/origin";
 import { loadSession } from "./http/session";
 import { mailerFor, type Mailer } from "./mail/mailer";
 import { applyModule } from "./modules/apply";
+import { badgesModule } from "./modules/badges";
 import { authModule } from "./modules/auth";
 import { organisersModule } from "./modules/organisers";
 import { platformModule } from "./modules/platform";
@@ -103,6 +104,7 @@ export function createApp({ config, db, mailer, now, storage, mpesa, callbackBas
   const allowUnscanned = config.APP_ENV ? config.APP_ENV !== "production" : config.NODE_ENV !== "production";
   app.use("/v1/dealroom", dealRoomModule({ db, now: rulesNow, storage: files, allowUnscanned }));
   app.use("/v1/apply", applyModule({ db, now: rulesNow, storage: files, uploadMaxBytes, payMethods: payments.service.methods }));
+  app.use("/v1/badges", badgesModule({ db, now: rulesNow }));
   app.use("/v1/pay", payments.pay);
   const organisers = organisersModule({ db, config, auth: auth.service, storage: files, now: rulesNow, uploadMaxBytes, allowUnscanned });
   app.use("/v1", organisers.routes);

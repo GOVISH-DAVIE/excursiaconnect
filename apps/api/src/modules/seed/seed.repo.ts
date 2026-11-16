@@ -84,7 +84,7 @@ export function createSeedRepo(db: Db): SeedRepo {
           await tx.event.createMany({ data: core.events });
           await tx.tier.createMany({ data: core.tiers });
           await tx.delegate.createMany({ data: core.delegates });
-          await tx.badge.createMany({ data: core.badges });
+          await tx.badge.createMany({ data: core.badges.map(({ revoked, ...b }) => ({ ...b, revokedAt: revoked ? new Date() : null })) });
           await tx.user.createMany({ data: users });
           await tx.membership.createMany({ data: memberships });
           for (const dr of dealRooms) {

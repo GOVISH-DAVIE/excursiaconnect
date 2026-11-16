@@ -6,7 +6,8 @@ import { ApplicationsQuery, AssignReviewerInput, EventParams, type ApplicationSu
 import {
   AppIdParams, CheckKycInput, ConditionParams, DecideInput, DocParams, ReadinessInput, RecommendInput, RequestInfoInput, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput, WaiveFeeInput,
 } from "@excursia/contracts/review";
-import { DealRoomSettingsInput } from "@excursia/contracts/onboarding";
+import { DealRoomSettingsInput, ExtendRetentionInput } from "@excursia/contracts/onboarding";
+import { BadgeDetailsInput, ReissueBadgeInput } from "@excursia/contracts/badge";
 import { sessionOf } from "../../http/session";
 import type { DealRoomService } from "./dealroom.service";
 
@@ -88,6 +89,16 @@ export function createDealRoomController(service: DealRoomService) {
       res.json(await service.waiveFee(sessionOf(res), eventId, appId, WaiveFeeInput.parse(req.body), ip(req)));
     }) satisfies RequestHandler,
 
+    badgeDetails: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.set("Cache-Control", "private, no-store").json(await service.badgeDetails(sessionOf(res), eventId, appId, BadgeDetailsInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    reissueBadge: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.set("Cache-Control", "private, no-store").json(await service.reissueBadge(sessionOf(res), eventId, appId, ReissueBadgeInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
     documentLink: (async (req, res) => {
       const { eventId, appId, docId } = DocParams.parse(req.params);
       res.set("Cache-Control", "private, no-store").json(await service.documentLink(sessionOf(res), eventId, appId, docId, ip(req)));
@@ -101,6 +112,11 @@ export function createDealRoomController(service: DealRoomService) {
     saveSettings: (async (req, res) => {
       const { eventId } = EventParams.parse(req.params);
       res.json(await service.saveSettings(sessionOf(res), eventId, DealRoomSettingsInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    extendRetention: (async (req, res) => {
+      const { eventId } = EventParams.parse(req.params);
+      res.json(await service.extendRetention(sessionOf(res), eventId, ExtendRetentionInput.parse(req.body), ip(req)));
     }) satisfies RequestHandler,
 
     messages: (async (req, res) => {

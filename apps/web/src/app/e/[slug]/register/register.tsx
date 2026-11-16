@@ -11,6 +11,10 @@ import type { Category, PaymentMethod } from "@excursia/domain/types";
 
 const steps = ["Ticket", "Your details", "Payment", "Done"];
 
+// the prototype's ids and badge numbers, made when the form is sent (never during render)
+const stampNow = () => Date.now().toString(36);
+const badgeNumber = () => Math.floor(1000 + Math.random() * 8999);
+
 export function Register({ slug }: { slug: string }) {
   const { state, dispatch } = useStore();
   const router = useRouter();
@@ -45,7 +49,7 @@ export function Register({ slug }: { slug: string }) {
 
   function finish() {
     if (!tier) return;
-    const stamp = Date.now().toString(36);
+    const stamp = stampNow();
     const needsApproval = tier.approval === "organiser";
     const statusFor = (t: typeof tier): "Waitlisted" | "Pending" | "Confirmed" | "Awaiting payment" => (t.cap - t.sold <= 0 ? "Waitlisted" : t.approval === "organiser" ? "Pending" : t.price === 0 || method !== "bank" ? "Confirmed" : "Awaiting payment");
     const people = [
@@ -75,7 +79,7 @@ export function Register({ slug }: { slug: string }) {
           zoneLog: [],
           sessions: [],
           bookable: false,
-          badgeCode: `EXC-${p.id.slice(2, 8).toUpperCase()}-${Math.floor(1000 + Math.random() * 8999)}`,
+          badgeCode: `EXC-${p.id.slice(2, 8).toUpperCase()}-${badgeNumber()}`,
           answers: p.id === `d_${stamp}` ? answers : undefined,
         },
         order,

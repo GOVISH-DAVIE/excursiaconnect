@@ -3,12 +3,13 @@
 /**
  * The Deal Room's settings, as its lead sets them up: the missions applicants apply under, the tracks within them,
  * when applications open and close, and how long an applicant has to answer a request. Applications open once
- * these are set and the event is live. The rubric is the platform's standard one for now (shown, not edited).
+ * these are set and the event is live. The rubric is the platform's standard one for now (shown, not edited). And
+ * how long the applicants' documents are kept, which only the lead extends, with a reason.
  */
 import { useState } from "react";
 import type { DealRoomSettings, DealRoomSettingsInput } from "@excursia/contracts/onboarding";
 import { PageHeader, Section } from "@/components/ui";
-import { useDealRoomSettings, useSaveSettings } from "@/features/onboarding/hooks/use-onboarding";
+import { useDealRoomSettings, useExtendRetention, useSaveSettings } from "@/features/onboarding/hooks/use-onboarding";
 import { Failed, Gaps, History, Loading } from "../../bits";
 
 type Mission = DealRoomSettings["missions"][number];
@@ -18,7 +19,16 @@ export function Settings({ eventId }: { eventId: string }) {
   const q = useDealRoomSettings(eventId);
   if (q.isPending) return <Loading />;
   if (q.isError) return <Failed error={q.error} />;
-  return <Form key={q.data.log.length} eventId={eventId} s={q.data} />;
+  // the form starts again from what was saved after each save; the retention section has its own state, so an
+  // extension never throws away edits in progress above it
+  return (
+    <>
+      <Form key={q.data.log.filter((l) => !l.what.startsWith("Document retention")).length} eventId={eventId} s={q.data} />
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_340px]">
+        <Retention eventId={eventId} r={q.data.retention} />
+      </div>
+    </>
+  );
 }
 
 function Form({ eventId, s }: { eventId: string; s: DealRoomSettings }) {
@@ -139,5 +149,50 @@ function Form({ eventId, s }: { eventId: string; s: DealRoomSettings }) {
         </div>
       </form>
     </>
+  );
+}
+
+/** A date with its year: retention runs years ahead. */
+const longDate = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+/** How long the documents are kept (PRD, Document retention), and the lead's extension. */
+function Retention({ eventId, r }: { eventId: string; r: DealRoomSettings["retention"] }) {
+  const extend = useExtendRetention(eventId);
+  const [months, setMonths] = useState("6");
+  const [reason, setReason] = useState("");
+  return (
+    <Section title="Document retention">
+      <p className="text-[14px]">
+        Applicants&apos; documents are deleted on <strong className="font-medium">{longDate(r.deleteOn)}</strong>: {r.months} months after the follow-up period ends ({longDate(r.conversionEnd)}). The
+        privacy notice tells applicants so.
+      </p>
+      {r.canExtend ? (
+        <form
+          className="mt-3 grid gap-2 sm:grid-cols-[140px_1fr_auto]"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (reason.trim()) extend.mutate({ months: Number(months), reason }, { onSuccess: () => setReason("") });
+          }}
+        >
+          <select className="input h-9" aria-label="Extend by" value={months} onChange={(e) => setMonths(e.target.value)}>
+            {[3, 6, 12, 24].map((m) => (
+              <option key={m} value={m}>
+                {m} more months
+              </option>
+            ))}
+          </select>
+          <input className="input h-9" aria-label="Why they are kept longer" placeholder="Why, for example a deal still in diligence" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <button className="btn-secondary btn-sm" disabled={extend.isPending || !reason.trim()}>
+            {extend.isPending ? "Extending…" : "Extend"}
+          </button>
+          <p className="text-[12px] text-slate sm:col-span-3">Every document still kept moves to the new date; the reason goes in the changes. Documents already deleted stay deleted.</p>
+          <div className="sm:col-span-3">
+            <Failed error={extend.error} />
+          </div>
+        </form>
+      ) : (
+        <p className="mt-2 text-[13px] text-slate">Only the lead can keep them longer.</p>
+      )}
+    </Section>
   );
 }

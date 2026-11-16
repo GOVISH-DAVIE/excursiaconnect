@@ -17,8 +17,11 @@ export type CoreRows = {
   events: Prisma.EventCreateManyInput[];
   tiers: Prisma.TierCreateManyInput[];
   delegates: Prisma.DelegateCreateManyInput[];
-  badges: Prisma.BadgeCreateManyInput[];
+  /** Every badge a delegate holds; a cancelled delegate's is revoked, and the database stamps when (revoked_at). */
+  badges: BadgeRow[];
 };
+
+export type BadgeRow = { code: string; delegateId: string; eventId: string; revoked: boolean };
 
 /** A record as JSON for a `record` column. The rules' records are plain data, so this loses nothing. */
 export const json = <T>(value: T) => value as unknown as Prisma.InputJsonValue;
@@ -52,7 +55,7 @@ export function coreToRows(core: CoreRecords, opts: { demo: boolean }): CoreRows
       exhibitorId: d.exhibitorId ?? null,
       record: json(d),
     })),
-    badges: core.delegates.filter((d) => d.badgeCode && !d.cancelled).map((d) => ({ code: d.badgeCode, delegateId: d.id, eventId: d.eventId })),
+    badges: core.delegates.filter((d) => d.badgeCode).map((d) => ({ code: d.badgeCode, delegateId: d.id, eventId: d.eventId, revoked: !!d.cancelled })),
   };
 }
 

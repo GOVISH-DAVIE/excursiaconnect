@@ -6,6 +6,7 @@
  * side is in apply.ts.
  */
 import { z } from "zod";
+import { StaffBadge } from "./badge";
 import { KycItem } from "./apply";
 import { StaffMember } from "./dealroom";
 
@@ -32,7 +33,9 @@ export const ReviewView = z.object({
   now: z.string(),
   me: StaffMember,
   staff: z.array(StaffMember),
-  can: z.object({ review: z.boolean(), assign: z.boolean(), decideExpiry: z.boolean(), decide: z.boolean(), readiness: z.boolean(), waiveFee: z.boolean() }),
+  /** the participant's badge, once issued (M2.1) */
+  badge: StaffBadge.nullable(),
+  can: z.object({ review: z.boolean(), assign: z.boolean(), decideExpiry: z.boolean(), decide: z.boolean(), readiness: z.boolean(), waiveFee: z.boolean(), badge: z.boolean() }),
 });
 export type ReviewView = z.infer<typeof ReviewView>;
 

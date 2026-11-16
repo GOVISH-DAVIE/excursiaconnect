@@ -53,6 +53,15 @@ export function useOpenKycDoc(organiserId: string) {
   });
 }
 
+/** The lead keeps the Deal Room's documents longer, with a reason: the answer is the settings as they now are. */
+export function useExtendRetention(eventId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof onboardingApi.extendRetention>[1]) => onboardingApi.extendRetention(eventId, input),
+    onSuccess: (view) => qc.setQueryData(onboardingKeys.settings(eventId), view),
+  });
+}
+
 export function useSaveSettings(eventId: string) {
   const qc = useQueryClient();
   return useMutation({

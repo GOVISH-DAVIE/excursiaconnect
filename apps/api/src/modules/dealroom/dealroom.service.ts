@@ -8,9 +8,11 @@ import type { Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor } from "@excursia/domain/ctx";
 import { decisionOf, drCan, roleOf } from "@excursia/domain/dealroom/logic";
 import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
-import type { DealRoomSettings, DealRoomSettingsInput } from "@excursia/contracts/onboarding";
+import type { DealRoomSettings, DealRoomSettingsInput, ExtendRetentionInput } from "@excursia/contracts/onboarding";
+import { retentionDate } from "@excursia/domain/dealroom/apply";
 import type { DrApplication, DrStaff } from "@excursia/domain/dealroom/types";
-import type { AppState } from "@excursia/domain/types";
+import type { AppState, Delegate } from "@excursia/domain/types";
+import type { BadgeDetailsInput, ReissueBadgeInput, StaffBadge } from "@excursia/contracts/badge";
 import type { Storage } from "../../storage/storage";
 import type { DrConfigRecord } from "./dealroom.mapper";
 import { HttpError } from "../../http/errors";
@@ -73,14 +75,46 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
     const [found, all] = await Promise.all([repo.forReview(eventId, appId), repo.listStaff(eventId)]);
     if (!found) throw new HttpError("not_found", "No such application in this Deal Room.");
     const cfg = (found.config as unknown as DrConfigRecord).config;
+    const app = found.record as unknown as DrApplication;
     return {
       application: found.record as unknown as ReviewView["application"],
       config: { rubric: cfg.rubric, rfiDays: cfg.rules.rfiDays, missions: cfg.missions, tracks: cfg.tracks, secondReview: cfg.secondReview },
       now: nairobiNow(now()),
       me: toStaff(staff),
       staff: all.map((s) => toStaff(s.record as unknown as DrStaff)),
-      can: { review: drCan(staff, "review"), assign: drCan(staff, "assign"), decideExpiry: staff.role === "Lead" && staff.active, decide: drCan(staff, "decide"), readiness: drCan(staff, "readiness"), waiveFee: staff.role === "Lead" && staff.active },
+      badge: app.delegateId ? await badgeOf(eventId, app.delegateId) : null,
+      can: {
+        review: drCan(staff, "review"), assign: drCan(staff, "assign"), decideExpiry: staff.role === "Lead" && staff.active, decide: drCan(staff, "decide"), readiness: drCan(staff, "readiness"),
+        waiveFee: staff.role === "Lead" && staff.active, badge: drCan(staff, "liveboard"),
+      },
     };
+  }
+
+  async function badgeOf(eventId: string, delegateId: string): Promise<StaffBadge | null> {
+    const row = await repo.delegateOf(eventId, delegateId);
+    if (!row) return null;
+    const d = row.record as unknown as Delegate;
+    return { code: d.badgeCode, status: d.cancelled ? "revoked" : "valid", name: d.name, jobTitle: d.jobTitle, accredited: d.accredited };
+  }
+
+  /**
+   * The desk's change to a badge: the lead, operations or a coordinator, whom the rules name (M2.1). Any of the team
+   * may ask; the rules refuse the others. It answers with the badge, so a desk without the review page can use it.
+   */
+  async function onBadge(session: Resolved, eventId: string, appId: string, ip: string | null, action: Action): Promise<StaffBadge> {
+    const { actor } = await staffActor(session, eventId);
+    const state = await commands.run({
+      eventId,
+      actor,
+      userId: session.user.id,
+      ip,
+      owned: (s) => {
+        if (!s.dealRoom.apps.some((a) => a.id === appId)) throw new HttpError("not_found", "No such application in this Deal Room.");
+      },
+      actions: () => [action],
+    });
+    const d = state.delegates.find((x) => x.id === state.dealRoom.apps.find((a) => a.id === appId)!.delegateId)!;
+    return { code: d.badgeCode, status: d.cancelled ? "revoked" : "valid", name: d.name, jobTitle: d.jobTitle, accredited: d.accredited };
   }
 
   /** A reviewer's change to one application: in this event, through the rules, then the screen's new view. */
@@ -177,6 +211,14 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
     waiveFee: (session: Resolved, eventId: string, appId: string, input: WaiveFeeInput, ip: string | null) =>
       act(session, eventId, appId, ip, () => [{ type: "dr/waiveFee", appId, reason: input.reason }]),
 
+    /* ----- M2.1: the badge, at the desk ----- */
+
+    badgeDetails: (session: Resolved, eventId: string, appId: string, input: BadgeDetailsInput, ip: string | null) =>
+      onBadge(session, eventId, appId, ip, { type: "dr/badgeDetails", appId, name: input.name, jobTitle: input.jobTitle }),
+
+    reissueBadge: (session: Resolved, eventId: string, appId: string, input: ReissueBadgeInput, ip: string | null) =>
+      onBadge(session, eventId, appId, ip, { type: "dr/reissueBadge", appId, reason: input.reason }),
+
     /* ----- M1.6: a provider's verification ----- */
 
     /** One KYC document, looked at and found in order. */
@@ -231,7 +273,26 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
         gaps: dealRoomGaps(cfg),
         canEdit: drCan(staff, "configure"),
         log: [...cfg.log].reverse(),
+        retention: { months: cfg.rules.retentionMonths, conversionEnd: cfg.rules.conversionEnd, deleteOn: retentionDate(cfg.rules), canExtend: staff.role === "Lead" && staff.active },
       };
+    },
+
+    /**
+     * The lead keeps the documents longer, with a reason (PRD, Document retention): the months go up, and every
+     * document still kept moves to the new date in the same transaction. Allowed after the Deal Room is archived.
+     */
+    async extendRetention(session: Resolved, eventId: string, input: ExtendRetentionInput, ip: string | null): Promise<DealRoomSettings> {
+      const { actor } = await staffActor(session, eventId);
+      await commands.run({
+        eventId,
+        actor,
+        userId: session.user.id,
+        ip,
+        actions: () => [{ type: "dr/retention", eventId, months: input.months, reason: input.reason }],
+        // the end of that day in Nairobi, as uploads are given (apply.service.ts)
+        retentionUntil: (after) => new Date(`${retentionDate(after.dealRoom.configs[eventId].rules)}T23:59:59+03:00`),
+      });
+      return this.settings(session, eventId);
     },
 
     /** The lead sets the missions, tracks and dates, through the rules' own dr/config (lead only, logged). */

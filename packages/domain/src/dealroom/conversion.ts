@@ -2,7 +2,7 @@
  * Cut 3: what happens to an opportunity after the summit (PRD Conversion tracking). The rules live in
  * `applyStep`, which both staff actions and the seeded timeline go through, so neither can skip one.
  */
-import type { Ctx } from "../ctx";
+import { no, type Ctx } from "../ctx";
 import type { AppState } from "../types";
 import { CLOSE_REASONS, OPEN_STAGES, staffOf, drCan, oppOpen, oppOverdue, oppParties, staffName } from "./logic";
 import type { CloseReason, DealRoomState, DrDocument, DrOpportunity, DrOppOutcome, DrScriptStep, OppStage, OutcomeKind } from "./types";
@@ -102,8 +102,12 @@ export function drConvReducer(state: AppState, action: DrConvAction, ctx: Ctx): 
   const me = staffOf(dr, ctx.actor);
 
   if (action.type === "dr/retention") {
+    // documents are deleted retentionMonths after the conversion end, unless the lead extends it with a reason (PRD)
     const c = dr.configs[action.eventId];
-    if (!c || !drCan(me, "conversion") || action.months < 1 || !action.reason.trim()) return state;
+    if (!c) return no(ctx, state, "No Deal Room for this event");
+    if (me?.role !== "Lead" || !me.active) return no(ctx, state, "Only the lead can extend document retention");
+    if (!Number.isInteger(action.months) || action.months < 1 || action.months > 24) return no(ctx, state, "Extend by 1 to 24 months at a time");
+    if (!action.reason.trim()) return no(ctx, state, "An extension needs a reason");
     const what = `Document retention extended by ${action.months} months: ${action.reason.trim()}`;
     return withDr(state, { ...dr, configs: { ...dr.configs, [c.eventId]: { ...c, rules: { ...c.rules, retentionMonths: c.rules.retentionMonths + action.months }, log: [...c.log, { at, by: me!.id, what }] } }, adminLog: [{ at, by: me!.id, what }, ...dr.adminLog] });
   }

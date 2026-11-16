@@ -6,6 +6,9 @@ import { Empty, KV, PageHeader, Section, StatusPill, Tone } from "@/components/u
 import { money, useStore } from "@/lib/store";
 import type { Category } from "@excursia/domain/types";
 
+/** A reissued badge's new number, made when the button is pressed (the prototype's). */
+const reissuedCode = () => `EXC-RE-${Math.floor(1000 + Math.random() * 8999)}`;
+
 export function DelegateRecord({ eventId, delegateId }: { eventId: string; delegateId: string }) {
   const { state, dispatch, hydrated } = useStore();
   const [editing, setEditing] = useState(false);
@@ -56,7 +59,7 @@ export function DelegateRecord({ eventId, delegateId }: { eventId: string; deleg
             <Link href={`/badge/${d.id}`} target="_blank" className="btn-secondary">
               Open badge
             </Link>
-            <button className="btn-secondary" onClick={() => dispatch({ type: "updateDelegate", delegateId: d.id, patch: { badgeCode: `EXC-RE-${Math.floor(1000 + Math.random() * 8999)}` } })}>
+            <button className="btn-secondary" onClick={() => dispatch({ type: "updateDelegate", delegateId: d.id, patch: { badgeCode: reissuedCode() } })}>
               Reissue badge
             </button>
             {d.status === "Pending" && (

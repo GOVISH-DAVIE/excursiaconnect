@@ -19,6 +19,8 @@ import type { DealRoomState, Decision, DrApplication, DrConfig, DrStaff, Layer, 
 import { fmtStamp } from "@excursia/domain/time";
 import { DecisionPill, DocLine, Labeled, Pill, ReadinessPill, StatusPill, typeLabel } from "@/app/dealroom/bits";
 import { useOpenDocument, useReview, useReviewAction, type ReviewAction } from "@/features/dealroom/hooks/use-review";
+import { dealRoomKeys } from "@/features/dealroom/queries";
+import { useDeskBadge } from "@/features/badges/hooks/use-badges";
 
 /** What the tabs need, from the server's view: the record, the rules' config and clock, who's who, and what I may do. */
 type Ctx = {
@@ -29,6 +31,9 @@ type Ctx = {
   /** the signed-in staff member's id: a second decider must be someone else */
   me: string;
   can: ReviewView["can"];
+  eventId: string;
+  /** the participant's badge, once issued (M2.1) */
+  badge: ReviewView["badge"];
   act: (a: ReviewAction, after?: () => void) => void;
   pending: boolean;
   error: Error | null;
@@ -62,6 +67,8 @@ export function Review({ eventId, appId }: { eventId: string; appId: string }) {
     now: v.now,
     me: v.me.id,
     can: v.can,
+    eventId,
+    badge: v.badge,
     act: (a, after) => action.mutate(a, { onSuccess: () => after?.() }),
     pending: action.isPending,
     error: action.error,
@@ -545,6 +552,7 @@ function DecisionTab() {
         </Section>
 
         {qualified(app) && app.fee && <FeeNote />}
+        <BadgeNote />
 
         {qualified(app) && (
           <Section title="Readiness" action={<ReadinessPill app={app} />}>
@@ -828,7 +836,80 @@ function VerificationTab() {
           <p className="text-[13px] text-slate">{drafting ? "The applicant is still drafting." : can.review ? "A decider records the verification." : ""}</p>
         )}
       </Section>
+      <BadgeNote />
     </div>
+  );
+}
+
+/**
+ * The participant's badge (M2.1): its code and the name printed on it. The lead (and, from the desk, operations and
+ * the coordinators) corrects the name or title at any time, and reissues a lost or shared badge with a reason.
+ */
+function BadgeNote() {
+  const { app, eventId, badge, can } = useCtx();
+  const desk = useDeskBadge(eventId, app.id, dealRoomKeys.review(eventId, app.id));
+  const [mode, setMode] = useState<"view" | "edit" | "reissue">("view");
+  const [name, setName] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
+  const [reason, setReason] = useState("");
+  if (!badge) return null;
+  const valid = badge.status === "valid";
+  const error = desk.details.error ?? desk.reissue.error;
+  const busy = desk.details.isPending || desk.reissue.isPending;
+  return (
+    <Section title="Badge" action={<Pill tone={valid ? "ok" : "bad"}>{valid ? (badge.accredited ? "Accredited" : "Issued") : "Revoked"}</Pill>}>
+      <KV
+        rows={[
+          ["Code", <span key="c" className="font-mono">{badge.code}</span>],
+          ["Name on it", badge.name],
+          ["Job title", badge.jobTitle || "–"],
+        ]}
+      />
+      {!valid && <p className="mt-2 text-[13px] text-slate">Revoked by the decision in force; a decision that qualifies the application again revives it.</p>}
+      {valid && can.badge && mode === "view" && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button className="btn-secondary btn-sm" onClick={() => { setName(badge.name); setJobTitle(badge.jobTitle); desk.details.reset(); setMode("edit"); }}>
+            Correct the name
+          </button>
+          <button className="btn-secondary btn-sm" onClick={() => { setReason(""); desk.reissue.reset(); setMode("reissue"); }}>
+            Reissue the badge
+          </button>
+        </div>
+      )}
+      {valid && can.badge && mode === "edit" && (
+        <form
+          className="mt-3 grid gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            desk.details.mutate({ name, jobTitle }, { onSuccess: () => setMode("view") });
+          }}
+        >
+          <input className="input h-9 text-[13px]" aria-label="Name on the badge" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
+          <input className="input h-9 text-[13px]" aria-label="Job title on the badge" placeholder="Job title" value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} maxLength={80} />
+          <div className="flex gap-2">
+            <button className="btn-primary btn-sm" disabled={busy || name.trim().length < 2}>Save</button>
+            <button type="button" className="btn-quiet btn-sm" onClick={() => setMode("view")}>Cancel</button>
+          </div>
+        </form>
+      )}
+      {valid && can.badge && mode === "reissue" && (
+        <form
+          className="mt-3 grid gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (reason.trim()) desk.reissue.mutate({ reason }, { onSuccess: () => setMode("view") });
+          }}
+        >
+          <input className="input h-9 text-[13px]" aria-label="Why it is reissued" placeholder="Why, for example lost on the first morning" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} />
+          <p className="text-[12px] text-slate">The participant gets a new code by email; the old one stops opening doors at once.</p>
+          <div className="flex gap-2">
+            <button className="btn-primary btn-sm" disabled={busy || !reason.trim()}>Reissue</button>
+            <button type="button" className="btn-quiet btn-sm" onClick={() => setMode("view")}>Cancel</button>
+          </div>
+        </form>
+      )}
+      {error && mode !== "view" && <p className="mt-2 text-[13px] text-bad" role="alert">{error.message}</p>}
+    </Section>
   );
 }
 

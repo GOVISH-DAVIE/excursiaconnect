@@ -303,7 +303,7 @@ What applicants and reviewers need on day one comes first. Anything that can fol
 | M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record **Done 11 Nov 2026** for local and the commands staging and production use; staging itself comes with M0.6. Notes below |
 | M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL **Done 11 Nov 2026** in the API; the sign-in screens come with M0.5's client foundations and staging with M0.6. Notes below |
 | M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the module pattern in the API (`routes`, `controller`, `service`, `repo`, as `health` already does); the first POST and GET routes with their contracts; the Origin check on writes; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` client, `ApiError`); the feature-folder pattern in the web app | Assigning a reviewer runs from a screen through a hook, the API client, the Express route, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; a write from another origin is refused **Done 11 Nov 2026**, apart from moving the prototype's own screens, which goes module by module from M1.1. Notes below |
-| M0.6 | **CI and staging**: type-check, lint, tests and both builds on every push; staging deployed behind nginx as in `deploy.md`, with the web app and the API on their two names | CI is green; both names are reachable over HTTPS with the security headers; the deploy switches the API and then the web app with no failed request |
+| M0.6 | **CI and staging**: type-check, lint, tests and both builds on every push; staging deployed behind nginx as in `deploy.md`, with the web app and the API on their two names | CI is green; both names are reachable over HTTPS with the security headers; the deploy switches the API and then the web app with no failed request **CI built 14 Nov 2026** (`.github/workflows/ci.yml`), rehearsed green in a clean clone; staging waits for a server and its two names. Notes below |
 
 **Notes on M0.0, done 11 Nov 2026:**
 - **The rules are importable on the server:** `src/lib/core/{reducer,scan,orders}.ts` plus `src/lib/ctx.ts`. The client store is a thin provider.
@@ -556,7 +556,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - **A failed file doesn't count:** the applicant and the organiser see "Failed the virus check" on it, the rules' gaps list the document again, and it is dropped from the draft on the next save or submission (from KYC when it is sent). The form looks again every few seconds while a file is being checked. Nobody can open it.
   - **Retention:** a Deal Room document is kept until the Deal Room's retention months (12) after its conversion end, set when it is uploaded; the worker then deletes the bytes and keeps the row. KYC documents have no date yet (kept while the organiser works with Algotech). Files uploaded before today have no date.
   - **Consent:** documents are opened today only by their owner's side, the Deal Room's reviewers and Algotech, through two-minute links in the audit log. The per-counterparty consent check and the access log belong with M3.1, when investors and partners first reach seekers' documents.
-  - **Not yet:** the lead extending retention with a reason (PRD); an applicant opening their own uploaded documents; changing the retention months doesn't move dates already set.
+  - **Not yet:** an applicant opening their own uploaded documents. (The lead's extension, which moves the dates already set, came on 14 Nov: see M1.7's notes.)
 - **M1.5's buildable part, 12 Nov 2026:**
   - **Privacy notice** at `/privacy`, linked from sign-in, organiser sign-up and the apply form: what is collected, why, who sees it, how long it is kept (the periods the platform enforces), security, rights under the Act and the ODPC. Four facts only Algotech can confirm sit in `apps/web/src/lib/privacy.ts`: the registered name, the privacy mailbox (`privacy@algotech.co.ke` is a placeholder), the hosting country (D6), the ODPC registration. The text should be read by Algotech's counsel before 15 Dec.
   - **`GET /health/queues`:** 503 with the reason when an email or a virus scan has waited over two minutes (the worker stopped), more than 20 emails failed in a day, or a file is past its retention date. Counts only. Poll it with `/health/ready`.
@@ -605,6 +605,17 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - suspending an organiser or an event (PA-9), and reopening a verified KYC when its details change
   - amounts processed and commission earned on the overview (PA-5), which wait for payments
   - Algotech's real price list
+
+**Notes on M0.6's CI and the retention extension, 14 Nov 2026:**
+- **CI** (`.github/workflows/ci.yml`), on every push and pull request: PostgreSQL 15 as a service, provisioned by `scripts/db/setup-local.sh` as a developer's is (the four roles and their rights), both databases migrated, then `npm run typecheck`, `npm run lint`, `npm test` (the database suites included) and `npm run build`. Rehearsed step for step in a clean clone against a fresh PostgreSQL 15: all green, 376 tests, in about four minutes.
+  - Lint now passes with no errors: the four the prototype carried were `Date.now` and `Math.random` in click handlers the rule couldn't tell from rendering (now module helpers) and `useToday` setting state in an effect (now `useSyncExternalStore`, the prerendered page still getting no date).
+  - Still to do for M0.6: staging itself (a server, its two names and TLS), and a branch rule on GitHub requiring the check.
+- **The lead extends document retention** (PRD, Document retention), on the team's settings page:
+  - The settings say when the documents are deleted (the date, with its year) and how it's worked out; only the lead extends it, by 3 to 24 months, with a reason that goes in the changes.
+  - The rule (`dr/retention`) is the lead's alone, says why it refuses, and works after the Deal Room is archived.
+  - Every Deal Room document still kept moves to the new date in the same transaction; deleted ones stay deleted. On the walk-through database that included four uploads from before retention dates existed, which now have one.
+  - Every change to a Deal Room's settings is now audited (`dr_config`), the settings screen's saves included.
+  - Tested: 4 API tests (the settings' date, who may, the bounds, the move, the audit, archived) and in the browser on the walk-through event.
 
 **Notes on M1.7, M-Pesa first, built 14 Nov 2026:**
 - **Paying:** an approved seeker's status page shows the fee (USD 250 is KES 32,500 by M-Pesa) and a "Pay by M-Pesa" button with their number. The STK push puts the request on the phone; the page then shows "Check your phone" and updates by itself.
@@ -697,12 +708,57 @@ Each milestone from here on builds its feature the same way, as in [architecture
 
 | # | Milestone | Done when |
 | --- | --- | --- |
-| M2.1 | **Badges and delegates**: badge page and email, random badge codes, delegate edits | A paid participant gets a working badge by email and SMS |
+| M2.1 | **Badges and delegates**: badge page and email, random badge codes, delegate edits | A paid participant gets a working badge by email and SMS **Built 16 Nov 2026 for the Deal Room:** the badge page, its email, the name and title corrected by the participant or the desk, reissue, revocation stamped; SMS waits for the sender ID, and other events' delegates for M2.4's registration. Notes below |
 | M2.2 | **Accreditation and scanning**: scanner devices and PIN sign-in with lockout, desk accreditation, zone and room doors, anti-passback through `Presence`, atomic capacity, PIN overrides, the offline queue with idempotent sync | 50 scans a minute on two devices with one offline: no duplicates and no over-capacity after sync; the prototype's demo PINs and the applications' invite tokens no longer saved in browser storage (found by the security pass, 11 Nov 2026) |
 | M2.3 | **Organisers and events**: KYC and DPA, the event builder, media uploaded straight to storage, approval by Algotech | An organiser builds and publishes an event on staging **Core brought forward and done 11 Nov 2026** (self sign-up, KYC, Algotech's checks, events from draft to live, the Deal Room's set-up); the event builder's tiers, sessions and media remain. Notes under Phase 1 |
 | M2.4 | **Registration and orders**: pricing, promo and status worked out on the server; M-Pesa and card checkout; refunds | A delegate registers and pays; a crafted request can't change the price |
 | M2.5 | **Money and comms**: commission, payouts, reconciliation; memberships, shifts, campaigns | A payout run matches the payments to the shilling |
 | M2.6 | **Visitor log**: moved from SQLite to PostgreSQL; IP taken only from `X-Real-IP`; `/adminwatch` behind staff sign-in with TOTP and an IP allow-list | Visits record and replay from PostgreSQL; `/adminwatch` refuses anyone without staff sign-in |
+
+**Notes on M2.1, the Deal Room badge, 16 Nov 2026:**
+
+- **The badge page:** `/e/<event>/badge`.
+  - The participant signs in with the email they applied with, as they did to apply. Participant sessions last 7 days idle and 30 days at most, so one sign-in before the summit covers it.
+  - Each of their applications that holds a badge shows:
+    - the event, its dates and venue
+    - the name, title and organisation
+    - the QR and the code, with whether the desk has accredited them yet
+    - "First stop: the Deal Room desk" until it has
+  - Print or save as PDF. The page works at phone width.
+  - A revoked badge shows as revoked, with no QR.
+  - API: `GET /v1/badges/:slug`, the holder's own only. Anyone else's comes back empty, and a staff account is refused.
+- **The email:** the messages that announce a badge link to the page. The outbox turns `/dr/<id>?badge=1` into `/e/<slug>/badge`. They are:
+  - payment received
+  - fee waived
+  - verified
+  - reissued
+  - an approval that settles at once (no fee): a new "Your Deal Room badge is ready"
+  
+  The email carries no code: the code is a door credential, so it stays on the signed-in page (PRD Notifications: no private data). The application's outcome card now says the badge is ready and links to it.
+- **The name and title on it** (`dr/badgeDetails`):
+  - The participant corrects them (`PATCH /v1/badges/:slug/:appId`) until the organiser locks profiles for printing (`profileLocked`, OS-10).
+  - The desk (the lead, operations, a coordinator) corrects them at any time (`PATCH …/applications/:appId/badge`).
+  - The organisation comes from the application. Each change is noted in the application's history and audited.
+- **Reissue** (`dr/reissueBadge`, `POST …/applications/:appId/badge/reissue`): the desk, with a reason.
+  - It gives a new code. The old code is deleted from the badge table in the same transaction, so a scanner no longer finds it.
+  - The history keeps the old code, and the participant is emailed.
+  - Operations and coordinators can reissue through the API. Their screen comes with the desk in M2.2; on the review page only the lead sees the Badge section (Decision tab for a business, Verification tab for a provider).
+- **Codes:** still `EXC-DR-` and eight characters from the server's random ids. They are hexadecimal, so there is no O or I to misread at a desk, and there are about 4 billion of them.
+  - Saving a new code never takes over another delegate's row. The insert only updates a row that already belongs to the same delegate; otherwise the command fails and nothing is written.
+- **Revocation is recorded:**
+  - Before, a revoked badge stayed in the badge table with no `revoked_at`, so a scanner reading the table would have let it in.
+  - Now a decision that revokes stamps `revoked_at` once, and one that qualifies again clears it.
+  - The demo seed loads revoked badges as revoked.
+- **Not yet:**
+  - SMS (the sender ID)
+  - a badge saved for offline use on the day (M3.5)
+  - the desk's own screen for operations and coordinators (M2.2)
+  - badges for other events' delegates (their registration is M2.4)
+- **Tested:**
+  - 8 rule tests: own edit, refusals, the print lock, revoked, reissue and who may, the badge emails' links.
+  - 5 API tests: the holder's view against the badge table, edits and their audit, the lock, a reissue removing the old code, a revocation stamped.
+  - The outbox link.
+  - In the browser on the walk-through database: Neema signed in at phone width, saw her badge (code matching the table), corrected her name, and found "Open my Deal Room badge" on her application. The lead saw the badge on the Decision tab and reissued it: the old code left the table, the new one went in, the email was queued and both changes were audited.
 
 ### Phase 3: Deal Room summit operations (4 January to 10 February 2027)
 

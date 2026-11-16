@@ -28,7 +28,7 @@ export type Changes = {
     config: DealRoomRows["config"] | null;
     busy: { upsert: BusyRow[]; remove: string[] };
   };
-  core: { tiers: { upsert: CoreRows["tiers"] }; delegates: { upsert: CoreRows["delegates"] }; badges: { upsert: CoreRows["badges"] } };
+  core: { tiers: { upsert: CoreRows["tiers"] }; delegates: { upsert: CoreRows["delegates"] }; badges: { upsert: CoreRows["badges"]; remove: string[] } };
 };
 
 export type AuditRow = { actorKind: string; actorId: string | null; eventId: string; entity: string; entityId: string; action: string; detail: Prisma.InputJsonValue; ip: string | null };
@@ -140,7 +140,17 @@ async function saveWith(tx: Prisma.TransactionClient, eventId: string, ch: Chang
   // the Deal Room's tier first: an event's first badge makes it (drTierOf)
   await each(ch.core.tiers.upsert, (r) => tx.tier.upsert({ where: { id: r.id }, create: r, update: r }));
   await each(ch.core.delegates.upsert, (r) => tx.delegate.upsert({ where: { id: r.id }, create: r, update: r }));
-  for (const b of ch.core.badges.upsert) await tx.badge.upsert({ where: { code: b.code }, create: b, update: b });
+  // badges: a reissued badge's old code goes first, so the delegate's new one can take its place; a revoked one is
+  // stamped once, and a revived one cleared. A new code that is already another delegate's is never taken over:
+  // nothing is written, and the command fails rather than move someone else's badge
+  if (ch.core.badges.remove.length) await tx.$executeRaw`DELETE FROM badge WHERE event_id = ${eventId} AND code = ANY(${ch.core.badges.remove})`;
+  for (const b of ch.core.badges.upsert) {
+    const n = await tx.$executeRaw`INSERT INTO badge (code, delegate_id, event_id, revoked_at)
+      VALUES (${b.code}, ${b.delegateId}, ${b.eventId}, CASE WHEN ${b.revoked} THEN now() END)
+      ON CONFLICT (code) DO UPDATE SET revoked_at = CASE WHEN ${b.revoked} THEN COALESCE(badge.revoked_at, now()) END
+      WHERE badge.delegate_id = EXCLUDED.delegate_id`;
+    if (n !== 1) throw new Error(`Badge code ${b.code} is already another delegate's`);
+  }
 }
 
 export function createDealRoomRepo(db: Db) {
@@ -162,6 +172,7 @@ export function createDealRoomRepo(db: Db) {
         queue: (notes: { to: string; subject: string; link: string; eventId: string }[]) => Promise<void>;
         revokeStaff: (staffIds: string[]) => Promise<void>;
         confirmPayment: (p: { id: string; receipt: string; raw: object }) => Promise<boolean>;
+        moveRetention: (until: Date) => Promise<number>;
       }) => Promise<T>,
       scope?: { appId: string },
     ): Promise<T> {
@@ -191,6 +202,9 @@ export function createDealRoomRepo(db: Db) {
             // a payment is confirmed once: the row moves from pending in the same transaction as the fee it settles
             confirmPayment: async (p) =>
               (await tx.payment.updateMany({ where: { id: p.id, status: "pending" }, data: { status: "confirmed", receipt: p.receipt, rawPayload: p.raw as never, confirmedAt: new Date() } })).count === 1,
+            // every document of the Deal Room still kept moves to its new deletion date; deleted ones stay deleted
+            moveRetention: async (until) =>
+              (await tx.file.updateMany({ where: { eventId, ownerKind: "dr_application", deletedAt: null }, data: { retentionUntil: until } })).count,
             queue: async (notes) => {
               if (notes.length)
                 await tx.outboxMessage.createMany({
@@ -254,6 +268,9 @@ export function createDealRoomRepo(db: Db) {
       ]);
       return app && cfg ? { record: app.record, config: cfg.record } : null;
     },
+
+    /** The delegate behind an application's badge, in this event. */
+    delegateOf: (eventId: string, delegateId: string) => db.delegate.findFirst({ where: { id: delegateId, eventId }, select: { record: true } }),
 
     /** The stored file behind an application's document, if it has one (the demo seed's documents don't). */
     fileOf: (id: string, appId: string) => db.file.findFirst({ where: { id, ownerKind: "dr_application", ownerId: appId } }),

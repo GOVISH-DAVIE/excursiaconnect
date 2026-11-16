@@ -14,6 +14,8 @@ const BACKOFF_MIN = [1, 5, 15, 60, 240];
 /** Where the link in the email points, on the web app. */
 export function linkFor(web: string, r: Recipient, link: string): string {
   if (r.kind === "applicant") {
+    // the badge's own page (M2.1); every other message goes to the application
+    if (/[?&]badge=1/.test(link) && r.slug) return `${web}/e/${r.slug}/badge`;
     const apply = r.slug ? `/e/${r.slug}/deal-room/apply` : "/signin";
     return `${web}${apply}${link.includes("invite=") && r.invite ? `?invite=${encodeURIComponent(r.invite)}` : ""}`;
   }

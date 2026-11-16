@@ -6,6 +6,7 @@
  * KYC documents and signs the NDA, and sees each checked. A decision waiting for a second decider isn't shown: it
  * isn't one yet.
  */
+import Link from "next/link";
 import { useState } from "react";
 import type { KycItem, MyApplication } from "@excursia/contracts/apply";
 import { fmtStamp } from "@excursia/domain/time";
@@ -55,11 +56,21 @@ function Decision({ slug, app }: { slug: string; app: MyApplication }) {
       {approved && app.fee && owed && <PayFee slug={slug} app={app} />}
       {approved && app.fee && !owed && (
         <p className="mt-4 text-[14px] text-ok">
-          {app.fee.waived ? "Your participation fee is waived: your Deal Room badge comes by email." : `Your participation fee is paid${app.fee.payment?.status === "confirmed" ? ` (${app.fee.payment.message.replace(/^Paid, |\.$/g, "")})` : ""}: your Deal Room badge comes by email.`}
+          {app.fee.waived ? "Your participation fee is waived: your Deal Room badge is ready." : `Your participation fee is paid${app.fee.payment?.status === "confirmed" ? ` (${app.fee.payment.message.replace(/^Paid, |\.$/g, "")})` : ""}: your Deal Room badge is ready.`}
         </p>
       )}
+      {approved && !owed && <BadgeLink slug={slug} />}
       {approved && app.readiness === "Deal Room Ready" && <p className="mt-3 text-[14px] text-ok">You are Deal Room Ready: matching starts when the Deal Room opens.</p>}
     </Card>
+  );
+}
+
+/** The badge has its own page, for the desk and the doors (M2.1). */
+function BadgeLink({ slug }: { slug: string }) {
+  return (
+    <Link href={`/e/${slug}/badge`} className="btn btn-primary mt-4 w-full sm:w-auto">
+      Open my Deal Room badge
+    </Link>
   );
 }
 
@@ -136,11 +147,13 @@ function Verification({ slug, app, maxBytes }: { slug: string; app: MyApplicatio
         </div>
         <p className="mt-3 text-[14px] text-slate">
           {v.state === "Verified"
-            ? "Your organisation is verified: the Deal Room is open to you, and your badge comes by email."
+            ? "Your organisation is verified: the Deal Room is open to you, and your badge is ready."
             : v.state === "Declined"
               ? "Your organisation wasn't verified. The review team has written to you."
               : "Before the Deal Room opens to you, the review team checks who you are: your registration, who owns and controls the organisation, and the ID of the person signing. They also screen the organisation against the sanctions lists."}
         </p>
+
+        {v.state === "Verified" && <BadgeLink slug={slug} />}
 
         <div className="mt-4">
           {v.kyc.map((k) => {

@@ -39,7 +39,7 @@ import type {
   Layer,
   Readiness,
 } from "./types";
-import { exception, leadOf, note, patchApp, portal, send, withDr } from "./util";
+import { badgeLink, exception, leadOf, note, patchApp, portal, send, withDr } from "./util";
 import { drConvReducer, playForward, type DrConvAction } from "./conversion";
 import { drMeetReducer, type DrMeetAction } from "./meetings";
 import { drSessionReducer, type DrSessionAction } from "./sessions";
@@ -69,6 +69,8 @@ export type DrAction =
   | { type: "dr/readiness"; appId: string; readiness: Readiness }
   | { type: "dr/payFee"; appId: string; method: "M-Pesa" | "Card"; reference: string }
   | { type: "dr/waiveFee"; appId: string; reason: string }
+  | { type: "dr/badgeDetails"; appId: string; name: string; jobTitle: string }
+  | { type: "dr/reissueBadge"; appId: string; reason: string }
   /** the server's job: the one payment reminder, once it is due (the prototype's clock does the same) */
   | { type: "dr/feeReminder"; appId: string }
   | { type: "dr/updateProfile"; appId: string; patch: Partial<Pick<DrApplication, "org" | "contact" | "decisionMaker" | "ask" | "traction" | "mandate" | "teaser" | "challenge">> }
@@ -89,15 +91,26 @@ export type DrAction =
   | { type: "dr/supportView"; appId: string; viewer: string }
   | { type: "dr/exception"; kind: DrException["kind"]; reason: string; ref: string };
 
-/** An approved seeker or a verified provider becomes a platform delegate with a Deal Room badge. */
-function issueBadge(ctx: Ctx, state: AppState, app: DrApplication): AppState {
+/**
+ * A badge's code: what its QR carries and what the desk types, so it comes from the random ids, never from the
+ * application's id. Eight hexadecimal characters: no O or I to misread at a desk.
+ */
+const badgeCode = (ctx: Ctx) => `EXC-DR-${ctx.newId("b").slice(-8).toUpperCase()}`;
+
+/**
+ * An approved seeker or a verified provider becomes a platform delegate with a Deal Room badge. With `announce`,
+ * a badge that is new or revived is emailed to its participant; callers whose own message already says so don't.
+ */
+function issueBadge(ctx: Ctx, state: AppState, app: DrApplication, announce = false): AppState {
+  const tell = (s: AppState) => withDr(s, send(ctx, s.dealRoom, app.eventId, app.id, "Your Deal Room badge is ready", badgeLink(app), "Email and SMS"));
   if (app.delegateId) {
     // a later decision that qualifies again revives the same badge
-    return { ...state, delegates: state.delegates.map((d) => (d.id === app.delegateId ? { ...d, status: d.accredited ? "Checked in" : "Confirmed", cancelled: false } : d)) };
+    const was = state.delegates.find((d) => d.id === app.delegateId);
+    const next: AppState = { ...state, delegates: state.delegates.map((d) => (d.id === app.delegateId ? { ...d, status: d.accredited ? "Checked in" : "Confirmed", cancelled: false } : d)) };
+    return announce && was?.cancelled ? tell(next) : next;
   }
   const id = `d_dr_${app.id}`;
-  // the badge's code is what its QR carries, so it comes from the random ids, never from the application's id
-  const code = `EXC-DR-${ctx.newId("b").slice(-8).toUpperCase()}`;
+  const code = badgeCode(ctx);
   const tierId = drTierOf(app.eventId);
   const d: Delegate = {
     id,
@@ -129,12 +142,13 @@ function issueBadge(ctx: Ctx, state: AppState, app: DrApplication): AppState {
         },
         ...state.tiers,
       ];
-  return {
+  const next: AppState = {
     ...state,
     delegates: [d, ...state.delegates],
     tiers,
     dealRoom: patchApp(state.dealRoom, app.id, (a) => ({ ...a, delegateId: id })),
   };
+  return announce ? tell(next) : next;
 }
 
 function revokeBadge(ctx: Ctx, state: AppState, app: DrApplication): AppState {
@@ -148,7 +162,7 @@ export const ADMIN_ACTIONS = new Set(["dr/staffAdd", "dr/staffSet", "dr/staffRev
 const STAFF_ACTIONS = new Set([
   "dr/config", "dr/import", "dr/invite", "dr/assign", "dr/startReview", "dr/score", "dr/requestInfo", "dr/rfiExpiry", "dr/recommend", "dr/decide",
   "dr/confirmSecond", "dr/meetCondition", "dr/confirmDecisionMaker", "dr/readiness", "dr/approveTeaser", "dr/reReviewDone", "dr/checkKyc", "dr/sanctions",
-  "dr/verify", "dr/merge", "dr/grantSupport", "dr/exception", "dr/waiveFee",
+  "dr/verify", "dr/merge", "dr/grantSupport", "dr/exception", "dr/waiveFee", "dr/reissueBadge",
 ]);
 
 /* ---------- the fee's reminder ---------- */
@@ -454,7 +468,7 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       if (!action.reference.trim()) return no(ctx, state, "A payment needs its reference");
       const kes = action.method === "M-Pesa" ? feeInKes(app.fee!) : undefined;
       dr = patchApp(dr, app.id, (a) => note({ ...a, fee: { ...a.fee!, paid: { at, method: action.method, reference: action.reference.trim().slice(0, 40), kes } } }, "applicant", `Paid ${feeLabel(app.fee!)} by ${action.method}, ref ${action.reference.trim()}`, at));
-      dr = send(ctx, dr, app.eventId, app.id, `Payment received, ${feeLabel(app.fee!)}: your Deal Room badge is ready`, `/dr/${app.id}`, "Email and SMS");
+      dr = send(ctx, dr, app.eventId, app.id, `Payment received, ${feeLabel(app.fee!)}: your Deal Room badge is ready`, badgeLink(app), "Email and SMS");
       return issueBadge(ctx, withDr(state, dr), dr.apps.find((a) => a.id === app.id)!);
     }
 
@@ -474,10 +488,44 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       if (!feeOwed(app)) return no(ctx, state, "No fee is owed");
       if (!action.reason.trim()) return no(ctx, state, "A waiver needs a reason");
       dr = patchApp(dr, app.id, (a) => note({ ...a, fee: { ...a.fee!, waived: { by: me!.id, at, reason: action.reason.trim() } } }, me!.id, `Fee waived: ${action.reason.trim()}`, at));
-      dr = send(ctx, dr, app.eventId, app.id, "Your Deal Room fee is waived: your badge is ready", `/dr/${app.id}`, "Email and SMS");
+      dr = send(ctx, dr, app.eventId, app.id, "Your Deal Room fee is waived: your badge is ready", badgeLink(app), "Email and SMS");
       const next = withDr(state, dr);
       const updated = dr.apps.find((a) => a.id === app.id)!;
       return qualified(updated) ? issueBadge(ctx, next, updated) : next;
+    }
+
+    case "dr/badgeDetails": {
+      // the participant corrects their own name and title until the organiser locks them for printing (DE-10,
+      // OS-10); the desk (the lead, operations, a coordinator) may correct them at any time
+      if (!app) return no(ctx, state, "No such application");
+      const own = ctx.actor?.kind === "applicant" && ctx.actor.appId === app.id;
+      if (!own && !drCan(me, "liveboard")) return no(ctx, state, "Only the participant, or the lead, operations or a coordinator, can change a badge");
+      const d = state.delegates.find((x) => x.id === app.delegateId);
+      if (!d) return no(ctx, state, "This application has no badge yet");
+      if (d.cancelled) return no(ctx, state, "This badge is revoked");
+      if (own && state.events.find((e) => e.id === app.eventId)?.profileLocked) return no(ctx, state, "Badge details are locked for printing. Ask the Deal Room desk to change them");
+      const name = action.name.trim().replace(/\s+/g, " ");
+      const jobTitle = action.jobTitle.trim().replace(/\s+/g, " ");
+      if (name.length < 2 || name.length > 80) return no(ctx, state, "The name on a badge is 2 to 80 characters");
+      if (jobTitle.length > 80) return no(ctx, state, "A job title is at most 80 characters");
+      if (name === d.name && jobTitle === d.jobTitle) return no(ctx, state, "Those are already the badge's details");
+      const what = [name !== d.name ? `name "${d.name}" to "${name}"` : "", jobTitle !== d.jobTitle ? `job title "${d.jobTitle}" to "${jobTitle}"` : ""].filter(Boolean).join(", ");
+      dr = patchApp(dr, app.id, (a) => note(a, own ? "applicant" : me!.id, `Badge changed: ${what}`, at));
+      return { ...withDr(state, dr), delegates: state.delegates.map((x) => (x.id === d.id ? { ...x, name, jobTitle } : x)) };
+    }
+
+    case "dr/reissueBadge": {
+      // a lost or shared badge: a new code, and the old one stops opening doors (OS-6, AZ-3)
+      if (!app) return no(ctx, state, "No such application");
+      if (!drCan(me, "liveboard")) return no(ctx, state, "Only the lead, operations or a coordinator can reissue a badge");
+      const d = state.delegates.find((x) => x.id === app.delegateId);
+      if (!d) return no(ctx, state, "This application has no badge yet");
+      if (d.cancelled) return no(ctx, state, "A revoked badge isn't reissued; a decision that qualifies the application again revives it");
+      if (!action.reason.trim()) return no(ctx, state, "A reissue needs a reason");
+      dr = patchApp(dr, app.id, (a) => note(a, me!.id, `Badge reissued: ${action.reason.trim()}. The old code, ${d.badgeCode}, no longer opens doors`, at));
+      dr = send(ctx, dr, app.eventId, app.id, "Your Deal Room badge was reissued: use the new one", badgeLink(app), "Email and SMS");
+      const code = badgeCode(ctx);
+      return { ...withDr(state, dr), delegates: state.delegates.map((x) => (x.id === d.id ? { ...x, badgeCode: code } : x)) };
     }
 
     case "dr/updateProfile": {
@@ -584,7 +632,11 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       dr = patchApp(dr, app.id, (a) =>
         note({ ...a, status: "Decided", statusAt: at, reReview: undefined, verification: { ...a.verification!, state: action.outcome, decided: { by: me!.id, at, reason: action.reason } } }, me!.id, `Verification: ${action.outcome}`, at),
       );
-      dr = send(ctx, dr, app.eventId, app.id, action.outcome === "Verified" ? "Your organisation is verified: the Deal Room directory is open" : "A decision on your Deal Room application", portal(app));
+      dr = send(
+        ctx, dr, app.eventId, app.id,
+        action.outcome === "Verified" ? "Your organisation is verified: the Deal Room directory is open and your badge is ready" : "A decision on your Deal Room application",
+        action.outcome === "Verified" ? badgeLink(app) : portal(app),
+      );
       let next = withDr(state, dr);
       const fresh = next.dealRoom.apps.find((a) => a.id === app.id)!;
       next = action.outcome === "Verified" ? issueBadge(ctx, next, fresh) : revokeBadge(ctx, next, fresh);
@@ -677,6 +729,6 @@ function settleDecision(ctx: Ctx, state: AppState, appId: string): AppState {
     app = dr.apps.find((a) => a.id === appId)!;
   }
   let next = withDr(state, dr);
-  next = qualified(app) && feeSettled(app) ? issueBadge(ctx, next, app) : revokeBadge(ctx, next, app);
+  next = qualified(app) && feeSettled(app) ? issueBadge(ctx, next, app, true) : revokeBadge(ctx, next, app);
   return next;
 }

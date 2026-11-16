@@ -54,7 +54,8 @@ describe("the mappers, in memory", () => {
   test("the core records come back as they went in", () => {
     const rows = coreToRows(seed, { demo: true });
     expect(sortCore(coreFromRows(rows as never))).toEqual(expectedCore);
-    expect(rows.badges).toHaveLength(seed.delegates.filter((d) => !d.cancelled).length);
+    expect(rows.badges).toHaveLength(seed.delegates.filter((d) => d.badgeCode).length);
+    expect(rows.badges.filter((b) => b.revoked)).toHaveLength(seed.delegates.filter((d) => d.badgeCode && d.cancelled).length);
   });
 
   test("the Deal Room comes back as it went in", () => {

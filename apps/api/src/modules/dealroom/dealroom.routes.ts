@@ -12,6 +12,7 @@ export function dealRoomRoutes(c: DealRoomController): Router {
   r.get("/:eventId/settings", requireSession({ staff: true }), c.settings);
   r.get("/:eventId/messages", requireSession({ staff: true }), c.messages);
   r.put("/:eventId/settings", requireSession({ staff: true }), c.saveSettings);
+  r.post("/:eventId/settings/retention", requireSession({ staff: true }), c.extendRetention);
   r.get("/:eventId/applications", requireSession({ staff: true }), c.applications);
   r.post("/:eventId/applications/assign", requireSession({ staff: true }), c.assignReviewer);
   // one application, for its reviewers (M1.3)
@@ -34,5 +35,8 @@ export function dealRoomRoutes(c: DealRoomController): Router {
   r.post(`${one}/verification`, requireSession({ staff: true }), c.verify);
   // the fee (M1.7): only the lead waives it; paying is the applicant's, settled by the provider
   r.post(`${one}/fee/waive`, requireSession({ staff: true }), c.waiveFee);
+  // the badge, at the desk (M2.1): the lead, operations or a coordinator
+  r.patch(`${one}/badge`, requireSession({ staff: true }), c.badgeDetails);
+  r.post(`${one}/badge/reissue`, requireSession({ staff: true }), c.reissueBadge);
   return r;
 }

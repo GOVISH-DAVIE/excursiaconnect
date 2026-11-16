@@ -235,8 +235,14 @@ export const DealRoomSettings = z.object({
   gaps: z.array(z.string()),
   canEdit: z.boolean(),
   log: z.array(z.object({ at: z.string(), by: z.string(), what: z.string() })),
+  /** when the Deal Room's documents are deleted: months after the follow-up period (conversion) ends; the lead extends it */
+  retention: z.object({ months: z.number().int(), conversionEnd: z.string(), deleteOn: z.string(), canExtend: z.boolean() }),
 });
 export type DealRoomSettings = z.infer<typeof DealRoomSettings>;
+
+/** The lead keeps the documents longer, by whole months, always with a reason (PRD, Document retention). */
+export const ExtendRetentionInput = z.object({ months: z.number().int().min(1).max(24), reason: z.string().trim().min(1, "give a reason").max(500) });
+export type ExtendRetentionInput = z.infer<typeof ExtendRetentionInput>;
 
 export const DealRoomSettingsInput = z
   .object({ missions: z.array(Mission).max(10), tracks: z.array(Track).max(30), appOpen: day, appClose: day, rfiDays: z.number().int().min(1).max(30) })

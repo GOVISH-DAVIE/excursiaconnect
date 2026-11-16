@@ -21,6 +21,8 @@ export function send(ctx: Ctx, dr: DealRoomState, eventId: string, to: string, s
 }
 
 export const portal = (a: DrApplication) => `/dr/${a.id}`;
+/** Where a message about the badge points: the participant's badge (on the server, the event's badge page). */
+export const badgeLink = (a: DrApplication) => `/dr/${a.id}?badge=1`;
 
 /** The event's active lead: who gets the Deal Room's reports and unassigned work. The demo's is st_lead. */
 export const leadOf = (dr: DealRoomState, eventId: string) => dr.staff.find((s) => s.eventId === eventId && s.active && s.role === "Lead")?.id ?? "st_lead";

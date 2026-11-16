@@ -8,6 +8,7 @@ import {
   EventView,
   OrganiserView,
   type DealRoomSettingsInput,
+  type ExtendRetentionInput,
   type DealRoomStaffInput,
   type EventDecisionInput,
   type EventInput,
@@ -63,4 +64,5 @@ export const onboardingApi = {
 
   settings: (eventId: string) => http.get(`/v1/dealroom/${eventId}/settings`, { schema: DealRoomSettings }),
   saveSettings: (eventId: string, input: DealRoomSettingsInput) => http.put(`/v1/dealroom/${eventId}/settings`, { body: input, schema: DealRoomSettings }),
+  extendRetention: (eventId: string, input: ExtendRetentionInput) => http.post(`/v1/dealroom/${eventId}/settings/retention`, { body: input, schema: DealRoomSettings }),
 };

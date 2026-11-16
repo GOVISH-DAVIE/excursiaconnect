@@ -80,7 +80,7 @@ function changesBetween(eventId: string, before: AppState, after: AppState, now:
     core: {
       tiers: { upsert: diff(bc.tiers, ac.tiers, id).upsert },
       delegates: { upsert: diff(bc.delegates, ac.delegates, id).upsert },
-      badges: { upsert: diff(bc.badges, ac.badges, (x) => x.code).upsert },
+      badges: diff(bc.badges, ac.badges, (x) => x.code),
     },
   };
 }
@@ -98,7 +98,8 @@ function onlyTouches(ch: Changes, appId: string): boolean {
     Object.values(rest).every((d) => !d.upsert.length && !d.remove.length) &&
     !ch.core.tiers.upsert.length &&
     !ch.core.delegates.upsert.length &&
-    !ch.core.badges.upsert.length
+    !ch.core.badges.upsert.length &&
+    !ch.core.badges.remove.length
   );
 }
 
@@ -129,6 +130,8 @@ export type Command = {
   notify?: (after: AppState) => { to: string; subject: string; link: string }[];
   /** Staff whose sign-in loses this Deal Room with the change (DA-3). */
   revoke?: string[];
+  /** The documents' new deletion date, once the change is made (dr/retention): every kept file moves to it. */
+  retentionUntil?: (after: AppState) => Date;
   /** A provider's payment this change settles: confirmed in the same transaction, once (backend-plan.md, Payments). */
   payment?: { id: string; receipt: string; raw: object };
 };
@@ -141,7 +144,7 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
     /** Runs a command; returns the state after it, as committed. */
     run(cmd: Command): Promise<AppState> {
       const scope = cmd.only ? { appId: cmd.only } : undefined;
-      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff, queue, revokeStaff, confirmPayment }) => {
+      return repo.inEventLock(cmd.eventId, async ({ stored, save, audit, linkStaff, queue, revokeStaff, confirmPayment, moveRetention }) => {
         if (!stored) throw new HttpError("not_found", "This event has no Deal Room.");
         const at = nairobiNow(now());
         const ctx: Ctx = { now: at, newId, actor: cmd.actor };
@@ -176,7 +179,14 @@ export function createCommands({ repo, now, newId = (p) => `${p}_${randomUUID().
             ip: cmd.ip,
           })),
         );
+        // the settings are a record too: a change to them is audited like any other
+        if (changes.dealRoom.config)
+          rows.push({
+            actorKind: cmd.actor.kind, actorId: cmd.userId, eventId: cmd.eventId, entity: "dr_config", entityId: cmd.eventId, action: actions.map((a) => a.type).join(" + "),
+            detail: actions.length === 1 ? auditDetail(actions[0]) : { actions: actions.map(auditDetail) }, ip: cmd.ip,
+          });
         await audit(rows);
+        if (cmd.retentionUntil) await moveRetention(cmd.retentionUntil(state));
         if (cmd.notify) await queue(cmd.notify(state).map((n) => ({ ...n, eventId: cmd.eventId })));
         if (cmd.revoke) await revokeStaff(cmd.revoke);
         if (cmd.payment && !(await confirmPayment(cmd.payment))) throw new HttpError("conflict", "This payment is already settled.");
