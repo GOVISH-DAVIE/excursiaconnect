@@ -52,11 +52,15 @@ export function loadSession(config: Config, auth: AuthService): RequestHandler {
  * Lets the request through only with a session of the kind asked for.
  * - `staff`: staff or admin, not an applicant.
  * - `pending`: also accepts a staff session that is still to give its authenticator code (the TOTP routes only).
+ * - `scanner`: "only" for the scanning routes, which take nothing else; "also" where a scanner may come too (its own
+ *   session view). Without it a scanner's session is refused: a PIN on a desk tablet opens nothing but scanning.
  */
-export function requireSession(opts: { staff?: boolean; pending?: boolean } = {}): RequestHandler {
+export function requireSession(opts: { staff?: boolean; pending?: boolean; scanner?: "only" | "also" } = {}): RequestHandler {
   return (_req: Request, res: Response, next: NextFunction) => {
     const auth = (res.locals as SessionLocals).auth;
     if (!auth) throw new HttpError("unauthenticated", "Sign in first.");
+    if (auth.scanner && !opts.scanner) throw new HttpError("forbidden", "This device is signed in as a scanner; it only scans.");
+    if (!auth.scanner && opts.scanner === "only") throw new HttpError("unauthenticated", "Sign in on the scanner with your PIN.");
     if (auth.pending && !opts.pending) throw new HttpError("unauthenticated", "Finish signing in with the code from your authenticator.");
     if (opts.staff && auth.user.kind === "participant") throw new HttpError("forbidden", "This is for staff only.");
     next();

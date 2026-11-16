@@ -29,6 +29,8 @@ export const POLICY = {
   participant: { idleMs: 7 * DAY, absoluteMs: 30 * DAY },
   /** between a right password and the authenticator code */
   pending: { idleMs: 10 * MIN, absoluteMs: 10 * MIN },
+  /** a scanner, signed in with a PIN on an enrolled device: it only scans (M2.2) */
+  scanner: { idleMs: 60 * MIN, absoluteMs: 12 * HOUR },
 } as const;
 
 const CODE_TTL = { sign_in: 10 * MIN, verify_contact: 10 * MIN, set_password: 30 * MIN } as const;
@@ -55,7 +57,8 @@ const LIMITS = {
 } as const;
 
 export type ClientMeta = { ip: string | null; userAgent: string | null };
-export type Resolved = { session: SessionRow; user: UserRow; pending: boolean };
+/** `scanner`: the session only scans, for this event on this device (M2.2); every other route refuses it. */
+export type Resolved = { session: SessionRow; user: UserRow; pending: boolean; scanner: { eventId: string; deviceId: string } | null };
 /** A new session for the controller to put in the cookie. The token never leaves through a body. */
 export type Issued = { token: string; expiresAt: Date; staff: boolean };
 
@@ -108,7 +111,7 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
     if (!(await repo.consumeOtp(otp.id, now()))) throw expired;
   }
 
-  async function issue(user: UserRow, meta: ClientMeta, kind: keyof typeof POLICY, stepUp: boolean, replacing?: string, mfaSkipped = false): Promise<Issued> {
+  async function issue(user: Pick<UserRow, "id" | "kind">, meta: ClientMeta, kind: keyof typeof POLICY, stepUp: boolean, replacing?: string, mfaSkipped = false, scanner?: { eventId: string; deviceId: string }): Promise<Issued> {
     const token = newToken();
     const at = now();
     const next = {
@@ -121,6 +124,7 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
       mfaSkipped,
       ip: meta.ip,
       userAgent: meta.userAgent?.slice(0, 300) ?? null,
+      ...(scanner ? { scanEventId: scanner.eventId, scanDeviceId: scanner.deviceId } : {}),
     };
     const created = replacing ? await repo.rotateSession(replacing, next, at) : await repo.createSession(next);
     if (!created) throw new HttpError("unauthenticated", "This sign-in has ended. Start again.");
@@ -272,18 +276,25 @@ export function createAuthService({ repo, mailer, keys, now = () => new Date() }
       const session = await repo.sessionByTokenHash(hashToken(token));
       if (!session || session.revokedAt || session.user.disabledAt) return null;
       const at = now();
-      const pending = isStaff(session.user) && !session.stepUpAt && !session.mfaSkipped;
-      const policy = POLICY[pending ? "pending" : isStaff(session.user) ? "staff" : "participant"];
+      const scanner = session.scanEventId && session.scanDeviceId ? { eventId: session.scanEventId, deviceId: session.scanDeviceId } : null;
+      const pending = !scanner && isStaff(session.user) && !session.stepUpAt && !session.mfaSkipped;
+      const policy = POLICY[scanner ? "scanner" : pending ? "pending" : isStaff(session.user) ? "staff" : "participant"];
       if (at >= session.expiresAt || at.getTime() - session.lastSeenAt.getTime() > policy.idleMs) {
         await repo.revokeSession(session.id, at);
         return null;
       }
       // one write a minute at most, not one per request
       if (at.getTime() - session.lastSeenAt.getTime() > MIN) await repo.touchSession(session.id, at);
-      return { session, user: session.user, pending };
+      return { session, user: session.user, pending, scanner };
     },
 
     signOut: (r: Resolved) => repo.revokeSession(r.session.id, now()),
+
+    /**
+     * A scanner's session: the caller has checked the device and the PIN. It is new, so whatever session the cookie
+     * held on this device ends with the sign-in; it lasts 12 hours, and an hour without a scan signs it out.
+     */
+    scannerSession: (user: Pick<UserRow, "id" | "kind">, scanner: { eventId: string; deviceId: string }, meta: ClientMeta) => issue(user, meta, "scanner", true, undefined, false, scanner),
 
     async view(r: Resolved): Promise<SessionView> {
       const staff = isStaff(r.user);

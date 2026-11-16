@@ -14,7 +14,8 @@ export type UserRow = {
   disabledAt: Date | null;
   mfaGraceUntil: Date | null;
 };
-export type SessionRow = { id: string; userId: string; expiresAt: Date; lastSeenAt: Date; stepUpAt: Date | null; mfaSkipped: boolean; revokedAt: Date | null; user: UserRow };
+/** `scanEventId` and `scanDeviceId`: a scanner's session, signed in with a PIN on one enrolled device for one event (M2.2). */
+export type SessionRow = { id: string; userId: string; expiresAt: Date; lastSeenAt: Date; stepUpAt: Date | null; mfaSkipped: boolean; revokedAt: Date | null; scanEventId: string | null; scanDeviceId: string | null; user: UserRow };
 export type OtpRow = { id: string; codeHash: string; attempts: number; expiresAt: Date };
 export type TotpRow = { secretEncrypted: string; confirmedAt: Date | null; lastUsedStep: bigint | null; recoveryCodeHashes: string[] };
 export type NewSession = {
@@ -27,6 +28,8 @@ export type NewSession = {
   mfaSkipped: boolean;
   ip: string | null;
   userAgent: string | null;
+  scanEventId?: string | null;
+  scanDeviceId?: string | null;
 };
 
 /** What a one-time code is for: signing in, confirming a new organiser's email, or setting a staff password. */
@@ -90,7 +93,7 @@ export function createAuthRepo(db: Db) {
     sessionByTokenHash: (tokenHash: string): Promise<SessionRow | null> =>
       db.session.findUnique({
         where: { tokenHash },
-        select: { id: true, userId: true, expiresAt: true, lastSeenAt: true, stepUpAt: true, mfaSkipped: true, revokedAt: true, user: { select: userSelect } },
+        select: { id: true, userId: true, expiresAt: true, lastSeenAt: true, stepUpAt: true, mfaSkipped: true, revokedAt: true, scanEventId: true, scanDeviceId: true, user: { select: userSelect } },
       }),
 
     touchSession: (id: string, at: Date) => db.session.updateMany({ where: { id, revokedAt: null }, data: { lastSeenAt: at } }),

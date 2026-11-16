@@ -46,6 +46,10 @@ async function removeDemoRows(tx: Tx) {
     await tx.drStaff.deleteMany({ where: inEvents });
     await tx.drConfig.deleteMany({ where: inEvents });
     await tx.membership.deleteMany({ where: inEvents });
+    // the desk's records (M2.2): scans name their device, so they go first; arrivals go with their delegates
+    await tx.scan.deleteMany({ where: inEvents });
+    await tx.arrival.deleteMany({ where: inEvents });
+    await tx.scannerDevice.deleteMany({ where: inEvents });
     await tx.badge.deleteMany({ where: inEvents });
     await tx.delegate.deleteMany({ where: inEvents });
     await tx.tier.deleteMany({ where: inEvents });
