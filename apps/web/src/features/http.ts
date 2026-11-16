@@ -23,21 +23,32 @@ export class ApiError extends Error {
   }
 }
 
-type Options<T> = { body?: unknown; query?: Record<string, string | undefined>; schema?: z.ZodType<T> };
+type Options<T> = { body?: unknown; query?: Record<string, string | undefined>; schema?: z.ZodType<T>; headers?: Record<string, string> };
 
-async function request<T>(method: string, path: string, { body, query, schema }: Options<T> = {}): Promise<T> {
+async function request<T>(method: string, path: string, opts: Options<T> = {}): Promise<T> {
+  return (await exchange(method, path, opts)).data as T;
+}
+
+/** A request whose answer may be 304 Not Modified: the data, or `notModified` (the badge list's ETag, M2.2). */
+export async function conditional<T>(path: string, etag: string | null, schema: z.ZodType<T>): Promise<{ notModified: true } | { notModified: false; data: T; etag: string | null }> {
+  const r = await exchange("GET", path, { schema, headers: etag ? { "If-None-Match": etag } : undefined });
+  return r.status === 304 ? { notModified: true } : { notModified: false, data: r.data as T, etag: r.etag };
+}
+
+async function exchange<T>(method: string, path: string, { body, query, schema, headers }: Options<T> = {}): Promise<{ data: T | undefined; status: number; etag: string | null }> {
   const qs = new URLSearchParams(Object.entries(query ?? {}).filter((e): e is [string, string] => !!e[1])).toString();
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}${qs ? `?${qs}` : ""}`, {
       method,
       credentials: "include",
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
     throw new ApiError("network", "Can't reach ExcursiaConnect. Check your connection and try again.", 0);
   }
+  if (res.status === 304) return { data: undefined, status: 304, etag: res.headers.get("etag") };
   const text = await res.text();
   const json: unknown = text ? JSON.parse(text) : undefined;
   if (!res.ok) {
@@ -45,7 +56,7 @@ async function request<T>(method: string, path: string, { body, query, schema }:
     if (parsed.success) throw new ApiError(parsed.data.error.code, parsed.data.error.message, res.status, parsed.data.error.fields);
     throw new ApiError("internal", "Something went wrong on our side. Try again in a moment.", res.status);
   }
-  return schema ? schema.parse(json) : (undefined as T);
+  return { data: schema ? schema.parse(json) : undefined, status: res.status, etag: res.headers.get("etag") };
 }
 
 export const http = {

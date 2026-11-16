@@ -75,6 +75,8 @@ export function createApp({ config, db, mailer, now, storage, mpesa, callbackBas
       origin: config.WEB_ORIGINS,
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      // the scanner's badge list answers 304 against its ETag (M2.2), so the page must be able to read it
+      exposedHeaders: ["ETag"],
       maxAge: 600,
     }),
   );

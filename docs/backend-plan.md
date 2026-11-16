@@ -709,7 +709,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | # | Milestone | Done when |
 | --- | --- | --- |
 | M2.1 | **Badges and delegates**: badge page and email, random badge codes, delegate edits | A paid participant gets a working badge by email and SMS **Built 16 Nov 2026 for the Deal Room:** the badge page, its email, the name and title corrected by the participant or the desk, reissue, revocation stamped; SMS waits for the sender ID, and other events' delegates for M2.4's registration. Notes below |
-| M2.2 | **Accreditation and scanning**: scanner devices and PIN sign-in with lockout, desk accreditation, zone and room doors, anti-passback through `Presence`, atomic capacity, PIN overrides, the offline queue with idempotent sync | 50 scans a minute on two devices with one offline: no duplicates and no over-capacity after sync; the prototype's demo PINs and the applications' invite tokens no longer saved in browser storage (found by the security pass, 11 Nov 2026) |
+| M2.2 | **Accreditation and scanning**: scanner devices and PIN sign-in with lockout, desk accreditation, zone and room doors, anti-passback through `Presence`, atomic capacity, PIN overrides, the offline queue with idempotent sync | 50 scans a minute on two devices with one offline: no duplicates and no over-capacity after sync; the prototype's demo PINs and the applications' invite tokens no longer saved in browser storage (found by the security pass, 11 Nov 2026) **The Deal Room desk built 16 Nov 2026:** enrolled devices, PIN sign-in with lockout, accreditation and daily arrivals, the offline badge list and queue, each scan recorded once. Zone and room doors, the one-entry-per-badge check, capacity and PIN overrides wait for zones, rooms and the programme on the server (M2.3); meeting room doors for M3.2. Notes below |
 | M2.3 | **Organisers and events**: KYC and DPA, the event builder, media uploaded straight to storage, approval by Algotech | An organiser builds and publishes an event on staging **Core brought forward and done 11 Nov 2026** (self sign-up, KYC, Algotech's checks, events from draft to live, the Deal Room's set-up); the event builder's tiers, sessions and media remain. Notes under Phase 1 |
 | M2.4 | **Registration and orders**: pricing, promo and status worked out on the server; M-Pesa and card checkout; refunds | A delegate registers and pays; a crafted request can't change the price |
 | M2.5 | **Money and comms**: commission, payouts, reconciliation; memberships, shifts, campaigns | A payout run matches the payments to the shilling |
@@ -759,6 +759,67 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - 5 API tests: the holder's view against the badge table, edits and their audit, the lock, a reissue removing the old code, a revocation stamped.
   - The outbox link.
   - In the browser on the walk-through database: Neema signed in at phone width, saw her badge (code matching the table), corrected her name, and found "Open my Deal Room badge" on her application. The lead saw the badge on the Decision tab and reissued it: the old code left the table, the new one went in, the email was queued and both changes were audited.
+
+**Notes on M2.2, the Deal Room desk, 16 Nov 2026:**
+
+- **Scope, decided with the user:** the Deal Room desk first.
+  - The doors need the event's zones, rooms, programme and scanning team, which are still only in the prototype. They come with M2.3's event builder.
+  - Meeting room doors come with M3.2's meetings.
+- **Devices** (`scanner_device`):
+  - Someone on the desk team (the lead, operations, a coordinator), signed in with password and authenticator, enrols the tablet or phone in front of them from Desk scanners in the workspace.
+  - The device gets a random secret in an HttpOnly cookie, sent only to `/v1/scan`, for 90 days. The table keeps its hash. PINs are taken only on an enrolled device.
+  - Retiring a device signs out whoever is on it at once.
+- **PINs** (`scanner_pin`):
+  - Each person sets their own six digits in the workspace. All-same digits and straight runs are refused, and the form explains why before anything is sent.
+  - Hashed with argon2id, like passwords.
+  - Five wrong PINs lock that person's PIN for 15 minutes; ten on one device lock the device for 15 minutes.
+  - The scanner lists only the desk team's names, never reviewers.
+- **The scanner's session:**
+  - A PIN sign-in makes a session for that event on that device (`session.scan_event_id`, `scan_device_id`).
+  - It lasts 12 hours at most and ends after an hour without use.
+  - Every route refuses it except scanning (`requireSession({ scanner: "only" })`), so a desk tablet left signed in opens no application, setting or document.
+- **The desk rule** (`domain core/desk.ts`): pure, so the server and an offline device decide alike.
+  - An unknown, foreign or revoked badge is refused.
+  - The first scan accredits.
+  - On an event day, the first scan records the day's arrival (`arrival`, one per participant per day; Deal Room PRD DO-7). It counts for that day's meetings and sessions once they're on the server (M3.2).
+  - Before the event, a scan accredits without an arrival (badge pickup). After the event, it is refused.
+  - A second scan on the same day changes nothing and says when they arrived.
+- **Scans** (`scan`): each is sent with an id the device made, so a retry or the offline queue records it once.
+  - A scan is one transaction: the event's lock taken shared, so it never interleaves with a Deal Room command writing delegates, and scans don't wait for each other. Then the delegate's row is locked, the verdict decided on what is stored, and the delegate, arrival and scan written together.
+  - Accreditation is audited (`desk/accredit`).
+  - The device's clock is kept if the scan is up to a day old and no more than 2 minutes ahead of the server; otherwise the server's time is used.
+  - A batch is decided in the order scanned and answered in the order sent.
+- **Offline:**
+  - The scanner keeps the event's badge list, checked every 15 seconds against its ETag (304 when unchanged).
+  - When the API doesn't answer within 4 seconds, the device decides from the list, queues the scan, and shows that it did.
+  - The queue goes when the connection returns, and anything the server then decides differently is listed.
+  - The badge list and the device's details are also kept in the browser's storage, so a reload while offline still scans. That is participants' names and badge codes, on an enrolled desk device only; signing out removes the list. Scans not yet sent stay until they are sent.
+- **Input:** a handheld scanner types the code and Enter into the box, which keeps focus. The camera reads QR codes where the browser can (`BarcodeDetector`: Chrome on Android); elsewhere the button doesn't show.
+- **Not yet:**
+  - zone and room doors, the one-entry-per-badge check, capacity and PIN overrides (with M2.3's zones, rooms and programme)
+  - meeting room doors and the "next meeting" line at the desk (M3.2)
+  - the live board of who is in (M3.4)
+  - the prototype's demo PINs and invite tokens in browser storage (they leave with the prototype's screens)
+  - the 50-scans-a-minute load test on staging
+- **Tested:**
+  - 4 rule tests.
+  - 10 API tests:
+    - PIN rules
+    - only the desk team enrols
+    - the device's list of names
+    - five wrong PINs lock, and another person still signs in
+    - a scanner's session refused elsewhere
+    - the badge list and its 304
+    - accredit and arrive, the same id again, a later scan
+    - unknown and revoked
+    - ten concurrent scans from two devices giving one arrival, and one id sent five times at once giving one scan
+    - the offline batch out of order, with a stale clock replaced
+    - retiring a device
+  - In the browser on the walk-through database, at phone width:
+    - The lead set a PIN (an obvious one was refused, with the reason), enrolled "Desk tablet 1", signed in with a wrong then the right PIN, and accredited Neema.
+    - With the API stopped, Savanna Freight's badge and an unknown code were decided on the device and queued ("2 to send"). After a reload, still offline, the scanner opened and decided from the kept list.
+    - With the API back, the queue synced on its own. The database held each scan once, flagged offline, with both accreditations audited.
+    - Signing out returned to the PIN pad and removed the list.
 
 ### Phase 3: Deal Room summit operations (4 January to 10 February 2027)
 
