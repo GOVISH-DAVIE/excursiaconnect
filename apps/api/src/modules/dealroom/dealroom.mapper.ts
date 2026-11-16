@@ -239,7 +239,8 @@ export function dealRoomFromRows(eventId: string, rows: DealRoomStored, clock: s
     staff: records<DrStaff>(rows.staff),
     apps: records<DrApplication>(rows.apps),
     matches: records<DrMatch>(rows.matches),
-    consents: rows.consents.map((c): DrConsent => ({ id: c.id, seekerId: c.seekerId, providerId: c.providerId, docId: c.docId, granted: c.granted, at: fromInstant(c.at), version: c.version })),
+    // in the order they were made: the rules read the latest entry as the one in force
+    consents: [...rows.consents].sort((a, b) => a.version - b.version || a.at.getTime() - b.at.getTime()).map((c): DrConsent => ({ id: c.id, seekerId: c.seekerId, providerId: c.providerId, docId: c.docId, granted: c.granted, at: fromInstant(c.at), version: c.version })),
     access: rows.access.map((x): DrAccess => ({ id: x.id, seekerId: x.seekerId, item: x.item, viewer: x.viewer, action: x.action as DrAccess["action"], at: fromInstant(x.at) })),
     meetings: records<DrMeeting>(rows.meetings),
     sessions: records<DrSession>(rows.sessions),

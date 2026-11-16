@@ -3,7 +3,7 @@
  * Every rule is checked here, so a burst of requests (the concurrency test) can never double-book
  * a room, a table or a person: each request is checked against the state the last one left.
  */
-import type { Ctx } from "../ctx";
+import { no, type Ctx } from "../ctx";
 import type { AppState } from "../types";
 import { addMinutes, fmtStamp } from "../time";
 import {
@@ -12,12 +12,14 @@ import {
   bothAccepted,
   canSee,
   drCan,
+  fieldLabel,
   fit,
   introExpired,
+  latestConsent,
   lapsed,
-  matchable,
   moveSpot,
   mustHaveMisses,
+  notMatchable,
   occupies,
   readyToSchedule,
   roleOf,
@@ -28,7 +30,7 @@ import {
   type SlotRequest,
 } from "./logic";
 import type { DealRoomState, DrMatch, DrMeeting, DrOpportunity, DrOutcome } from "./types";
-import { exception, leadOf, opsOf, send, withDr } from "./util";
+import { exception, introLink, leadOf, opsOf, send, withDr } from "./util";
 
 export type DrMeetAction =
   | { type: "dr/matchDecide"; seekerId: string; providerId: string; decision: "Approved" | "Rejected" | "Deferred"; note: string; override?: string }
@@ -81,8 +83,13 @@ export function draftBrief(dr: DealRoomState, m: DrMatch) {
     : partner
       ? `${p.org.name} (${p.providerKind}) works with businesses in ${p.mandate?.sectors.join(", ")} on ${(p.mandate?.instruments ?? []).join(", ").toLowerCase()}, with contracts of ${range}, typically deciding in ${p.mandate?.timeline || "weeks"}.`
       : `${p.org.name} (${p.providerKind}) invests ${range} in ${p.mandate?.sectors.join(", ")}, typically deciding in ${p.mandate?.timeline || "weeks"}.`;
+  // what the seeker gave of its traction, without empty parts
+  const traction = [s.traction?.revenueBand ? `Revenue ${s.traction.revenueBand}` : "", s.traction?.customers ?? "", s.traction?.metrics ?? ""]
+    .map((x) => x.trim().replace(/\.+$/, ""))
+    .filter(Boolean)
+    .join("; ");
   return {
-    text: `${s.org.name} (${s.org.sector}, ${s.org.country}) seeks ${ask} in ${s.ask?.instrument.toLowerCase()} for: ${(s.ask?.useOfFunds ?? "").replace(/\.+$/, "")}. ${s.traction?.revenueBand ?? ""}; ${(s.traction?.metrics ?? "").replace(/\.+$/, "")}.\n\n${side}\n\nWhy this pair: ${(m.note || `meets ${m.met.join(", ")}`).replace(/\.+$/, "")}.\n\nDecision-makers: ${s.decisionMaker.name}, ${s.decisionMaker.title}; ${p.decisionMaker.name}, ${p.decisionMaker.title}.`,
+    text: `${s.org.name} (${s.org.sector}, ${s.org.country}) seeks ${ask} in ${s.ask?.instrument.toLowerCase()} for: ${(s.ask?.useOfFunds ?? "").replace(/\.+$/, "")}.${traction ? ` ${traction}.` : ""}\n\n${side}\n\nWhy this pair: ${(m.note || `meets ${m.met.join(", ")}`).replace(/\.+$/, "")}.\n\nDecision-makers: ${s.decisionMaker.name}, ${s.decisionMaker.title}; ${p.decisionMaker.name}, ${p.decisionMaker.title}.`,
     agenda: ["Introductions and the ask, 5 minutes", ch ? "The challenge and the institution's questions, 10 minutes" : partner ? "The partner's requirements and questions, 10 minutes" : "The investor's mandate and questions, 10 minutes", "Next step and who follows up, 5 minutes"],
   };
 }
@@ -143,27 +150,37 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
   switch (action.type) {
     /* ----- matching (DR-7, DR-10, DL-7) ----- */
     case "dr/matchDecide": {
-      if (!drCan(me, "match")) return state;
+      if (!drCan(me, "match")) return no(ctx, state, "Your role doesn't decide matches");
       const seeker = dr.apps.find((a) => a.id === action.seekerId);
       const provider = dr.apps.find((a) => a.id === action.providerId);
-      if (!seeker || !provider) return state;
+      if (seeker?.type !== "seeker" || provider?.type !== "provider" || seeker.eventId !== provider.eventId) return no(ctx, state, "A match pairs a seeker with a counterparty in the same Deal Room");
       const cfg = dr.configs[seeker.eventId];
-      if (action.decision === "Approved" && (!matchable(seeker) || !matchable(provider))) return state;
+      const note = action.note.trim();
+      if (action.decision === "Approved") {
+        const why = notMatchable(seeker) ?? notMatchable(provider);
+        if (why) return no(ctx, state, why);
+      } else if (!note) return no(ctx, state, `Say why the pair is ${action.decision.toLowerCase()}`);
+      const existing = dr.matches.find((m) => m.seekerId === seeker.id && m.providerId === provider.id);
       const blocked = blockedPair(dr, seeker.id, provider.id, cfg);
-      if (blocked && !(action.override?.trim() && me!.role === "Lead")) return state;
+      if (blocked && !(action.override?.trim() && me!.role === "Lead"))
+        return no(ctx, state, me!.role === "Lead" ? `This pair was ${blocked.toLowerCase()} before: give the reason to propose it again` : `This pair was ${blocked.toLowerCase()} before; only the lead can propose it again`);
+      if (existing?.intro && !blocked) return no(ctx, state, "This pair has been introduced; its decision can't change now");
+      if (existing && !blocked && existing.decision === action.decision) return no(ctx, state, `This pair is already ${action.decision.toLowerCase()}`);
       const f = fit(seeker, provider, cfg);
       const mandatoryMiss = mustHaveMisses(cfg, provider, f.missed);
       // a ticket-size or exclusion miss needs a reviewer's note to approve (PRD Matching req. 2)
-      if (action.decision === "Approved" && (mandatoryMiss.length || f.exclusionHit) && !action.note.trim()) return state;
-      const existing = dr.matches.find((m) => m.seekerId === seeker.id && m.providerId === provider.id);
-      const entry = { at, by: me!.id, what: `${action.decision}${action.note ? `: ${action.note}` : ""}${blocked ? ` (re-proposed after ${blocked.toLowerCase()}, lead override)` : ""}` };
+      if (action.decision === "Approved" && !note) {
+        if (f.exclusionHit) return no(ctx, state, `${provider.org.name} excludes "${f.exclusionHit}": write why this pair should still meet`);
+        if (mandatoryMiss.length) return no(ctx, state, `The pair misses ${mandatoryMiss.map((x) => fieldLabel(x, provider).toLowerCase()).join(" and ")}, which must match: write why it should still meet`);
+      }
+      const entry = { at, by: me!.id, what: `${action.decision}${note ? `: ${note}` : ""}${blocked ? ` (re-proposed after ${blocked.toLowerCase()}, lead override)` : ""}` };
       if (existing) {
-        dr = patchMatch(dr, existing.id, (m) => ({ ...m, ...f, decision: action.decision, note: action.note, by: me!.id, at, intro: blocked ? undefined : m.intro, override: blocked ? { by: me!.id, at, reason: action.override! } : m.override, history: [...m.history, entry] }));
+        dr = patchMatch(dr, existing.id, (m) => ({ ...m, ...f, decision: action.decision, note, by: me!.id, at, intro: blocked ? undefined : m.intro, override: blocked ? { by: me!.id, at, reason: action.override!.trim() } : m.override, history: [...m.history, entry] }));
       } else {
-        const m: DrMatch = { id: ctx.newId("mx"), eventId: seeker.eventId, seekerId: seeker.id, providerId: provider.id, origin: "search", ...f, decision: action.decision, note: action.note, by: me!.id, at, history: [entry] };
+        const m: DrMatch = { id: ctx.newId("mx"), eventId: seeker.eventId, seekerId: seeker.id, providerId: provider.id, origin: "search", ...f, decision: action.decision, note, by: me!.id, at, history: [entry] };
         dr = { ...dr, matches: [...dr.matches, m] };
       }
-      if (blocked) dr = exception(ctx, dr, seeker.eventId, me!.id, "Re-proposed pair", `${seeker.org.name} and ${provider.org.name} after ${blocked.toLowerCase()}: ${action.override}`, seeker.ref ?? seeker.id);
+      if (blocked) dr = exception(ctx, dr, seeker.eventId, me!.id, "Re-proposed pair", `${seeker.org.name} and ${provider.org.name} after ${blocked.toLowerCase()}: ${action.override!.trim()}`, seeker.ref ?? seeker.id);
       if (action.decision === "Approved") {
         const m = dr.matches.find((x) => x.seekerId === seeker.id && x.providerId === provider.id)!;
         if (!m.brief) dr = patchMatch(dr, m.id, (x) => ({ ...x, brief: { ...draftBrief(dr, x), editedAt: at } }));
@@ -172,9 +189,11 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
     }
 
     case "dr/interest": {
-      const provider = dr.apps.find((a) => a.id === action.providerId);
-      if (!provider || !canSee(dr, provider, { kind: "teaser", seekerId: action.seekerId }).ok) return state;
-      if (dr.matches.some((m) => m.seekerId === action.seekerId && m.providerId === provider.id)) return state;
+      const provider = dr.apps.find((a) => a.id === action.providerId && a.type === "provider");
+      if (!provider) return no(ctx, state, "No such counterparty");
+      const see = canSee(dr, provider, { kind: "teaser", seekerId: action.seekerId });
+      if (!see.ok) return no(ctx, state, see.reason ?? "This opportunity isn't open to you");
+      if (dr.matches.some((m) => m.seekerId === action.seekerId && m.providerId === provider.id)) return no(ctx, state, "You've already shown interest in this opportunity");
       const seeker = dr.apps.find((a) => a.id === action.seekerId)!;
       const f = fit(seeker, provider, dr.configs[seeker.eventId]);
       dr = { ...dr, matches: [...dr.matches, { id: ctx.newId("mx"), eventId: seeker.eventId, seekerId: seeker.id, providerId: provider.id, origin: "interest", ...f, decision: "Suggested", note: "", by: "applicant", at, history: [{ at, by: "applicant", what: `${provider.org.name} expressed interest` }] }] };
@@ -183,47 +202,72 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
     }
 
     case "dr/brief": {
-      if (!drCan(me, "introduce")) return state;
-      return withDr(state, patchMatch(dr, action.matchId, (m) => ({ ...m, brief: { text: action.text, agenda: action.agenda.filter(Boolean), editedAt: at }, history: [...m.history, { at, by: me!.id, what: "Brief edited" }] })));
+      if (!drCan(me, "introduce")) return no(ctx, state, "Your role doesn't write introductions");
+      const m = dr.matches.find((x) => x.id === action.matchId);
+      if (!m) return no(ctx, state, "No such match");
+      if (m.decision !== "Approved") return no(ctx, state, "Approve the pair before writing its brief");
+      if (m.intro) return no(ctx, state, "The introduction has been sent; its brief can't change");
+      const text = action.text.trim();
+      const agenda = action.agenda.map((x) => x.trim()).filter(Boolean);
+      if (!text) return no(ctx, state, "Write the brief");
+      if (m.brief && m.brief.text === text && JSON.stringify(m.brief.agenda) === JSON.stringify(agenda)) return no(ctx, state, "The brief is already this");
+      return withDr(state, patchMatch(dr, m.id, (x) => ({ ...x, brief: { text, agenda, editedAt: at }, history: [...x.history, { at, by: me!.id, what: "Brief edited" }] })));
     }
 
     case "dr/introduce": {
+      if (!drCan(me, "introduce")) return no(ctx, state, "Your role doesn't send introductions");
       const m = dr.matches.find((x) => x.id === action.matchId);
-      if (!m || !drCan(me, "introduce") || m.decision !== "Approved" || !m.brief || m.intro) return state;
+      if (!m) return no(ctx, state, "No such match");
+      if (m.decision !== "Approved") return no(ctx, state, "Approve the pair before introducing it");
+      if (m.intro) return no(ctx, state, "The introduction has already been sent");
+      if (!m.brief) return no(ctx, state, "Write the brief first");
       const seeker = dr.apps.find((a) => a.id === m.seekerId)!;
       const provider = dr.apps.find((a) => a.id === m.providerId)!;
-      if (!matchable(seeker) || !matchable(provider)) return state;
-      const items = ["teaser", "profile", ...action.items.filter((i) => seeker.documents.some((d) => d.id === i))];
-      dr = patchMatch(dr, m.id, (x) => ({ ...x, intro: { items, sentAt: at, by: me!.id }, history: [...x.history, { at, by: me!.id, what: `Introduction sent with ${items.length - 2} document${items.length === 3 ? "" : "s"} proposed` }] }));
-      for (const id of [m.seekerId, m.providerId]) dr = send(ctx, dr, m.eventId, id, "You have a Deal Room introduction to review", `/dr/${id}`);
+      const why = notMatchable(seeker) ?? notMatchable(provider);
+      if (why) return no(ctx, state, why);
+      if (action.items.some((i) => !seeker.documents.some((d) => d.id === i))) return no(ctx, state, "Only the seeker's own documents can be proposed");
+      const docs = [...new Set(action.items)];
+      const items = ["teaser", "profile", ...docs];
+      dr = patchMatch(dr, m.id, (x) => ({ ...x, intro: { items, sentAt: at, by: me!.id }, history: [...x.history, { at, by: me!.id, what: `Introduction sent with ${docs.length} document${docs.length === 1 ? "" : "s"} proposed` }] }));
+      for (const id of [m.seekerId, m.providerId]) dr = send(ctx, dr, m.eventId, id, "You have a Deal Room introduction to review", introLink(id));
       return withDr(state, dr);
     }
 
     case "dr/respondIntro": {
       const m = dr.matches.find((x) => x.id === action.matchId);
-      if (!m?.intro || m.intro[action.side]) return state;
+      if (!m?.intro) return no(ctx, state, "There's no introduction to answer");
+      const mine = m.intro[action.side];
+      if (mine) return no(ctx, state, `You've already ${mine.response.toLowerCase()} this introduction`);
       const cfg = dr.configs[m.eventId];
-      if (introExpired(m, cfg, at)) return state;
-      dr = patchMatch(dr, m.id, (x) => ({ ...x, intro: { ...x.intro!, [action.side]: { response: action.response, reason: action.reason, at } }, history: [...x.history, { at, by: action.side === "seeker" ? m.seekerId : m.providerId, what: `${action.side === "seeker" ? "Seeker" : "Provider"} ${action.response.toLowerCase()}${action.reason ? `: ${action.reason}` : ""}` }] }));
+      if (introExpired(m, cfg, at)) return no(ctx, state, "This introduction expired unanswered");
+      if (m.intro[action.side === "seeker" ? "provider" : "seeker"]?.response === "Declined") return no(ctx, state, "The other party has declined this introduction");
+      const reason = action.reason?.trim() || undefined;
+      if (action.response === "Declined" && !reason) return no(ctx, state, "Say why, so the Deal Room team can find a better match");
+      const docs = m.intro.items.filter((i) => i !== "teaser" && i !== "profile");
+      if (action.side === "seeker" && (action.consent ?? []).some((d) => !docs.includes(d))) return no(ctx, state, "You can share only the documents this introduction proposes");
+      dr = patchMatch(dr, m.id, (x) => ({ ...x, intro: { ...x.intro!, [action.side]: { response: action.response, reason, at } }, history: [...x.history, { at, by: action.side === "seeker" ? m.seekerId : m.providerId, what: `${action.side === "seeker" ? "Seeker" : "Provider"} ${action.response.toLowerCase()}${reason ? `: ${reason}` : ""}` }] }));
       // the seeker's consent is recorded with the acceptance, per document, with its time and version (Flow 6)
       if (action.side === "seeker" && action.response === "Accepted") {
-        const docs = m.intro.items.filter((i) => i !== "teaser" && i !== "profile");
         for (const d of docs) {
           const prev = dr.consents.filter((c) => c.seekerId === m.seekerId && c.providerId === m.providerId && c.docId === d).length;
           dr = { ...dr, consents: [...dr.consents, { id: ctx.newId("cs"), seekerId: m.seekerId, providerId: m.providerId, docId: d, granted: (action.consent ?? []).includes(d), at, version: prev + 1 }] };
         }
       }
       const other = action.side === "seeker" ? m.providerId : m.seekerId;
-      dr = send(ctx, dr, m.eventId, other, `The other party ${action.response.toLowerCase()} your Deal Room introduction`, `/dr/${other}`);
+      dr = send(ctx, dr, m.eventId, other, `The other party ${action.response.toLowerCase()} your Deal Room introduction`, introLink(other));
       const fresh = dr.matches.find((x) => x.id === m.id)!;
       if (bothAccepted(fresh)) dr = send(ctx, dr, m.eventId, opsOf(dr, m.eventId), "A match is ready to schedule", "/dealroom/meetings", "Email");
       return withDr(state, dr);
     }
 
     case "dr/consent": {
+      // a seeker shares or withdraws one document with one counterparty, after accepting their introduction
+      const m = dr.matches.find((x) => x.seekerId === action.seekerId && x.providerId === action.providerId);
+      if (!m?.intro?.items.includes(action.docId) || action.docId === "teaser" || action.docId === "profile") return no(ctx, state, "This document isn't part of an introduction to them");
+      if (m.intro.seeker?.response !== "Accepted") return no(ctx, state, "Choose what to share when you accept the introduction");
       const prev = dr.consents.filter((c) => c.seekerId === action.seekerId && c.providerId === action.providerId && c.docId === action.docId);
-      const last = prev[prev.length - 1];
-      if (last && last.granted === action.granted) return state;
+      const last = latestConsent(dr, action.seekerId, action.providerId, action.docId);
+      if ((last?.granted ?? false) === action.granted) return no(ctx, state, action.granted ? "It's already shared with them" : "It isn't shared with them");
       dr = { ...dr, consents: [...dr.consents, { id: ctx.newId("cs"), seekerId: action.seekerId, providerId: action.providerId, docId: action.docId, granted: action.granted, at, version: prev.length + 1 }] };
       if (!action.granted) {
         const seeker = dr.apps.find((a) => a.id === action.seekerId)!;
@@ -235,10 +279,11 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
     case "dr/access": {
       // every opening of a profile or a document is logged where the seeker can see it (PRD Confidentiality req. 4)
       const viewer = dr.apps.find((a) => a.id === action.viewer);
-      if (!viewer) return state;
+      if (!viewer) return no(ctx, state, "No such participant");
       const r = action.item === "profile" ? { kind: "profile" as const, seekerId: action.seekerId } : action.item === "teaser" ? { kind: "teaser" as const, seekerId: action.seekerId } : { kind: "doc" as const, seekerId: action.seekerId, docId: action.item };
-      if (!canSee(dr, viewer, r).ok) return state;
-      if (action.action === "download" && r.kind === "doc" && !dr.apps.find((a) => a.id === action.seekerId)?.documents.find((d) => d.id === action.item)?.download) return state;
+      const see = canSee(dr, viewer, r);
+      if (!see.ok) return no(ctx, state, see.reason ?? "This isn't open to you");
+      if (action.action === "download" && r.kind === "doc" && !dr.apps.find((a) => a.id === action.seekerId)?.documents.find((d) => d.id === action.item)?.download) return no(ctx, state, "The seeker allows this document to be viewed, not downloaded");
       return withDr(state, { ...dr, access: [{ id: ctx.newId("ac"), seekerId: action.seekerId, item: action.item, viewer: viewer.id, action: action.action, at }, ...dr.access] });
     }
 

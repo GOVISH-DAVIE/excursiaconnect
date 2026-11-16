@@ -164,6 +164,14 @@ export function roleOf(a: DrApplication): DrRole {
   return isPartnerKind(a.providerKind) ? "partner" : "capital";
 }
 /** The organisation types each provider-side pathway offers; a challenge comes from a public institution or a corporate buyer. */
+/** What a participant is, in a few words: a seeker, an investor's kind, a partner's or a challenge's. */
+export function participantLabel(a: DrApplication) {
+  const role = roleOf(a);
+  if (role === "seeker") return ROLE_LABEL.seeker;
+  if (role === "challenge") return `Challenge, ${(a.providerKind ?? "institution").toLowerCase()}`;
+  if (role === "partner") return a.providerKind ? `Partner, ${a.providerKind.toLowerCase()}` : ROLE_LABEL.partner;
+  return a.providerKind ?? ROLE_LABEL.capital;
+}
 export const KINDS_FOR: Record<Exclude<DrRole, "seeker">, ProviderKind[]> = { capital: CAPITAL_KINDS, partner: PARTNER_KINDS, challenge: CHALLENGE_KINDS };
 /* ---------- sessions: the paper's activity formats and four-day programme ---------- */
 
@@ -289,6 +297,18 @@ export function matchable(app: DrApplication) {
   if (app.reReview) return false;
   if (app.type === "provider") return app.verification?.state === "Verified";
   return qualified(app) && openConditions(app).length === 0 && app.readiness === "Deal Room Ready" && feeSettled(app);
+}
+
+/** Why a participant is not open to matching yet, in words for the team; undefined when it is (M3.1). */
+export function notMatchable(app: DrApplication): string | undefined {
+  if (matchable(app)) return undefined;
+  const name = app.org?.name || app.ref || "This participant";
+  if (app.reReview) return `${name} is being re-reviewed after a material change`;
+  if (app.type === "provider") return `${name} isn't verified yet`;
+  if (!qualified(app)) return `${name} isn't qualified`;
+  if (openConditions(app).length) return `${name} still has conditions to meet`;
+  if (app.readiness !== "Deal Room Ready") return `${name} isn't marked Deal Room Ready`;
+  return `${name} hasn't settled the Deal Room fee`;
 }
 
 /** Why a seeker cannot be Deal Room Ready yet; empty when it can (PRD Qualification req. 6). */
@@ -493,14 +513,23 @@ export function canSee(dr: DealRoomState, viewer: DrApplication, r: Resource): {
   const both = match.intro.seeker?.response === "Accepted" && match.intro.provider?.response === "Accepted";
   if (!both) return { ok: false, reason: "Documents open once both of you accept the introduction." };
   if (!match.intro.items.includes(r.docId)) return { ok: false, reason: "Not part of this introduction." };
-  if (!consentGranted(dr, seeker.id, viewer.id, r.docId)) return { ok: false, reason: "The seeker has not consented to share this document with you." };
+  if (!consentGranted(dr, seeker.id, viewer.id, r.docId)) return { ok: false, reason: "The business hasn't shared this document with you." };
   return { ok: true };
 }
 
 /** The latest consent entry for a document and a named provider decides. */
 export function consentGranted(dr: DealRoomState, seekerId: string, providerId: string, docId: string) {
-  const last = [...dr.consents].reverse().find((c) => c.seekerId === seekerId && c.providerId === providerId && c.docId === docId);
-  return !!last?.granted;
+  return !!latestConsent(dr, seekerId, providerId, docId)?.granted;
+}
+
+/**
+ * The entry that decides a document's consent: the highest version, not the last in the list. Stored rows come back
+ * in their ids' order, which isn't the order they were made in (M3.1).
+ */
+export function latestConsent(dr: DealRoomState, seekerId: string, providerId: string, docId: string) {
+  let last: DealRoomState["consents"][number] | undefined;
+  for (const c of dr.consents) if (c.seekerId === seekerId && c.providerId === providerId && c.docId === docId && (!last || c.version > last.version)) last = c;
+  return last;
 }
 
 /* ---------- matching (Cut 2) ---------- */

@@ -65,12 +65,17 @@ function Decision({ slug, app }: { slug: string; app: MyApplication }) {
   );
 }
 
-/** The badge has its own page, for the desk and the doors (M2.1). */
+/** The badge has its own page, for the desk and the doors (M2.1); so do the introductions (M3.1). */
 function BadgeLink({ slug }: { slug: string }) {
   return (
-    <Link href={`/e/${slug}/badge`} className="btn btn-primary mt-4 w-full sm:w-auto">
-      Open my Deal Room badge
-    </Link>
+    <div className="mt-4 flex flex-wrap gap-2">
+      <Link href={`/e/${slug}/badge`} className="btn btn-primary w-full sm:w-auto">
+        Open my Deal Room badge
+      </Link>
+      <Link href={`/e/${slug}/deal-room/introductions`} className="btn btn-secondary w-full sm:w-auto">
+        My introductions
+      </Link>
+    </div>
   );
 }
 

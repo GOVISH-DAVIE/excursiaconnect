@@ -29,8 +29,8 @@ describe("apply", () => {
   });
 
   test("a refusal a rule does not explain still comes back, never silent", () => {
-    // matching is Phase 3: its refusals get reasons there; until then the generic one stands in
-    const r = run({ type: "dr/matchDecide", seekerId: "nobody", providerId: "nobody", decision: "Approved", note: "" }, lead);
+    // scheduling's refusals get their reasons with M3.2; until then the generic one stands in
+    const r = run({ type: "dr/confirm", meetingId: "nobody", side: "seeker" }, lead);
     expect(r.refusal).toBe(UNEXPLAINED);
   });
 });

@@ -825,13 +825,68 @@ Each milestone from here on builds its feature the same way, as in [architecture
 
 | # | Milestone | Done when |
 | --- | --- | --- |
-| M3.1 | **Matching and introductions**: candidates and fit, decisions, briefs, introductions and answers, intro expiry, consent per document, the access log, watermarked downloads | A pair is introduced and accepts; a document opens only under consent and is logged |
+| M3.1 | **Matching and introductions**: candidates and fit, decisions, briefs, introductions and answers, intro expiry, consent per document, the access log, watermarked downloads | A pair is introduced and accepts; a document opens only under consent and is logged **The introduction loop built 16 Nov 2026:** candidates with their fit, decisions with reasons, the brief, introductions with chosen documents, both answers, consent per document with withdrawal, the profile and stamped copies opened through two-minute links, every opening logged. Teasers, the directory and expressions of interest are next. Notes below |
 | M3.2 | **Scheduling**: `DrBusy` with exclusion constraints, lapse release, caps under advisory locks, confirm and change, auto-propose as a job, .ics invites, reminders | The PRD's three 50-request bursts book no clash; auto-propose for 150 pairs finishes within 10 s |
 | M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server |
 | M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds |
 | M3.5 | **Offline on the day**: live board and scanners queue offline and sync with client ids; conflicts go to the lead; incidents are logged | A forced 10-minute outage loses nothing |
 | M3.6 | **Every role, walked through**: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight | No role sees a screen or a record it shouldn't, and no link ends in a refusal |
 | M3.7 | **Freeze and rehearsal**: freeze Fri 22 Jan; rehearsal on staging with real phones Wed 10 Feb; printed backups; restore drill and failover to the standby server | **The summit runs 15 to 18 Feb 2027** |
+
+**Notes on M3.1, matching and introductions, 16 Nov 2026:**
+
+- **Scope, decided with the user:** the introduction loop first. Teasers written by the seeker and approved by staff, the directory for verified providers and expressions of interest come next. The rules for interest already give their reasons.
+- **The rules** (`domain dealroom/meetings.ts`), unchanged in what they allow, now say why they refuse:
+  - Approving a pair needs both sides open to matching, and the refusal names who isn't and why (`notMatchable`: re-review, not verified, not qualified, conditions open, not Deal Room Ready, fee unpaid).
+  - Deferring or rejecting needs a reason. A must-have miss or an exclusion hit needs the reviewer's note to approve.
+  - A pair rejected, declined or expired before comes back only with the lead's reason, logged as an exception.
+  - Once introduced, a pair's decision and brief no longer change. The introduction proposes only the seeker's own documents.
+  - A decline needs its reason. The seeker shares only documents the introduction proposed, chooses them when accepting, and may share or withdraw each one later. Each choice is a new consent entry with a higher version.
+  - The entry with the highest version decides a document's consent. Stored rows load in their ids' order, so "the last in the list" was arbitrary on the server: a withdrawal could come back. Found by the API tests; the mapper now also sorts by version.
+- **The team's side** (`/v1/matching/:eventId`, `/team/matching`):
+  - The lead, reviewers and coordinators match; operations is refused, and schedules the accepted pairs with M3.2.
+  - The board lists who is open to matching on each side, filtered by mission and name. Each participant's candidates show the fit field by field, in the lead's order.
+  - The pairs tab lists every pair by stage, opening on those approved and waiting for their introduction.
+  - The pair's page shows both parties and how they fit. It also has the brief, editable until sent, and the introduction with the documents to propose. Once sent, it shows each side's answer, the consent per document and every opening. The history comes last.
+  - Reads load the event's aggregate without the lock; every write runs through runCommand and is audited.
+- **The participant's side** (`/v1/introductions/:slug`, `/e/:slug/deal-room/introductions`):
+  - Signed in with the email they applied with, they see the introductions of their own applications only, as seeker or counterparty.
+  - The emails link here (`/dr/<id>?intros=1`, mapped by the outbox).
+  - The counterparty opens the seeker's full profile from the introduction, and each document once both have accepted and the seeker shares it. The seeker sees every opening of their file.
+  - The other side's answer is shown without its reason.
+- **Stamped copies** (`storage/stamp.ts`, pdf-lib):
+  - A PDF, or a PNG or JPEG put on a page of its own, opens as a copy carrying the viewer's name, organisation and the time four times across each page, sized to fit, plus a footer line. The original is never changed.
+  - Opening one runs the rules' `dr/access`, which checks and logs it. Then a signed two-minute link serves the copy, shown in the browser or downloaded. The link names the file, the stamp's words and its expiry, signed with a key derived from AUTH_SECRET.
+  - A damaged or password-protected file is refused with the reason before anything is logged. The walk-through's stand-in deck from M1.1 was such a file.
+  - Word, Excel and PowerPoint files can't be stamped, so they are downloaded as they are, and only where the seeker allows downloads.
+  - Files over 40 MB aren't stamped either.
+- **Not yet:**
+  - teasers, the directory and expressions of interest
+  - an email when an introduction expires unanswered (the stage shows it)
+  - the seeker choosing view-only per document (every upload allows downloads today)
+  - Oversight's read-only view of matching (M4.3)
+- **Tested:**
+  - 12 rule tests.
+  - 6 API tests:
+    - the board, and its refusals for operations and participants
+    - approve, brief and introduce: audited, and both sides emailed with the introductions link
+    - each side sees only its own; a stranger sees none and can't answer
+    - the profile opens with the introduction and is logged; a document waits for both answers
+    - both accept; the stamped copy is served inline, a changed link is refused
+    - the access log; a withdrawal closes the document at once; the team sees the same
+  - In the browser on the walk-through database, at phone width:
+    - Kilimo Fresh's readiness was scored and it was marked Deal Room Ready.
+    - The lead approved Kilimo Fresh with Savanna Freight, writing the note the three must-have misses required. The lead then edited the brief and introduced them with the pitch deck and the financial statements.
+    - Savanna Freight opened the profile and accepted. Kilimo Fresh accepted, sharing the deck only.
+    - Savanna Freight's deck was first refused as unreadable. That was the M1.1 stand-in, replaced with a real two-page PDF. Its stamped copy was checked by rendering it.
+    - The financial statements stayed closed with the reason. Kilimo Fresh saw each opening and withdrew the deck, and the lead's page showed it withdrawn with every opening.
+    - Found and fixed in the browser:
+      - a server error on an unreadable file, now refused with the reason on the page
+      - the stamp running off a landscape page
+      - an empty "; ." in drafted briefs when traction is missing
+      - cramped lists at phone width
+      - the pairs tab opening on an empty stage
+
 
 ### Phase 4: After the summit (22 February to 19 March 2027)
 

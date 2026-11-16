@@ -14,14 +14,19 @@ const BACKOFF_MIN = [1, 5, 15, 60, 240];
 /** Where the link in the email points, on the web app. */
 export function linkFor(web: string, r: Recipient, link: string): string {
   if (r.kind === "applicant") {
-    // the badge's own page (M2.1); every other message goes to the application
+    // the badge's own page (M2.1) and the introductions (M3.1); every other message goes to the application
     if (/[?&]badge=1/.test(link) && r.slug) return `${web}/e/${r.slug}/badge`;
+    // an introduction to answer, or the other side's answer to one (M3.1)
+    if (/[?&]intros=1/.test(link) && r.slug) return `${web}/e/${r.slug}/deal-room/introductions`;
     const apply = r.slug ? `/e/${r.slug}/deal-room/apply` : "/signin";
     return `${web}${apply}${link.includes("invite=") && r.invite ? `?invite=${encodeURIComponent(r.invite)}` : ""}`;
   }
   if (r.kind === "staff") {
     const app = /\/dealroom\/applications\/(dr_[a-z0-9_]+)/.exec(link)?.[1];
-    return `${web}${app ? `/team/applications/${app}` : "/team"}`;
+    if (app) return `${web}/team/applications/${app}`;
+    // an expression of interest, a match to look at (M3.1)
+    if (/\/dealroom\/(matching|matches)\b/.test(link)) return `${web}/team/matching`;
+    return `${web}/team`;
   }
   return `${web}${link.startsWith("/") ? link : "/team"}`;
 }

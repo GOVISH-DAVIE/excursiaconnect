@@ -22,7 +22,9 @@ function navFor(r: ReturnType<typeof rolesOf>): NavItem[] {
   if (r.admin) nav.push({ href: "/team/admin", label: "Organisers and events" });
   if (r.superAdmin) nav.push({ href: "/team/admin/team", label: "Algotech team" });
   if (r.owner) nav.push({ href: "/team/organisation", label: "Organisation and KYC" }, { href: "/team/events", label: "Events" });
-  if (r.dealRoom) nav.push({ href: "/team/applications", label: "Review queue" }, { href: "/team/messages", label: "Messages" });
+  if (r.dealRoom) nav.push({ href: "/team/applications", label: "Review queue" });
+  if (r.matching) nav.push({ href: "/team/matching", label: "Matching" });
+  if (r.dealRoom) nav.push({ href: "/team/messages", label: "Messages" });
   if (r.desk) nav.push({ href: "/team/desk", label: "Desk scanners" });
   if (r.lead) nav.push({ href: "/team/dealroom/settings", label: "Deal Room settings" });
   return nav;

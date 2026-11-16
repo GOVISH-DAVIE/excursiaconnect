@@ -20,9 +20,11 @@ describe("the email around a message", () => {
     expect(linkFor(WEB, applicant, "/dr/dr_cs1")).toBe(`${WEB}/e/savanna-summit/deal-room/apply`);
     // a message about the badge opens the badge (M2.1)
     expect(linkFor(WEB, applicant, "/dr/dr_cs1?badge=1")).toBe(`${WEB}/e/savanna-summit/badge`);
+    expect(linkFor(WEB, applicant, "/dr/dr_cs1?intros=1")).toBe(`${WEB}/e/savanna-summit/deal-room/introductions`);
     expect(linkFor(WEB, applicant, "/e/connected-africa-3/deal-room/apply?invite=old")).toBe(`${WEB}/e/savanna-summit/deal-room/apply?invite=tok123`);
     expect(linkFor(WEB, staff, "/dealroom/applications/dr_cs_ab12")).toBe(`${WEB}/team/applications/dr_cs_ab12`);
     expect(linkFor(WEB, staff, "/dealroom/meetings")).toBe(`${WEB}/team`);
+    expect(linkFor(WEB, staff, "/dealroom/matching")).toBe(`${WEB}/team/matching`);
     expect(linkFor(WEB, { ...staff, kind: "user" }, "/team/organisation")).toBe(`${WEB}/team/organisation`);
   });
 
