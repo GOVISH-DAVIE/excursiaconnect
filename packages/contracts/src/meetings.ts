@@ -7,6 +7,7 @@
  * exclusion constraint is the last word.
  */
 import { z } from "zod";
+import { MySession } from "./sessions";
 
 const EventId = z.string().regex(/^ev_[a-z0-9_]+$/, "an event id");
 const MeetingId = z.string().regex(/^mt_[a-z0-9_]{2,80}$/, "a meeting id");
@@ -21,6 +22,7 @@ export const ScheduleParams = z.object({ eventId: EventId });
 export const MeetingParams = ScheduleParams.extend({ meetingId: MeetingId });
 export const MyMeetingsParams = z.object({ slug: Slug });
 export const MyMeetingParams = MyMeetingsParams.extend({ meetingId: MeetingId });
+export const MySessionParams = MyMeetingsParams.extend({ sessionId: z.string().regex(/^ses_[a-z0-9_]{1,60}$/, "a session id") });
 export const SlotsQuery = z.object({ matchId: MatchId, day: Day, flagged: z.enum(["1", "0"]).optional(), meetingId: MeetingId.optional() });
 export const TimesQuery = z.object({ day: Day });
 
@@ -131,6 +133,8 @@ export type MyMeeting = z.infer<typeof MyMeeting>;
 export const MyMeetings = z.object({
   event: z.object({ name: z.string(), slug: z.string(), days: z.array(Day), now: Wall }),
   meetings: z.array(MyMeeting),
+  /** the sessions they host or are invited to (M3.3): one schedule with their meetings */
+  sessions: z.array(MySession),
 });
 export type MyMeetings = z.infer<typeof MyMeetings>;
 

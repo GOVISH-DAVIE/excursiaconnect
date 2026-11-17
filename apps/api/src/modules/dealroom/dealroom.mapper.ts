@@ -123,6 +123,15 @@ export function dealRoomToRows(dr: DealRoomState, eventId: string, now: string):
       }));
     });
 
+  // a session holds its room, its host and everyone who accepted, from its start to its end: no buffer, as the
+  // rules check one session against another; a meeting's own rows carry the buffer that keeps the two apart
+  for (const x of mine(dr.sessions)) {
+    if (x.cancelled) continue;
+    const people = new Set([...(x.host ? [x.host] : []), ...Object.entries(x.responses).filter(([, r]) => r.answer === "Accepted").map(([id]) => id)]);
+    for (const key of [`room:${x.roomId}:0`, ...[...people].map((id) => `app:${id}`)])
+      busy.push({ id: `${x.id}:${key}`, eventId, source: "session" as const, sourceId: x.id, key, from: toInstant(x.start), to: toInstant(x.end), active: true, confirmBy: null });
+  }
+
   const record: DrConfigRecord = { config, liveWindow: dr.liveWindow, archivedAt: dr.archivedAt, grants: dr.grants, adminLog: dr.adminLog };
 
   return {

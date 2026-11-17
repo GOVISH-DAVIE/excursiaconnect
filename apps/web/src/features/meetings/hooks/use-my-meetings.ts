@@ -25,3 +25,12 @@ export function useMyMeetingActions(slug: string, meetingId: string) {
     }),
   };
 }
+
+/** The participant's answer to a session's invitation (M3.3). */
+export function useSessionAnswer(slug: string, sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (answer: "Accepted" | "Declined") => meetingsApi.respondSession(slug, sessionId, answer),
+    onSuccess: (all) => queryClient.setQueryData(meetingsKeys.mine(slug), all),
+  });
+}

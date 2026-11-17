@@ -91,7 +91,7 @@ function Aside({ slug }: { slug: string }) {
         </li>
       </ul>
       <Link href={`/e/${slug}/deal-room/meetings`} className="link mt-4 inline-block text-[14px]">
-        See your meetings
+        See your schedule
       </Link>
     </Panel>
   );

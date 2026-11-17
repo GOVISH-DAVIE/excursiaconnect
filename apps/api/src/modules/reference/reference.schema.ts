@@ -43,6 +43,7 @@ const DrConfig = z.looseObject({
   multiplePerOrg: z.boolean(),
   rooms: z.record(z.string(), z.object({ tables: z.number().int().min(0), from: z.string(), to: z.string(), name: z.string().min(1).max(60).optional() })),
   sessionRooms: z.array(z.string()),
+  sessionRoomNames: z.record(z.string(), z.string().min(1).max(60)).optional(),
   log: z.array(z.unknown()).default([]),
 });
 

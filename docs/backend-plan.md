@@ -827,7 +827,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | --- | --- | --- |
 | M3.1 | **Matching and introductions**: candidates and fit, decisions, briefs, introductions and answers, intro expiry, consent per document, the access log, watermarked downloads | A pair is introduced and accepts; a document opens only under consent and is logged **Built 16 Nov 2026:** candidates with their fit, decisions with reasons, the brief, introductions with chosen documents, both answers, consent per document with withdrawal, the profile and stamped copies opened through two-minute links, every opening logged; then the business's teaser and its approval, the directory for verified counterparties, expressions of interest in the team's queue, view-only documents, and the email when an introduction expires unanswered. Notes below |
 | M3.2 | **Scheduling**: `DrBusy` with exclusion constraints, lapse release, caps under advisory locks, confirm and change, auto-propose as a job, .ics invites, reminders | The PRD's three 50-request bursts book no clash; auto-propose for 150 pairs finishes within 10 s **Built 17 Nov 2026:** the team's schedule with a slot picker, auto-propose, moves, cancellations and caps; each participant confirms, asks to move, answers a move and adds a meeting to its calendar; lapsed proposals release their slot and are told once; reminders a day and half an hour before. The bursts book 1, 4 and 6 of 50 with no clash; auto-propose drafts 150 pairs in about 1.7 s. Notes below |
-| M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server |
+| M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server **Built 17 Nov 2026:** the team's Sessions page (plan, change, invite, cancel, attendance, outcomes) and sessions in each participant's schedule (accept or decline, with the reason when a meeting is in the way); every refusal says why; a session holds its room, host and whoever accepted in the database too. Door scans wait for the room doors (M2.2). Notes below |
 | M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds |
 | M3.5 | **Offline on the day**: live board and scanners queue offline and sync with client ids; conflicts go to the lead; incidents are logged | A forced 10-minute outage loses nothing |
 | M3.6 | **Every role, walked through**: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight | No role sees a screen or a record it shouldn't, and no link ends in a refusal |
@@ -964,6 +964,44 @@ Each milestone from here on builds its feature the same way, as in [architecture
     - the calendar file's name, which the browser can't read across origins and the page now builds itself
     - a request button too wide for a phone
 
+
+**Notes on M3.3, sessions, 17 Nov 2026:**
+
+- **The rules** (`domain dealroom/sessions.ts`): every session refusal now says why.
+  - These include the role, a format that needs a host, an answer for someone else or the same answer twice, a cancellation with no reason, attendance outside its window and an outcome for someone not marked present.
+  - **Closed a gap:** moving a session now checks everyone who accepted it, as well as the host, against their meetings and other sessions, and names who is in the way. Before, only the host was checked.
+  - The staff member running a session is emailed when a participant changes their answer, not on every first answer.
+- **The database:** a session that goes ahead holds its room (`room:<id>:0`), its host and everyone who accepted, from its start to its end, in `dr_busy`.
+  - These rows carry no buffer, since the rules check one session against another without one; a meeting's own rows carry the buffer.
+  - So the exclusion constraint covers sessions and meetings together, and is never stricter than the rules. A cancelled session holds nothing.
+- **Rooms:** the session rooms' names come from the settings (`sessionRoomNames`), as the meeting rooms' do. The local demo database was given them directly.
+- **The team** (`/v1/sessions/:eventId`, `/team/sessions`):
+  - **Who:** the lead, operations and coordinators plan, invite, move and cancel. Reviewers see the page and record outcomes. Oversight is refused until M4.3.
+  - **The page:** day by day, each session with its answers and, once under way, its attendance and outcomes left to record. A session opens on its people, with a large attendance tick on a phone and the outcome with its next step.
+  - **Inviting:** the invite list puts those on the session's track first, and says who would be busy then.
+- **The participant** (`/v1/my-meetings/:slug`, `/e/:slug/deal-room/meetings`): sessions join the meetings in one schedule, day by day, and the tab is now "Schedule".
+  - An invitation is accepted or declined in its row.
+  - When a meeting is in the way, the row says which, and offers only Decline.
+  - The tab's count includes invitations to answer.
+  - Session emails (`?tab=Programme`) open the schedule.
+- **Not yet:** attendance from the room doors' scanners (`dr/sessionArrive`) waits for the doors (M2.2); reminders before a session.
+- **Tested:**
+  - 4 rule tests on the refusals and the move check.
+  - A mapper test that each session holds its room, host and those who accepted.
+  - 6 API tests:
+    - the board and who may see it
+    - planning, with its refusals, audit and emails
+    - an invitation accepted from the schedule and held in the database
+    - a move refused onto a meeting
+    - a cancellation that frees the time
+    - attendance and outcomes on the day
+  - In the browser on the demo database:
+    - Operations invited Atlas Innovation Hub to a briefing; the list marked who was busy.
+    - At phone width, Baobab Logistics saw two invitations it can't accept for its meetings, and declined one. The count went from 2 to 1.
+    - Fixed in the browser:
+      - waiting items' dates wrapping after a comma
+      - an amber message under the contrast floor
+      - the day buttons stacking on a phone
 
 ### Phase 4: After the summit (22 February to 19 March 2027)
 

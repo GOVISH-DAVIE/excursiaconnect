@@ -10,8 +10,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { MyMeeting, MyMeetings } from "@excursia/contracts/meetings";
+import type { MySession } from "@excursia/contracts/sessions";
 import { fmtStamp } from "@excursia/domain/time";
-import { useMoveTimes, useMyMeetingActions, useMyMeetings } from "@/features/meetings/hooks/use-my-meetings";
+import { useMoveTimes, useMyMeetingActions, useMyMeetings, useSessionAnswer } from "@/features/meetings/hooks/use-my-meetings";
 import { Panel, ParticipantPage, Skeleton } from "../participant";
 
 export function MyMeetingsPage({ slug }: { slug: string }) {
@@ -19,9 +20,9 @@ export function MyMeetingsPage({ slug }: { slug: string }) {
     <ParticipantPage
       slug={slug}
       page="meetings"
-      title="Meetings"
-      lede="Your one-to-one meetings in the Deal Room. Confirm each one by its date: a time nobody confirms is released for others."
-      signIn="Sign in to see your meetings"
+      title="Your schedule"
+      lede="Your one-to-one meetings and the sessions you take part in, day by day. Confirm each meeting by its date and answer each invitation; a time nobody confirms is released for others."
+      signIn="Sign in to see your schedule"
       aside={<HowItWorks slug={slug} />}
     >
       <Body slug={slug} />
@@ -31,15 +32,21 @@ export function MyMeetingsPage({ slug }: { slug: string }) {
 
 /** Whether the meeting is behind us: held, a no-show, or its time gone. */
 const done = (m: MyMeeting, now: string) => m.status === "Held" || m.status === "No-show" || (m.end <= now && m.status !== "In progress");
-/** What the participant must do about it now, if anything. */
+/** What the participant must do about a meeting now, if anything. */
 const needs = (m: MyMeeting) => m.can.confirm || m.can.answer;
+/** An invitation still to answer (one they can't accept for a clash still asks for a decline or a word to the team). */
+const toAnswer = (x: MySession) => x.role === "invited" && !x.answer && !x.cancelled && x.can.decline;
+
+/** One line of the schedule: a meeting or a session. */
+type Entry = { kind: "meeting"; m: MyMeeting } | { kind: "session"; x: MySession };
+const startOf = (e: Entry) => (e.kind === "meeting" ? e.m.start : e.x.start);
 
 function Body({ slug }: { slug: string }) {
   const q = useMyMeetings(slug, true);
   if (q.isPending) return <Skeleton rows={4} />;
   if (q.isError)
     return (
-      <Panel title="Your meetings didn't load">
+      <Panel title="Your schedule didn't load">
         <p className="mb-4 text-[15px] text-slate">{q.error.message}</p>
         <button className="btn-secondary" onClick={() => q.refetch()}>
           Try again
@@ -47,11 +54,11 @@ function Body({ slug }: { slug: string }) {
       </Panel>
     );
   const d = q.data;
-  if (!d.meetings.length)
+  if (!d.meetings.length && !d.sessions.length)
     return (
-      <Panel title="No meetings yet">
+      <Panel title="Nothing on your schedule yet">
         <p className="max-w-[60ch] text-[15px] text-slate">
-          Once you and the other party both accept an introduction, the Deal Room team proposes a time and a table, and we email you to confirm it. It then appears here.
+          Once you and the other party both accept an introduction, the Deal Room team proposes a time and a table, and we email you to confirm it. Invitations to sessions such as presentations and roundtables come here too.
         </p>
         <Link href={`/e/${slug}/deal-room/introductions`} className="btn-secondary mt-4">
           See your introductions
@@ -59,34 +66,34 @@ function Body({ slug }: { slug: string }) {
       </Panel>
     );
   const now = d.event.now;
-  const ahead = d.meetings.filter((m) => !done(m, now));
-  const earlier = d.meetings.filter((m) => done(m, now)).reverse();
-  const waiting = ahead.filter(needs);
-  const days = [...new Set(ahead.map((m) => m.start.slice(0, 10)))];
+  const entries: Entry[] = [...d.meetings.map((m) => ({ kind: "meeting" as const, m })), ...d.sessions.map((x) => ({ kind: "session" as const, x }))].sort((a, b) => startOf(a).localeCompare(startOf(b)));
+  const isDone = (e: Entry) => (e.kind === "meeting" ? done(e.m, now) : e.x.end <= now || (!!e.x.cancelled && e.x.start <= now));
+  const ahead = entries.filter((e) => !isDone(e));
+  const earlier = entries.filter(isDone).reverse();
+  const waitingMeetings = ahead.flatMap((e) => (e.kind === "meeting" && needs(e.m) ? [e.m] : []));
+  const waitingSessions = ahead.flatMap((e) => (e.kind === "session" && toAnswer(e.x) ? [e.x] : []));
+  const days = [...new Set(ahead.map((e) => startOf(e).slice(0, 10)))];
+  const key = (e: Entry) => (e.kind === "meeting" ? `${e.m.id}:${e.m.side}` : e.x.id);
   return (
     <>
-      {waiting.length > 0 && <Waiting list={waiting} />}
+      {waitingMeetings.length + waitingSessions.length > 0 && <Waiting meetings={waitingMeetings} sessions={waitingSessions} />}
       {days.map((day) => {
-        const list = ahead.filter((m) => m.start.slice(0, 10) === day);
+        const list = ahead.filter((e) => startOf(e).slice(0, 10) === day);
         return (
           <section key={day} aria-labelledby={`day-${day}`}>
             <h2 id={`day-${day}`} className="mb-3 flex items-baseline gap-2 text-[17px] font-medium">
               {fmtStamp(`${day} 00:00`, false)}
-              <span className="text-[14px] font-normal text-slate">
-                {list.length} meeting{list.length === 1 ? "" : "s"}
-              </span>
+              <span className="text-[14px] font-normal text-slate">{countOf(list)}</span>
             </h2>
             <ul className="agenda surface overflow-hidden">
-              {list.map((m) => (
-                <Row key={`${m.id}:${m.side}`} slug={slug} m={m} d={d} />
-              ))}
+              {list.map((e) => (e.kind === "meeting" ? <Row key={key(e)} slug={slug} m={e.m} d={d} /> : <SessionRowItem key={key(e)} slug={slug} x={e.x} />))}
             </ul>
           </section>
         );
       })}
       {ahead.length === 0 && (
         <Panel title="Nothing ahead">
-          <p className="text-[15px] text-slate">Every meeting has taken place. Their record is below.</p>
+          <p className="text-[15px] text-slate">Everything on your schedule has taken place. Its record is below.</p>
         </Panel>
       )}
       {earlier.length > 0 && (
@@ -95,12 +102,10 @@ function Body({ slug }: { slug: string }) {
             <svg className="size-4 transition-transform group-open:rotate-90" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            Earlier ({earlier.length})
+            Earlier, {earlier.length}
           </summary>
           <ul className="agenda surface mt-3 overflow-hidden">
-            {earlier.map((m) => (
-              <Row key={`${m.id}:${m.side}`} slug={slug} m={m} d={d} past />
-            ))}
+            {earlier.map((e) => (e.kind === "meeting" ? <Row key={key(e)} slug={slug} m={e.m} d={d} past /> : <SessionRowItem key={key(e)} slug={slug} x={e.x} past />))}
           </ul>
         </details>
       )}
@@ -108,27 +113,106 @@ function Body({ slug }: { slug: string }) {
   );
 }
 
-/** What waits on the participant, each a link down to its meeting. */
-function Waiting({ list }: { list: MyMeeting[] }) {
+/** "2 meetings, 1 session" for a day's heading. */
+function countOf(list: Entry[]) {
+  const m = list.filter((e) => e.kind === "meeting").length;
+  const x = list.length - m;
+  return [m ? `${m} meeting${m === 1 ? "" : "s"}` : "", x ? `${x} session${x === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
+}
+
+/** What waits on the participant, each a link down to its line in the schedule. */
+function Waiting({ meetings, sessions }: { meetings: MyMeeting[]; sessions: MySession[] }) {
+  const n = meetings.length + sessions.length;
   return (
     <section className="surface p-5 sm:p-6" aria-labelledby="waiting-title">
       <h2 id="waiting-title" className="h2 flex items-center gap-2">
         <span className="portal__count" aria-hidden="true">
-          {list.length}
+          {n}
         </span>
-        {list.length === 1 ? "One meeting needs you" : "Meetings need you"}
+        Waiting for your answer
       </h2>
       <ul className="mt-3 space-y-2">
-        {list.map((m) => (
+        {meetings.map((m) => (
           <li key={m.id} className="text-[15px]">
             <a href={`#${m.id}`} className="link">
               {m.can.answer ? `${m.other.org} asks to move ${fmtStamp(m.start)}` : `Confirm ${fmtStamp(m.start)} with ${m.other.org}`}
             </a>
-            {m.can.confirm && m.confirmBy && <span className="text-slate">, by {fmtStamp(m.confirmBy)}</span>}
+            {m.can.confirm && m.confirmBy && <span className="block text-[14px] text-slate">Confirm by {fmtStamp(m.confirmBy)}</span>}
+          </li>
+        ))}
+        {sessions.map((x) => (
+          <li key={x.id} className="text-[15px]">
+            <a href={`#${x.id}`} className="link">
+              Invitation: {x.title}
+            </a>
+            <span className="block text-[14px] text-slate">{fmtStamp(x.start)}, {x.room}</span>
           </li>
         ))}
       </ul>
     </section>
+  );
+}
+
+/** A session in the schedule: hosting, invited (accept or decline) or going, with why if they can't accept. */
+function SessionRowItem({ slug, x, past = false }: { slug: string; x: MySession; past?: boolean }) {
+  const answer = useSessionAnswer(slug, x.id);
+  const tone = x.cancelled
+    ? { tone: "bg-bad-50 text-bad", label: "Cancelled" }
+    : x.role === "host"
+      ? { tone: "bg-ink text-white", label: "Hosting" }
+      : x.answer === "Accepted"
+        ? past
+          ? { tone: "bg-paper-200 text-ink", label: x.attended ? "Attended" : "Going" }
+          : { tone: "bg-ok-50 text-ok", label: "Going" }
+        : x.answer === "Declined"
+          ? { tone: "bg-paper-200 text-slate", label: "Declined" }
+          : { tone: "bg-warn-50 text-warn", label: "Invitation" };
+  const open = !past && !x.cancelled;
+  return (
+    <li id={x.id} className="agenda__row scroll-mt-[calc(var(--ptop)+16px)]">
+      <div className="agenda__time">
+        <span className={`block text-[17px] font-medium ${past ? "text-slate" : "text-ink"}`}>{x.start.slice(11)}</span>
+        <span className="block text-[13px] text-slate">to {x.end.slice(11)}</span>
+      </div>
+      <div className="agenda__who min-w-0">
+        <p className={`text-[16px] font-medium ${past || x.cancelled ? "text-slate" : "text-ink"}`}>{x.title}</p>
+        <p className="text-[14px] text-slate">
+          {x.format} · {x.role === "host" ? "you host it" : `hosted by ${x.host}`}
+        </p>
+        <p className={`mt-1 text-[14px] ${past ? "text-slate" : "text-ink"}`}>{x.room}</p>
+      </div>
+      <div className="agenda__status">
+        <span className={`pill whitespace-nowrap ${tone.tone}`}>{tone.label}</span>
+      </div>
+      {(x.cancelled || (open && x.role === "invited") || answer.error) && (
+        <div className="agenda__more space-y-3">
+          {x.cancelled && <p className="max-w-[62ch] text-[14px] text-slate">Cancelled: {x.cancelled.reason}</p>}
+          {open && x.role === "invited" && !x.answer && <p className="max-w-[62ch] text-[14px] text-slate">{x.what}</p>}
+          {open && x.blocked && x.answer !== "Accepted" && <p className="max-w-[62ch] rounded-[var(--r-sm)] bg-warn-50 px-3 py-2 text-[14px] text-ink">
+              <b className="font-medium">You can&apos;t accept for now:</b> {x.blocked.replace(/^You /, "you ")}. Move or decline that first, or decline this.
+            </p>}
+          {answer.error && (
+            <p role="alert" className="rounded-[var(--r-sm)] bg-bad-50 px-3 py-2 text-[14px] text-bad">
+              {answer.error.message}
+            </p>
+          )}
+          {open && x.role === "invited" && (x.can.accept || x.can.decline) && (
+            <div className="flex flex-wrap gap-2">
+              {x.can.accept && (
+                <button className="btn-primary btn-sm" disabled={answer.isPending} onClick={() => answer.mutate("Accepted")}>
+                  {answer.isPending && answer.variables === "Accepted" ? "Accepting…" : x.answer === "Declined" ? "Accept after all" : "Accept"}
+                </button>
+              )}
+              {x.can.decline && (
+                <button className={x.answer === "Accepted" ? "btn-quiet btn-sm" : "btn-secondary btn-sm"} disabled={answer.isPending} onClick={() => answer.mutate("Declined")}>
+                  {answer.isPending && answer.variables === "Declined" ? "Declining…" : x.answer === "Accepted" ? "Can't come after all" : "Decline"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -363,13 +447,16 @@ function AskMove({ slug, m, d, onDone }: { slug: string; m: MyMeeting; d: MyMeet
 /** The few rules a participant needs, beside the agenda on a big screen and after it on a phone. */
 function HowItWorks({ slug }: { slug: string }) {
   return (
-    <Panel title="How meetings work">
+    <Panel title="How your schedule works">
       <ul className="space-y-3 text-[14px] text-slate">
         <li>
           <b className="font-medium text-ink">Confirm in time.</b> A proposed time is held for both of you until its confirm-by date, then released.
         </li>
         <li>
           <b className="font-medium text-ink">Moving one.</b> Pick a time you are both free; the other side agrees, then the Deal Room team confirms it.
+        </li>
+        <li>
+          <b className="font-medium text-ink">Sessions.</b> Accept an invitation to hold the time; you can still decline later. No meeting is booked over a session you accepted.
         </li>
         <li>
           <b className="font-medium text-ink">On the day.</b> We remind you a day before and half an hour before. Check in at the Deal Room desk with your badge.

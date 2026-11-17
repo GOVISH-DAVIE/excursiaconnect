@@ -47,7 +47,7 @@ export function stateOf(eventId: string, stored: EventStored, now: string): AppS
 function roomsOf(cfg: DrConfig | undefined): Room[] {
   if (!cfg) return [];
   const ids = [...Object.keys(cfg.rooms), ...cfg.sessionRooms.filter((id) => !cfg.rooms[id])];
-  return ids.map((id) => ({ id, zoneId: `dr:${cfg.eventId}`, name: cfg.rooms[id]?.name ?? id, capacity: 0 }));
+  return ids.map((id) => ({ id, zoneId: `dr:${cfg.eventId}`, name: cfg.rooms[id]?.name ?? cfg.sessionRoomNames?.[id] ?? id, capacity: 0 }));
 }
 
 /** Rows that differ between before and after, by key; and keys that are gone. */

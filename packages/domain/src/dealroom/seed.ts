@@ -251,6 +251,7 @@ export const ca3Config: DrConfig = {
     r_dr7: { tables: 3, from: "09:00", to: "16:00", name: "Deal floor C" },
   },
   sessionRooms: ["r_dr8", "r_dr9"],
+  sessionRoomNames: { r_dr8: "Presentation area", r_dr9: "Roundtable room" },
   log: [
     { at: "2026-11-06 15:20", by: "st_lead", what: "Missions, sources, rubric and matching fields set" },
     { at: "2026-11-13 09:05", by: "st_lead", what: "Rules: 20 + 5 minute meetings, seekers capped at 5, providers at 6 a day" },

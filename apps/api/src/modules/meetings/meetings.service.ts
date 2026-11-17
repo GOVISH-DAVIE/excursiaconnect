@@ -13,6 +13,7 @@
  * The worker's side: a proposal that lapsed unconfirmed is told to both sides and operations once, and each
  * confirmed meeting gets a reminder the day before and half an hour before.
  */
+import type { MySession } from "@excursia/contracts/sessions";
 import type {
   MeetingRow,
   MoveInput,
@@ -42,7 +43,9 @@ import {
   slotTimes,
   staffName,
 } from "@excursia/domain/dealroom/logic";
-import type { DealRoomState, DrApplication, DrConfig, DrMeeting, DrStaff } from "@excursia/domain/dealroom/types";
+import { acceptProblems } from "@excursia/domain/dealroom/sessions";
+import { formatInfo } from "@excursia/domain/dealroom/logic";
+import type { DealRoomState, DrApplication, DrConfig, DrMeeting, DrSession, DrStaff } from "@excursia/domain/dealroom/types";
 import { addMinutes } from "@excursia/domain/time";
 import type { AppState } from "@excursia/domain/types";
 import { HttpError } from "../../http/errors";
@@ -324,7 +327,68 @@ export function createMeetingsService({ repo, drRepo, commands, now }: MeetingsD
       // a lapsed proposal the team has since replaced is history, not a meeting
       .filter(({ m }) => !lapsed(m, cfg, at) || !dr.meetings.some((x) => x.matchId === m.matchId && x.id !== m.id && x.status !== "Cancelled" && x.proposedAt > m.proposedAt))
       .sort((a, b) => a.m.start.localeCompare(b.m.start));
-    return { event: { name: e.name, slug: e.slug, days: daysOf(state, e.id), now: at }, meetings: list.map(({ m, side }) => myMeeting(state, cfg, m, side, at)) };
+    return { event: { name: e.name, slug: e.slug, days: daysOf(state, e.id), now: at }, meetings: list.map(({ m, side }) => myMeeting(state, cfg, m, side, at)), sessions: mySessions(state, e.id, ids, at) };
+  }
+
+  /**
+   * The sessions they host or are invited to, from their side. A cancelled one shows only to those it held (the host
+   * and whoever accepted), so they know; an invitation they never took up just goes.
+   */
+  function mySessions(state: AppState, eventId: string, ids: Set<string>, at: string): MySession[] {
+    const dr = state.dealRoom;
+    return dr.sessions
+      .filter((x) => x.eventId === eventId)
+      .flatMap((x) => {
+        const appId = x.host && ids.has(x.host) ? x.host : x.invitees.find((i) => ids.has(i));
+        if (!appId) return [];
+        const role = appId === x.host ? ("host" as const) : ("invited" as const);
+        const answer = role === "invited" ? (x.responses[appId]?.answer ?? null) : null;
+        if (x.cancelled && role === "invited" && answer !== "Accepted") return [];
+        const open = !x.cancelled && x.start > at && role === "invited";
+        const why = open && answer !== "Accepted" ? (acceptProblems(dr, x, appId)[0] ?? null) : null;
+        const host = x.host ? (dr.apps.find((a) => a.id === x.host)?.org.name ?? "A participant") : "The Deal Room team";
+        return [
+          {
+            id: x.id,
+            title: x.title,
+            format: formatInfo(x.format).short,
+            what: formatInfo(x.format).what,
+            start: x.start,
+            end: x.end,
+            room: state.rooms.find((r) => r.id === x.roomId)?.name ?? x.roomId,
+            host,
+            role,
+            answer,
+            cancelled: x.cancelled ? { at: x.cancelled.at, reason: x.cancelled.reason } : null,
+            attended: x.attended.includes(appId),
+            blocked: why,
+            can: { accept: open && answer !== "Accepted" && !why, decline: open && answer !== "Declined" },
+          },
+        ];
+      })
+      .sort((a, b) => a.start.localeCompare(b.start));
+  }
+
+  /** The participant's answer to a session's invitation, through the rules, as the invited application. */
+  async function respondSession(session: Resolved, slug: string, sessionId: string, answer: "Accepted" | "Declined", ip: string | null): Promise<MyMeetings> {
+    const email = participant(session);
+    const e = await eventOf(slug);
+    const ids = new Set(await repo.appIdsOf(e.id, email));
+    const { dr } = await load(e.id);
+    const x: DrSession | undefined = dr.sessions.find((s) => s.id === sessionId && s.eventId === e.id);
+    const appId = x?.invitees.find((i) => ids.has(i));
+    if (!x || !appId) throw new HttpError("not_found", "No such invitation.");
+    await commands.run({
+      eventId: e.id,
+      actor: { kind: "applicant", appId },
+      userId: session.user.id,
+      ip,
+      owned: (s) => {
+        if (!s.dealRoom.sessions.some((y) => y.id === sessionId && y.invitees.includes(appId))) throw new HttpError("not_found", "No such invitation.");
+      },
+      actions: () => [{ type: "dr/sessionRespond", sessionId, appId, answer }],
+    });
+    return mine(session, slug);
   }
 
   /** A change the participant makes to one of its meetings, through the rules, as its own application. */
@@ -360,7 +424,7 @@ export function createMeetingsService({ repo, drRepo, commands, now }: MeetingsD
     return { filename: `deal-room-${m.start.slice(0, 10)}-${m.start.slice(11).replace(":", "")}.ics`, body: ics(m, `Deal Room: ${mm.other.org}`, where) };
   }
 
-  return { schedule, slots, propose, autoPropose, move, cancel, acceptChange, declineChange, mine, confirm, askMove, answerMove, times, invite };
+  return { schedule, slots, propose, autoPropose, move, cancel, acceptChange, declineChange, mine, confirm, askMove, answerMove, times, invite, respondSession };
 }
 export type MeetingsService = ReturnType<typeof createMeetingsService>;
 

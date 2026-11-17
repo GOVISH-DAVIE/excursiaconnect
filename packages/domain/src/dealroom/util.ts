@@ -29,6 +29,8 @@ export const introLink = (appId: string) => `/dr/${appId}?intros=1`;
 export const profileLink = (a: DrApplication) => `/dr/${a.id}?profile=1`;
 /** The participant's meetings, to confirm, move or add to a calendar (M3.2; on the server, the event's page for them). */
 export const meetingsLink = (appId: string) => `/dr/${appId}?meetings=1`;
+/** The participant's sessions: an invitation to answer, a move or a cancellation (M3.3; on the server, their schedule). */
+export const programmeLink = (appId: string) => `/dr/${appId}?tab=Programme`;
 
 /** The event's active lead: who gets the Deal Room's reports and unassigned work. The demo's is st_lead. */
 export const leadOf = (dr: DealRoomState, eventId: string) => dr.staff.find((s) => s.eventId === eventId && s.active && s.role === "Lead")?.id ?? "st_lead";

@@ -29,5 +29,7 @@ export function myMeetingsRoutes(c: MeetingsController): Router {
   r.post("/:slug/:meetingId/move", signedIn, c.askMove);
   r.post("/:slug/:meetingId/move/answer", signedIn, c.answerMove);
   r.get("/:slug/:meetingId/invite.ics", signedIn, c.invite);
+  // a session's invitation, answered from the same schedule (M3.3)
+  r.post("/:slug/sessions/:sessionId/respond", signedIn, c.respondSession);
   return r;
 }

@@ -80,9 +80,24 @@ describe("the mappers, in memory", () => {
 
   test("every meeting that holds a slot holds its room table and both people", () => {
     const rows = dealRoomToRows(seed.dealRoom, EV, seed.dealRoom.clock);
-    const held = new Set(rows.busy.map((b) => b.sourceId));
-    for (const id of held) expect(rows.busy.filter((b) => b.sourceId === id).map((b) => b.key.split(":")[0]).sort()).toEqual(["app", "app", "room"]);
+    const meetings = rows.busy.filter((b) => b.source === "meeting");
+    const held = new Set(meetings.map((b) => b.sourceId));
+    for (const id of held) expect(meetings.filter((b) => b.sourceId === id).map((b) => b.key.split(":")[0]).sort()).toEqual(["app", "app", "room"]);
     expect(rows.busy.every((b) => b.to > b.from)).toBe(true);
+  });
+
+  test("every session that goes ahead holds its room, its host and everyone who accepted, and a cancelled one nothing (M3.3)", () => {
+    const rows = dealRoomToRows(seed.dealRoom, EV, seed.dealRoom.clock);
+    for (const x of seed.dealRoom.sessions.filter((s) => s.eventId === EV)) {
+      const keys = rows.busy.filter((b) => b.sourceId === x.id).map((b) => b.key).sort();
+      if (x.cancelled) {
+        expect(keys).toEqual([]);
+        continue;
+      }
+      const people = new Set([...(x.host ? [x.host] : []), ...Object.entries(x.responses).filter(([, r]) => r.answer === "Accepted").map(([id]) => id)]);
+      expect(keys).toEqual([`room:${x.roomId}:0`, ...[...people].map((id) => `app:${id}`)].sort());
+    }
+    expect(rows.busy.some((b) => b.source === "session")).toBe(true);
   });
 });
 

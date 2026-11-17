@@ -85,7 +85,7 @@ function BadgeBlock({ slug, badge }: { slug: string; badge: BadgeView }) {
                   Print or save as PDF
                 </button>
                 <Link href={`/e/${slug}/deal-room/meetings`} className="btn-quiet btn-sm">
-                  See your meetings
+                  See your schedule
                 </Link>
               </div>
             </Panel>

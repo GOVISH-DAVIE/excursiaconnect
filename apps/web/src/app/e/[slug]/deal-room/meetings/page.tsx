@@ -6,7 +6,7 @@ export function generateStaticParams() {
   return seed.events.map((e) => ({ slug: e.slug }));
 }
 
-export const metadata = { title: "My Deal Room meetings", robots: { index: false, follow: false } };
+export const metadata = { title: "My Deal Room schedule", robots: { index: false, follow: false } };
 
 // the params are read inside the Suspense boundary, so the shell around them can render at once
 async function Resolved({ params }: { params: Promise<{ slug: string }> }) {

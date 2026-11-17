@@ -469,7 +469,9 @@ export interface DrConfig {
   seekerFee: { amount: number; currency: Currency; reminderDays: number }; // 0 charges nothing
   multiplePerOrg: boolean;
   rooms: Record<string, { tables: number; from: string; to: string; /** the room's name, where the event's rooms aren't on the server (M3.2) */ name?: string }>;
-  sessionRooms: string[]; // the presentation area and roundtable room: sessions only, no meeting tables
+  sessionRooms: string[];
+  /** the session rooms' names, where the event's rooms aren't on the server (M3.3) */
+  sessionRoomNames?: Record<string, string>; // the presentation area and roundtable room: sessions only, no meeting tables
   log: DrHistory[];
 }
 

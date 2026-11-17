@@ -23,6 +23,7 @@ describe("the email around a message", () => {
     expect(linkFor(WEB, applicant, "/dr/dr_cs1?intros=1")).toBe(`${WEB}/e/savanna-summit/deal-room/introductions`);
     expect(linkFor(WEB, applicant, "/dr/dr_cs1?profile=1")).toBe(`${WEB}/e/savanna-summit/deal-room/teaser`);
     expect(linkFor(WEB, applicant, "/dr/dr_cs1?meetings=1")).toBe(`${WEB}/e/savanna-summit/deal-room/meetings`);
+    expect(linkFor(WEB, applicant, "/dr/dr_cs1?tab=Programme")).toBe(`${WEB}/e/savanna-summit/deal-room/meetings`);
     expect(linkFor(WEB, applicant, "/e/connected-africa-3/deal-room/apply?invite=old")).toBe(`${WEB}/e/savanna-summit/deal-room/apply?invite=tok123`);
     expect(linkFor(WEB, staff, "/dealroom/applications/dr_cs_ab12")).toBe(`${WEB}/team/applications/dr_cs_ab12`);
     expect(linkFor(WEB, staff, "/dealroom/reports")).toBe(`${WEB}/team`);
@@ -30,6 +31,7 @@ describe("the email around a message", () => {
     expect(linkFor(WEB, staff, "/dealroom/matching?tab=interest")).toBe(`${WEB}/team/matching?tab=interest`);
     expect(linkFor(WEB, staff, "/dealroom/meetings?tab=Changes")).toBe(`${WEB}/team/meetings?tab=changes`);
     expect(linkFor(WEB, staff, "/dealroom/meetings")).toBe(`${WEB}/team/meetings`);
+    expect(linkFor(WEB, staff, "/dealroom/sessions")).toBe(`${WEB}/team/sessions`);
     expect(linkFor(WEB, staff, "/dealroom/matches/mx_abc123")).toBe(`${WEB}/team/matching/mx_abc123`);
     expect(linkFor(WEB, { ...staff, kind: "user" }, "/team/organisation")).toBe(`${WEB}/team/organisation`);
   });

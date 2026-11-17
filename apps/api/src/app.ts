@@ -22,6 +22,7 @@ import { badgesModule } from "./modules/badges";
 import { scanningModule } from "./modules/scanning";
 import { matchingModule } from "./modules/matching";
 import { meetingsModule } from "./modules/meetings";
+import { sessionsModule } from "./modules/sessions";
 import { authModule } from "./modules/auth";
 import { organisersModule } from "./modules/organisers";
 import { platformModule } from "./modules/platform";
@@ -117,6 +118,7 @@ export function createApp({ config, db, mailer, now, storage, mpesa, callbackBas
   const meetings = meetingsModule({ db, now: rulesNow });
   app.use("/v1/meetings", meetings.team);
   app.use("/v1/my-meetings", meetings.participant);
+  app.use("/v1/sessions", sessionsModule({ db, now: rulesNow }));
   app.use("/v1/pay", payments.pay);
   const organisers = organisersModule({ db, config, auth: auth.service, storage: files, now: rulesNow, uploadMaxBytes, allowUnscanned });
   app.use("/v1", organisers.routes);

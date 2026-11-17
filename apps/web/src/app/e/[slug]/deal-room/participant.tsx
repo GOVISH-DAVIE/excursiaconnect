@@ -60,7 +60,7 @@ function navFor(apps: MyApplications | undefined, counts: { introductions: numbe
   const list = apps ?? [];
   const admitted = list.filter((a) => a.admitted);
   const items: NavItem[] = [{ path: "apply", label: "Application", count: 0 }];
-  if (admitted.length) items.push({ path: "introductions", label: "Introductions", count: counts.introductions }, { path: "meetings", label: "Meetings", count: counts.meetings });
+  if (admitted.length) items.push({ path: "introductions", label: "Introductions", count: counts.introductions }, { path: "meetings", label: "Schedule", count: counts.meetings });
   if (admitted.some((a) => a.mode === "seeker")) items.push({ path: "teaser", label: "Teaser", count: 0 });
   if (admitted.some((a) => a.mode !== "seeker")) items.push({ path: "directory", label: "Directory", count: 0 });
   return items;
@@ -154,7 +154,10 @@ export function ParticipantFrame({ slug, page, children }: { slug: string; page:
   const nav = participant
     ? navFor(apps.data, {
         introductions: intros.data?.introductions.filter((i) => i.stage === "Introduced" && !i.mine).length ?? 0,
-        meetings: meetings.data?.meetings.filter((m) => m.can.confirm || m.can.answer).length ?? 0,
+        // meetings to confirm or moves to answer, and session invitations still to answer
+        meetings:
+          (meetings.data?.meetings.filter((m) => m.can.confirm || m.can.answer).length ?? 0) +
+          (meetings.data?.sessions.filter((x) => x.role === "invited" && !x.answer && !x.cancelled && x.can.decline).length ?? 0),
       })
     : [];
   const brand = form.data?.brand.primary ?? "#1C1C1E";

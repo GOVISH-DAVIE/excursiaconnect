@@ -1,8 +1,9 @@
 /** Scheduling's handlers: parse with the contracts, call the service, answer. Never cached: all of it is private. */
 import type { RequestHandler } from "express";
 import {
-  AnswerMoveInput, AskMoveInput, AutoProposeInput, MeetingParams, MoveInput, MyMeetingParams, MyMeetingsParams, ProposeInput, ReasonInput, ScheduleParams, SlotsQuery, TimesQuery,
+  AnswerMoveInput, AskMoveInput, AutoProposeInput, MeetingParams, MoveInput, MyMeetingParams, MyMeetingsParams, MySessionParams, ProposeInput, ReasonInput, ScheduleParams, SlotsQuery, TimesQuery,
 } from "@excursia/contracts/meetings";
+import { RespondSessionInput } from "@excursia/contracts/sessions";
 import { sessionOf } from "../../http/session";
 import type { MeetingsService } from "./meetings.service";
 
@@ -78,6 +79,11 @@ export function createMeetingsController(service: MeetingsService) {
     answerMove: (async (req, res) => {
       const { slug, meetingId } = MyMeetingParams.parse(req.params);
       res.set(PRIVATE).json(await service.answerMove(sessionOf(res), slug, meetingId, AnswerMoveInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    respondSession: (async (req, res) => {
+      const { slug, sessionId } = MySessionParams.parse(req.params);
+      res.set(PRIVATE).json(await service.respondSession(sessionOf(res), slug, sessionId, RespondSessionInput.parse(req.body).answer, ip(req)));
     }) satisfies RequestHandler,
 
     invite: (async (req, res) => {

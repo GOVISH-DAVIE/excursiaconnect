@@ -27,4 +27,5 @@ export const meetingsApi = {
   askMove: (slug: string, meetingId: string, input: { start: string; reason: string }) => http.post(`${mine(slug)}/${meetingId}/move`, { body: input, schema: MyMeetings }),
   answerMove: (slug: string, meetingId: string, input: { agree: boolean; reason?: string }) => http.post(`${mine(slug)}/${meetingId}/move/answer`, { body: input, schema: MyMeetings }),
   invite: (slug: string, meetingId: string) => http.file(`${mine(slug)}/${meetingId}/invite.ics`),
+  respondSession: (slug: string, sessionId: string, answer: "Accepted" | "Declined") => http.post(`${mine(slug)}/sessions/${sessionId}/respond`, { body: { answer }, schema: MyMeetings }),
 };
