@@ -207,6 +207,13 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
     readiness: (session: Resolved, eventId: string, appId: string, input: ReadinessInput, ip: string | null) =>
       act(session, eventId, appId, ip, (app) => (app.readiness === input.readiness ? [] : [{ type: "dr/readiness", appId, readiness: input.readiness }])),
 
+    /** A reviewer approves the business's teaser for the directory; verified counterparties see it once it is ready (M3.1). */
+    approveTeaser: (session: Resolved, eventId: string, appId: string, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        if (!app.teaser) throw new HttpError("conflict", "The business hasn't written its teaser yet.");
+        return app.teaser.approved ? [] : [{ type: "dr/approveTeaser", appId }];
+      }),
+
     /** The lead waives the fee, with a reason: the badge is issued at once (M1.7). */
     waiveFee: (session: Resolved, eventId: string, appId: string, input: WaiveFeeInput, ip: string | null) =>
       act(session, eventId, appId, ip, () => [{ type: "dr/waiveFee", appId, reason: input.reason }]),

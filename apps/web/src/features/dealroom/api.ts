@@ -27,6 +27,7 @@ export const dealRoomApi = {
   meetCondition: (eventId: string, appId: string, conditionId: string) => http.post(`${one(eventId, appId)}/conditions/${conditionId}/met`, { schema: ReviewView }),
   confirmDecisionMaker: (eventId: string, appId: string) => http.post(`${one(eventId, appId)}/decision-maker/confirm`, { schema: ReviewView }),
   readiness: (eventId: string, appId: string, input: ReadinessInput) => http.post(`${one(eventId, appId)}/readiness`, { body: input, schema: ReviewView }),
+  approveTeaser: (eventId: string, appId: string) => http.post(`${one(eventId, appId)}/teaser/approve`, { schema: ReviewView }),
   checkKyc: (eventId: string, appId: string, input: CheckKycInput) => http.post(`${one(eventId, appId)}/kyc/check`, { body: input, schema: ReviewView }),
   sanctions: (eventId: string, appId: string, input: SanctionsInput) => http.post(`${one(eventId, appId)}/sanctions`, { body: input, schema: ReviewView }),
   verify: (eventId: string, appId: string, input: VerifyInput) => http.post(`${one(eventId, appId)}/verification`, { body: input, schema: ReviewView }),

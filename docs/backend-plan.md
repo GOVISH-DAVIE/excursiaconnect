@@ -825,7 +825,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 
 | # | Milestone | Done when |
 | --- | --- | --- |
-| M3.1 | **Matching and introductions**: candidates and fit, decisions, briefs, introductions and answers, intro expiry, consent per document, the access log, watermarked downloads | A pair is introduced and accepts; a document opens only under consent and is logged **The introduction loop built 16 Nov 2026:** candidates with their fit, decisions with reasons, the brief, introductions with chosen documents, both answers, consent per document with withdrawal, the profile and stamped copies opened through two-minute links, every opening logged. Teasers, the directory and expressions of interest are next. Notes below |
+| M3.1 | **Matching and introductions**: candidates and fit, decisions, briefs, introductions and answers, intro expiry, consent per document, the access log, watermarked downloads | A pair is introduced and accepts; a document opens only under consent and is logged **Built 16 Nov 2026:** candidates with their fit, decisions with reasons, the brief, introductions with chosen documents, both answers, consent per document with withdrawal, the profile and stamped copies opened through two-minute links, every opening logged; then the business's teaser and its approval, the directory for verified counterparties, expressions of interest in the team's queue, view-only documents, and the email when an introduction expires unanswered. Notes below |
 | M3.2 | **Scheduling**: `DrBusy` with exclusion constraints, lapse release, caps under advisory locks, confirm and change, auto-propose as a job, .ics invites, reminders | The PRD's three 50-request bursts book no clash; auto-propose for 150 pairs finishes within 10 s |
 | M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server |
 | M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds |
@@ -835,7 +835,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 
 **Notes on M3.1, matching and introductions, 16 Nov 2026:**
 
-- **Scope, decided with the user:** the introduction loop first. Teasers written by the seeker and approved by staff, the directory for verified providers and expressions of interest come next. The rules for interest already give their reasons.
+- **Scope, decided with the user:** the introduction loop first, then teasers, the directory and expressions of interest (below).
 - **The rules** (`domain dealroom/meetings.ts`), unchanged in what they allow, now say why they refuse:
   - Approving a pair needs both sides open to matching, and the refusal names who isn't and why (`notMatchable`: re-review, not verified, not qualified, conditions open, not Deal Room Ready, fee unpaid).
   - Deferring or rejecting needs a reason. A must-have miss or an exclusion hit needs the reviewer's note to approve.
@@ -860,11 +860,31 @@ Each milestone from here on builds its feature the same way, as in [architecture
   - A damaged or password-protected file is refused with the reason before anything is logged. The walk-through's stand-in deck from M1.1 was such a file.
   - Word, Excel and PowerPoint files can't be stamped, so they are downloaded as they are, and only where the seeker allows downloads.
   - Files over 40 MB aren't stamped either.
-- **Not yet:**
-  - teasers, the directory and expressions of interest
-  - an email when an introduction expires unanswered (the stage shows it)
-  - the seeker choosing view-only per document (every upload allows downloads today)
-  - Oversight's read-only view of matching (M4.3)
+- **Then the rest of M3.1, the same day:**
+  - **The teaser** (`/e/:slug/deal-room/teaser`, CS-7):
+    - The business writes it once approved: a title, a summary of up to 1,200 characters, and whether its name shows or stays back until an introduction. A live preview shows the card as the directory will.
+    - The first one also completes the matching profile, which clears the "profile past its deadline" flag.
+    - A new or changed teaser leaves the directory until a reviewer approves it. The reviewer is emailed once each time it starts waiting, not on every edit while it waits.
+    - The rules refuse a teaser from a counterparty, or from a business not yet approved. The prototype's own profile screen still saves through the same action.
+  - **Approval** (the team's application page, Decision tab): a banner points to a waiting teaser. A reviewer or the lead approves it, and the business is emailed with a link to its teaser.
+  - **The directory** (`/e/:slug/deal-room/directory`, FP-5):
+    - It is for verified investors and partners. It shows the approved teasers of businesses open to matching, and filters by sector, country, ask band and pathway.
+    - An anonymous teaser carries no name. A shilling ask is banded in dollars at the review's rate.
+    - Anyone else gets the reason instead: a business, a counterparty not yet verified, or an email with no application here.
+  - **Expressions of interest** (FP-6, DR-10):
+    - "Express interest" creates a suggestion, never an introduction. The business's reviewer (or the lead) is emailed with a link to the team's Interest tab.
+    - The tab lists each waiting pair with its fit, and the same decide panel as the candidate list.
+    - The counterparty's card then reads: with the Deal Room team, the team is preparing an introduction, introduced (linked), or not taken forward.
+  - **View only:** on its teaser page, the business sets each document to view only (a stamped copy, never downloaded) or downloadable. Only the business can change it. A file that can't be stamped and is set to view only can't be opened, and the page says so in red.
+  - **Expiry:** every ten minutes the worker notes each introduction that expired unanswered (`dr/introLapse`, system only, once).
+    - Each side is emailed whether it was waiting on itself or on the other.
+    - The team is emailed a link to the pair.
+    - The pair's history records it.
+  - **Email links:**
+    - The team's links now open the pair itself or the Interest tab, not just matching.
+    - The business's teaser link opens its teaser page.
+  - **The application page** links a business to its teaser, and a verified counterparty to the directory.
+- **Not yet:** Oversight's read-only view of matching (M4.3).
 - **Tested:**
   - 12 rule tests.
   - 6 API tests:
@@ -886,6 +906,16 @@ Each milestone from here on builds its feature the same way, as in [architecture
       - an empty "; ." in drafted briefs when traction is missing
       - cramped lists at phone width
       - the pairs tab opening on an empty stage
+  - For the rest: 5 more rule tests and 3 more API tests:
+    - a teaser: written, waiting, approved once, out again on a change
+    - the refusals
+    - interest and the team's queue
+    - view only
+    - the expiry round, once
+  - In the browser at phone width, on two databases:
+    - **The walk-through database:** Kilimo Fresh wrote its teaser and set its pitch deck to view only. The lead approved the teaser from the banner. Savanna Freight found it in the directory, marked introduced.
+    - **The demo database:** Lakeside Distribution filtered the 39 teasers and expressed interest in Atlas Pay. The lead approved it from the Interest tab with a note for the sector miss, and Lakeside's card turned to "preparing an introduction".
+    - Fixed in the browser: the document rule cut off at phone width, and a cramped header on the Interest tab.
 
 
 ### Phase 4: After the summit (22 February to 19 March 2027)

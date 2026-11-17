@@ -18,36 +18,49 @@ import type {
   Candidates,
   DecideMatchInput,
   DecidedMatch,
+  Directory,
+  DirectoryEntry,
+  InterestRow,
   IntroduceInput,
   MatchingBoard,
   MatchStage,
   MatchView,
   MyIntroductions,
+  MyProfile,
   PoolEntry,
   RespondIntroInput,
   SeekerProfile,
   SharedDoc,
   SharedLink,
+  TeaserCard,
+  TeaserInput,
 } from "@excursia/contracts/matching";
 import type { Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor } from "@excursia/domain/ctx";
 import {
+  askBand,
   blockedPair,
   canSee,
   candidates,
   compact,
   consentGranted,
   drCan,
+  fit,
   fitDetail,
+  introExpired,
   introExpiresAt,
   matchable,
   matchStage,
+  missionName,
+  mustHaveMisses,
   notMatchable,
   pairTimeline,
   participantLabel,
+  profileDeadline,
+  qualified,
   staffName,
 } from "@excursia/domain/dealroom/logic";
-import type { DealRoomState, DrApplication, DrMatch, DrStaff } from "@excursia/domain/dealroom/types";
+import type { DealRoomState, DrApplication, DrConfig, DrMatch, DrStaff } from "@excursia/domain/dealroom/types";
 import { fmtStamp } from "@excursia/domain/time";
 import type { AppState } from "@excursia/domain/types";
 import { HttpError } from "../../http/errors";
@@ -87,6 +100,32 @@ const stampedByName = (name: string) => /\.(pdf|png|jpe?g)$/i.test(name);
 function summaryOf(a: DrApplication) {
   if (a.type === "seeker") return [a.org.sector, a.ask ? compact(a.ask.amount, a.ask.currency) : ""].filter(Boolean).join(", ");
   return a.mandate ? `${compact(a.mandate.ticketMin, a.mandate.currency)} to ${compact(a.mandate.ticketMax, a.mandate.currency)}` : "";
+}
+
+/** The ask in US dollars, for its band in the directory: a shilling ask is converted at the review's rate. */
+const askUsd = (a: DrApplication) => (!a.ask ? 0 : a.ask.currency === "KES" ? a.ask.amount / 130 : a.ask.amount);
+
+/** Tier 1 of a business's file, as the directory shows it: the name only if the business chose to show it. */
+function teaserCard(cfg: DrConfig, a: DrApplication): TeaserCard {
+  const t = a.teaser ?? { title: "", summary: "", anonymous: true };
+  return {
+    title: t.anonymous ? t.title : a.org.name,
+    named: !t.anonymous,
+    sector: a.org.sector,
+    country: a.org.country,
+    askBand: a.ask ? askBand(askUsd(a)) : "–",
+    pathway: a.ask?.instrument ?? "–",
+    mission: a.mission ? missionName(cfg, a.mission) : "–",
+    summary: t.summary,
+  };
+}
+
+/** Where a counterparty stands with a teaser, from the pair's match if there is one. */
+function interestOf(m: DrMatch | undefined): DirectoryEntry["interest"] {
+  if (!m) return "none";
+  if (m.decision === "Rejected") return "closed";
+  if (m.decision !== "Approved") return "sent";
+  return m.intro ? "introduced" : "preparing";
 }
 
 export function createMatchingService({ repo, drRepo, commands, storage, shareKey, now, allowUnscanned }: MatchingDeps) {
@@ -326,6 +365,111 @@ export function createMatchingService({ repo, drRepo, commands, storage, shareKe
     };
   }
 
+  /** The participant's application on one side here: the one that is furthest along, if the email owns several. */
+  async function myApp(session: Resolved, slug: string, type: "seeker" | "provider") {
+    const email = participant(session);
+    const e = await eventOf(slug);
+    const ids = new Set(await repo.appIdsOf(e.id, email));
+    const { dr, at } = await load(e.id);
+    const mine = dr.apps.filter((a) => ids.has(a.id) && a.type === type);
+    const best = type === "seeker" ? (mine.find(qualified) ?? mine[0]) : (mine.find((a) => a.verification?.state === "Verified") ?? mine[0]);
+    return { e, dr, at, cfg: dr.configs[e.id], app: best };
+  }
+
+  async function myProfile(session: Resolved, slug: string): Promise<MyProfile> {
+    const { e, cfg, app } = await myApp(session, slug, "seeker");
+    const event = { name: e.name, slug: e.slug };
+    if (!app) return { event, app: null, reason: "The teaser is written by a business seeking capital or partners. No such application here is under the email you signed in with." };
+    if (!qualified(app)) return { event, app: null, reason: "Your teaser opens once your application is approved." };
+    const t = app.teaser;
+    return {
+      event,
+      reason: null,
+      app: {
+        id: app.id,
+        ref: app.ref ?? null,
+        org: app.org.name,
+        teaser: t ? { title: t.title, summary: t.summary, anonymous: t.anonymous } : null,
+        state: !t ? "none" : t.approved ? "approved" : "waiting",
+        approvedAt: t?.approved?.at ?? null,
+        listed: !!t?.approved && matchable(app),
+        preview: teaserCard(cfg, app),
+        deadline: profileDeadline(app, cfg) ?? null,
+        completedAt: app.profileCompletedAt ?? null,
+        documents: app.documents.map((d) => ({ id: d.id, kind: d.kind, name: d.name, stamped: stampedByName(d.name), download: d.download })),
+      },
+    };
+  }
+
+  /** A change the business makes to its own file, through the rules, as itself. */
+  async function onMyProfile(session: Resolved, slug: string, ip: string | null, actions: (app: DrApplication) => Action[]): Promise<MyProfile> {
+    const { e, app } = await myApp(session, slug, "seeker");
+    if (!app || !qualified(app)) throw new HttpError("conflict", "Your teaser opens once your application is approved.");
+    const list = actions(app);
+    if (list.length)
+      await commands.run({
+        eventId: e.id,
+        actor: { kind: "applicant", appId: app.id },
+        userId: session.user.id,
+        ip,
+        owned: (s) => {
+          if (!s.dealRoom.apps.some((a) => a.id === app.id)) throw new HttpError("not_found", "No such application.");
+        },
+        actions: () => list,
+      });
+    return myProfile(session, slug);
+  }
+
+  async function directory(session: Resolved, slug: string): Promise<Directory> {
+    const { e, dr, cfg, app } = await myApp(session, slug, "provider");
+    const event = { name: e.name, slug: e.slug };
+    const empty = { sectors: [], countries: [], bands: [], pathways: [] };
+    if (!app) return { event, me: null, reason: "The directory is for verified investors and partners. No such application here is under the email you signed in with.", teasers: [], filters: empty };
+    const gate = canSee(dr, app, { kind: "directory" });
+    if (!gate.ok) return { event, me: null, reason: gate.reason ?? "The directory isn't open to you yet.", teasers: [], filters: empty };
+    const teasers: DirectoryEntry[] = dr.apps
+      .filter((a) => a.eventId === e.id && a.type === "seeker" && canSee(dr, app, { kind: "teaser", seekerId: a.id }).ok)
+      .map((a) => ({ seekerId: a.id, ...teaserCard(cfg, a), interest: interestOf(dr.matches.find((m) => m.seekerId === a.id && m.providerId === app.id)) }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+    const uniq = (f: (t: DirectoryEntry) => string) => [...new Set(teasers.map(f))].filter((x) => x !== "–").sort();
+    const BANDS = [askBand(0), askBand(500_000), askBand(2_000_000), askBand(10_000_000)];
+    return {
+      event,
+      me: { org: app.org.name },
+      reason: null,
+      teasers,
+      filters: { sectors: uniq((t) => t.sector), countries: uniq((t) => t.country), bands: BANDS.filter((b) => teasers.some((t) => t.askBand === b)), pathways: uniq((t) => t.pathway) },
+    };
+  }
+
+  /** The team's queue of expressions of interest: each pair with its fit, to approve, defer or reject. */
+  function interestRows(dr: DealRoomState, cfg: DrConfig): InterestRow[] {
+    const side = (a: DrApplication) => ({ id: a.id, org: a.org.name, label: participantLabel(a), summary: summaryOf(a) });
+    return dr.matches
+      .filter((m) => m.origin === "interest" && (m.decision === "Suggested" || m.decision === "Deferred"))
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .flatMap((m) => {
+        const s = dr.apps.find((a) => a.id === m.seekerId);
+        const p = dr.apps.find((a) => a.id === m.providerId);
+        if (!s || !p) return [];
+        const f = fit(s, p, cfg);
+        return [
+          {
+            matchId: m.id,
+            at: m.history[0]?.at ?? m.at,
+            stage: m.decision as "Suggested" | "Deferred",
+            note: m.decision === "Deferred" ? m.note : "",
+            seeker: side(s),
+            provider: side(p),
+            fit: fitDetail(s, p, cfg),
+            exclusionHit: f.exclusionHit ?? null,
+            needsNote: mustHaveMisses(cfg, p, f.missed).length > 0 || !!f.exclusionHit,
+            blocked: notMatchable(s) ?? notMatchable(p) ?? null,
+          },
+        ];
+      });
+  }
+
   return {
     /* ----- the team ----- */
 
@@ -353,6 +497,7 @@ export function createMatchingService({ repo, drRepo, commands, storage, shareKe
             sentAt: m.intro?.sentAt ?? null,
             expiresAt: m.intro ? introExpiresAt(m, cfg)! : null,
           })),
+        interest: interestRows(dr, cfg),
         can: { match: true, introduce: drCan(staff, "introduce"), lead: staff.role === "Lead" && staff.active },
       };
     },
@@ -434,6 +579,45 @@ export function createMatchingService({ repo, drRepo, commands, storage, shareKe
         actions: () => [{ type: "dr/consent", seekerId: pair.seekerId, providerId: pair.providerId, docId, granted }],
       });
       return introductions(session, slug);
+    },
+
+    /* ----- the business's teaser, and the directory ----- */
+
+    myProfile,
+
+    /** The business writes or changes its teaser; the first one also completes its matching profile (CS-7). */
+    saveTeaser: (session: Resolved, slug: string, input: TeaserInput, ip: string | null) =>
+      onMyProfile(session, slug, ip, (app) => {
+        const t = app.teaser;
+        const same = !!t && t.title === input.title && t.summary === input.summary && t.anonymous === input.anonymous;
+        return [...(same ? [] : [{ type: "dr/updateProfile" as const, appId: app.id, patch: { teaser: { title: input.title, summary: input.summary, anonymous: input.anonymous } } }]), ...(app.profileCompletedAt ? [] : [{ type: "dr/completeProfile" as const, appId: app.id }])];
+      }),
+
+    /** The business lets counterparties download a document, or only view a stamped copy of it. */
+    setDownload: (session: Resolved, slug: string, docId: string, download: boolean, ip: string | null) =>
+      onMyProfile(session, slug, ip, (app) => {
+        const d = app.documents.find((x) => x.id === docId);
+        if (!d) throw new HttpError("not_found", "No such document.");
+        return d.download === download ? [] : [{ type: "dr/docDownload", appId: app.id, docId, download }];
+      }),
+
+    directory,
+
+    /** A verified counterparty flags a teaser: a suggestion for the team, never an introduction (FP-6). */
+    async interest(session: Resolved, slug: string, seekerId: string, ip: string | null): Promise<Directory> {
+      const { e, app } = await myApp(session, slug, "provider");
+      if (!app) throw new HttpError("forbidden", "The directory is for verified investors and partners.");
+      await commands.run({
+        eventId: e.id,
+        actor: { kind: "applicant", appId: app.id },
+        userId: session.user.id,
+        ip,
+        owned: (s) => {
+          if (!s.dealRoom.apps.some((a) => a.id === seekerId && a.type === "seeker")) throw new HttpError("not_found", "No such opportunity.");
+        },
+        actions: () => [{ type: "dr/interest", providerId: app.id, seekerId }],
+      });
+      return directory(session, slug);
     },
 
     /** The counterparty opens the seeker's full profile: the rules check it may, and log it. */
@@ -534,3 +718,29 @@ export function createMatchingService({ repo, drRepo, commands, storage, shareKe
   };
 }
 export type MatchingService = ReturnType<typeof createMatchingService>;
+
+/**
+ * The worker's round (M3.1): each introduction that expired unanswered is told to both sides and the team, once.
+ * Expiry itself is read from the clock wherever a stage is shown; this only sends the news.
+ */
+export function createIntroLapses({ repo, drRepo, commands, now, log = console }: Pick<MatchingDeps, "repo" | "drRepo" | "commands" | "now"> & { log?: Pick<Console, "error"> }) {
+  return async function lapse(): Promise<number> {
+    const at = nairobiNow(now());
+    let told = 0;
+    for (const eventId of await repo.eventsWithOpenIntros()) {
+      const stored = await drRepo.load(eventId);
+      if (!stored) continue;
+      const dr = stateOf(eventId, stored, at).dealRoom;
+      const cfg = dr.configs[eventId];
+      const due = dr.matches.filter((m) => m.intro && !m.intro.lapsedAt && introExpired(m, cfg, at)).map((m) => m.id);
+      if (!due.length) continue;
+      try {
+        await commands.run({ eventId, actor: { kind: "system" }, userId: null, ip: null, actions: () => due.map((matchId) => ({ type: "dr/introLapse" as const, matchId })) });
+        told += due.length;
+      } catch (e) {
+        log.error(`[matching] noting expired introductions in ${eventId} failed: ${(e as Error).message}`);
+      }
+    }
+    return told;
+  };
+}

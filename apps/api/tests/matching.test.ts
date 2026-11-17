@@ -12,13 +12,14 @@ import { join } from "node:path";
 import { PDFDocument } from "pdf-lib";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { ErrorBody } from "@excursia/contracts/http";
-import { Candidates, DecidedMatch, MatchingBoard, MatchView, MyIntroductions, SeekerProfile, SharedLink } from "@excursia/contracts/matching";
+import { Candidates, DecidedMatch, Directory, MatchingBoard, MatchView, MyIntroductions, MyProfile, SeekerProfile, SharedLink } from "@excursia/contracts/matching";
 import { createDb } from "@excursia/db";
 import { candidates, matchable, mustHaveMisses } from "@excursia/domain/dealroom/logic";
 import { seed } from "@excursia/domain/seed";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
 import { memoryMailer } from "../src/mail/mailer";
+import { introLapses } from "../src/modules/matching";
 import { createSeedRepo } from "../src/modules/seed/seed.repo";
 import { demoRows, demoUserId } from "../src/modules/seed/seed.service";
 import { toInstant } from "../src/persistence/time";
@@ -33,6 +34,8 @@ const run = Date.now().toString(36);
 /** An introduction sent the day before the clock, unanswered, proposing documents. */
 const pending = seed.dealRoom.matches.find((m) => m.intro && !m.intro.seeker && !m.intro.provider && m.intro.sentAt > "2027-02-12" && m.intro.items.length > 2)!;
 const [DECK, OTHER] = pending.intro!.items.filter((i) => i !== "teaser" && i !== "profile");
+/** An introduction that expired unanswered long before the clock. */
+const lapsed = seed.dealRoom.matches.find((m) => m.intro && !m.intro.seeker && !m.intro.provider && m.intro.sentAt < "2027-02-01")!;
 /** A pair nobody has decided yet, with no must-have miss. */
 const cfg = Object.values(seed.dealRoom.configs)[0];
 const free = seed.dealRoom.apps
@@ -197,5 +200,59 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("matching and introductions", ()
     // the team sees the same: withdrawn, and the one opening
     const v = MatchView.parse((await call("GET", `/v1/matching/${EV}/matches/${pending.id}`, "st_lead")).json);
     expect(v.match.intro!.items.find((i) => i.id === DECK)).toMatchObject({ consent: "withdrawn", opened: [{ action: "view" }] });
+  });
+
+  test("the business changes its teaser: out of the directory until a reviewer approves it again; a document set to view only", async () => {
+    const teaser = `/v1/introductions/${SLUG}/teaser`;
+    const before = MyProfile.parse((await call("GET", teaser, "seeker")).json);
+    expect(before.app).toMatchObject({ id: pending.seekerId, state: "approved", listed: true });
+    expect((await call("PUT", teaser, "seeker", { title: " ", summary: "x", anonymous: true })).status).toBe(400);
+    const changed = MyProfile.parse((await call("PUT", teaser, "seeker", { title: "Agritech, Kenya", summary: "Cold storage for smallholder farmers, in three counties.", anonymous: true })).json);
+    expect(changed.app).toMatchObject({ state: "waiting", listed: false, preview: { title: "Agritech, Kenya", named: false } });
+    // a counterparty has no teaser of its own, and a stranger no application
+    expect(MyProfile.parse((await call("GET", teaser, "provider")).json).reason).toMatch(/^The teaser is written by a business/);
+    expect(MyProfile.parse((await call("GET", teaser, "stranger")).json).app).toBeNull();
+    // operations can't approve it; a reviewer can, once
+    const approve = `/v1/dealroom/${EV}/applications/${pending.seekerId}/teaser/approve`;
+    expect(reason(await call("POST", approve, "st_ops1"))).toBe("Your role, Operations, doesn't open applications.");
+    expect((await call("POST", approve, "st_rev1")).status).toBe(200);
+    expect(MyProfile.parse((await call("GET", teaser, "seeker")).json).app).toMatchObject({ state: "approved", listed: true });
+    expect(await db.outboxMessage.findFirst({ where: { recipient: pending.seekerId, subject: { startsWith: "Your teaser is approved" } } })).toMatchObject({ link: `/dr/${pending.seekerId}?profile=1` });
+    // view only: the counterparty may no longer download that document
+    const off = MyProfile.parse((await call("PUT", `${teaser}/documents/${OTHER}`, "seeker", { download: false })).json);
+    expect(off.app!.documents.find((d) => d.id === OTHER)!.download).toBe(false);
+    expect((await call("PUT", `${teaser}/documents/${OTHER}`, "provider", { download: true })).status).toBe(409);
+  });
+
+  test("a verified counterparty browses teasers and expresses interest; the team sees it in its queue", async () => {
+    const dir = `/v1/introductions/${SLUG}/directory`;
+    const d = Directory.parse((await call("GET", dir, "provider")).json);
+    expect(d.me).not.toBeNull();
+    expect(d.teasers.length).toBeGreaterThan(3);
+    expect(d.teasers.find((t) => t.seekerId === pending.seekerId)!.interest).toBe("introduced");
+    // anonymous teasers never carry the name
+    for (const t of d.teasers.filter((x) => !x.named)) expect(seed.dealRoom.apps.find((a) => a.id === t.seekerId)!.org.name).not.toBe(t.title);
+    const target = d.teasers.find((t) => t.interest === "none")!;
+    const after = Directory.parse((await call("POST", `${dir}/${target.seekerId}/interest`, "provider")).json);
+    expect(after.teasers.find((t) => t.seekerId === target.seekerId)!.interest).toBe("sent");
+    expect(reason(await call("POST", `${dir}/${target.seekerId}/interest`, "provider"))).toBe("You've already shown interest in this opportunity");
+    const board = MatchingBoard.parse((await call("GET", `/v1/matching/${EV}`, "st_rev1")).json);
+    const row = board.interest.find((i) => i.seeker.id === target.seekerId && i.provider.id === pending.providerId)!;
+    expect(row).toMatchObject({ stage: "Suggested", blocked: null });
+    expect(row.fit.length).toBe(cfg.matching.length);
+    // a business, and someone with no application, get the reason instead of teasers
+    expect(Directory.parse((await call("GET", dir, "seeker")).json)).toMatchObject({ me: null, teasers: [] });
+    expect(Directory.parse((await call("GET", dir, "stranger")).json).reason).toMatch(/^The directory is for verified investors and partners/);
+    expect((await call("POST", `${dir}/${target.seekerId}/interest`, "stranger")).status).toBe(403);
+  });
+
+  test("the worker tells both sides and the team of an introduction that expired unanswered, once", async () => {
+    const lapse = introLapses({ db, now: () => clock });
+    expect(await lapse()).toBeGreaterThan(0);
+    const m = await db.drMatch.findUniqueOrThrow({ where: { id: lapsed.id } });
+    expect((m.record as { intro: { lapsedAt?: string } }).intro.lapsedAt).toBe("2027-02-14 09:00");
+    const told = await db.outboxMessage.findMany({ where: { recipient: { in: [lapsed.seekerId, lapsed.providerId] }, subject: { startsWith: "Your Deal Room introduction expired" } } });
+    expect(told.length).toBe(2);
+    expect(await lapse()).toBe(0);
   });
 });

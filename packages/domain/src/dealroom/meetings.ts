@@ -39,6 +39,8 @@ export type DrMeetAction =
   | { type: "dr/introduce"; matchId: string; items: string[] }
   | { type: "dr/respondIntro"; matchId: string; side: "seeker" | "provider"; response: "Accepted" | "Declined"; reason?: string; consent?: string[] }
   | { type: "dr/consent"; seekerId: string; providerId: string; docId: string; granted: boolean }
+  /** the server's job: an introduction that expired unanswered is told to both sides and the team, once */
+  | { type: "dr/introLapse"; matchId: string }
   | { type: "dr/access"; seekerId: string; item: string; viewer: string; action: "view" | "download" }
   | { type: "dr/propose"; req: SlotRequest; override?: string }
   | { type: "dr/autoPropose"; limit: number }
@@ -197,7 +199,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       const seeker = dr.apps.find((a) => a.id === action.seekerId)!;
       const f = fit(seeker, provider, dr.configs[seeker.eventId]);
       dr = { ...dr, matches: [...dr.matches, { id: ctx.newId("mx"), eventId: seeker.eventId, seekerId: seeker.id, providerId: provider.id, origin: "interest", ...f, decision: "Suggested", note: "", by: "applicant", at, history: [{ at, by: "applicant", what: `${provider.org.name} expressed interest` }] }] };
-      dr = send(ctx, dr, seeker.eventId, seeker.assignee ?? leadOf(dr, seeker.eventId), `Expression of interest in ${seeker.ref}`, "/dealroom/matching", "Email");
+      dr = send(ctx, dr, seeker.eventId, seeker.assignee ?? leadOf(dr, seeker.eventId), `Expression of interest in ${seeker.ref}`, "/dealroom/matching?tab=interest", "Email");
       return withDr(state, dr);
     }
 
@@ -276,6 +278,25 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       return withDr(state, dr);
     }
 
+    case "dr/introLapse": {
+      if (ctx.actor?.kind !== "system") return no(ctx, state, "Expiries are noted by the system");
+      const m = dr.matches.find((x) => x.id === action.matchId);
+      if (!m?.intro) return no(ctx, state, "No such introduction");
+      if (m.intro.lapsedAt) return no(ctx, state, "This expiry was already noted");
+      if (!introExpired(m, dr.configs[m.eventId], at)) return no(ctx, state, "This introduction hasn't expired");
+      const intro = m.intro;
+      dr = patchMatch(dr, m.id, (x) => ({ ...x, intro: { ...intro, lapsedAt: at }, history: [...x.history, { at, by: "system", what: "The introduction expired unanswered" }] }));
+      // each side hears whether it was waiting on itself or on the other; the team can propose the pair again
+      for (const side of ["seeker", "provider"] as const) {
+        const id = side === "seeker" ? m.seekerId : m.providerId;
+        const subject = intro[side] ? "Your Deal Room introduction expired: the other party didn't answer in time" : "Your Deal Room introduction expired before you answered";
+        dr = send(ctx, dr, m.eventId, id, subject, introLink(id), "Email");
+      }
+      const seeker = dr.apps.find((a) => a.id === m.seekerId);
+      dr = send(ctx, dr, m.eventId, seeker?.assignee ?? leadOf(dr, m.eventId), `An introduction expired unanswered${seeker?.ref ? `: ${seeker.ref}` : ""}`, `/dealroom/matches/${m.id}`, "Email");
+      return withDr(state, dr);
+    }
+
     case "dr/access": {
       // every opening of a profile or a document is logged where the seeker can see it (PRD Confidentiality req. 4)
       const viewer = dr.apps.find((a) => a.id === action.viewer);
@@ -283,7 +304,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       const r = action.item === "profile" ? { kind: "profile" as const, seekerId: action.seekerId } : action.item === "teaser" ? { kind: "teaser" as const, seekerId: action.seekerId } : { kind: "doc" as const, seekerId: action.seekerId, docId: action.item };
       const see = canSee(dr, viewer, r);
       if (!see.ok) return no(ctx, state, see.reason ?? "This isn't open to you");
-      if (action.action === "download" && r.kind === "doc" && !dr.apps.find((a) => a.id === action.seekerId)?.documents.find((d) => d.id === action.item)?.download) return no(ctx, state, "The seeker allows this document to be viewed, not downloaded");
+      if (action.action === "download" && r.kind === "doc" && !dr.apps.find((a) => a.id === action.seekerId)?.documents.find((d) => d.id === action.item)?.download) return no(ctx, state, "The business allows this document to be viewed, not downloaded");
       return withDr(state, { ...dr, access: [{ id: ctx.newId("ac"), seekerId: action.seekerId, item: action.item, viewer: viewer.id, action: action.action, at }, ...dr.access] });
     }
 

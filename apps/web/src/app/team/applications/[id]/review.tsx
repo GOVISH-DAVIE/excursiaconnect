@@ -5,7 +5,7 @@
  * own review screen, ported: the same tabs, rubric and wording, but every number comes from the server and every
  * button is a use case the server checks against the same rules. M1.6 adds the Decision tab (recommend or decide,
  * the second decider, conditions, readiness) and, for providers, the Verification tab; M1.7 the fee: paid by the
- * applicant, settled by the provider, or waived by the lead. The teaser and what happens in the Deal Room come later.
+ * applicant, settled by the provider, or waived by the lead; M3.1 the business's teaser, approved for the directory.
  */
 import { createContext, useContext, useState, type ReactNode } from "react";
 import type { ReviewView } from "@excursia/contracts/review";
@@ -120,6 +120,14 @@ export function Review({ eventId, appId }: { eventId: string; appId: string }) {
         <Banner tone={expired ? "bad" : "warn"}>
           Information requested {fmtStamp(rfi.at)}, {expired ? <b className="font-medium">expired {fmtStamp(rfiDue(rfi, cfg), false)}</b> : `due ${fmtStamp(rfiDue(rfi, cfg), false)}`}.{" "}
           {expired && (v.can.decideExpiry ? <RfiExpiry /> : <span>The lead decides what happens next.</span>)}
+        </Banner>
+      )}
+      {app.teaser && !app.teaser.approved && v.can.review && shown !== "Decision" && (
+        <Banner tone="warn">
+          The business&apos;s teaser is waiting for approval before it goes into the directory.{" "}
+          <button className="link" onClick={() => setTab("Decision")}>
+            Review it on the Decision tab
+          </button>
         </Banner>
       )}
 
@@ -586,6 +594,8 @@ function DecisionTab() {
           </Section>
         )}
 
+        {qualified(app) && app.type === "seeker" && <TeaserNote />}
+
         <Section title="Every decision and recommendation" flush>
           {app.decisions.length + app.recommendations.length === 0 ? (
             <div className="p-5">
@@ -663,6 +673,41 @@ function DecisionTab() {
         )}
       </Section>
     </div>
+  );
+}
+
+/** The business's teaser: tier 1 of its file, shown to verified counterparties once approved and Deal Room Ready (M3.1). */
+function TeaserNote() {
+  const { app, dr, can, act, pending } = useCtx();
+  const t = app.teaser;
+  return (
+    <Section title="Teaser for the directory" action={!t ? <Pill tone="mute">Not written</Pill> : t.approved ? <Pill tone="ok">Approved</Pill> : <Pill tone="warn">Waiting for approval</Pill>}>
+      {!t ? (
+        <p className="text-[14px] text-slate">The business writes it from its own page once approved. You are emailed when it is waiting.</p>
+      ) : (
+        <>
+          <div className="rounded-md border border-line p-4">
+            <div className="text-[12px] text-slate">{t.anonymous ? "Anonymous: the name shows only after an introduction" : "Shows the organisation's name"}</div>
+            <div className="mt-1 font-medium">{t.anonymous ? t.title : app.org.name}</div>
+            <p className="mt-1.5 whitespace-pre-line text-[14px]">{t.summary}</p>
+          </div>
+          {t.approved ? (
+            <p className="mt-2 text-[12px] text-slate">
+              Approved by {staffName(dr as DealRoomState, t.approved.by)}, {fmtStamp(t.approved.at)}. Verified investors and partners see it while the business is Deal Room Ready. A change by the business comes back here.
+            </p>
+          ) : can.review ? (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button className="btn-primary btn-sm" disabled={pending} onClick={() => act({ kind: "approveTeaser" })}>
+                Approve for the directory
+              </button>
+              <span className="text-[12px] text-slate">Check it names nothing the business wants kept back, and makes no claim the file doesn&apos;t support.</span>
+            </div>
+          ) : (
+            <p className="mt-2 text-[12px] text-slate">A reviewer or the lead approves it.</p>
+          )}
+        </>
+      )}
+    </Section>
   );
 }
 

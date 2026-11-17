@@ -6,7 +6,7 @@
 import { describe, expect, test } from "vitest";
 import { apply, type Action } from "@excursia/domain/core/reducer";
 import { fixedCtx, type Actor } from "@excursia/domain/ctx";
-import { candidates, consentGranted, matchable, mustHaveMisses } from "@excursia/domain/dealroom/logic";
+import { candidates, consentGranted, matchable, mustHaveMisses, qualified } from "@excursia/domain/dealroom/logic";
 import { seed } from "@excursia/domain/seed";
 import type { AppState } from "@excursia/domain/types";
 
@@ -155,5 +155,76 @@ describe("answering an introduction, consent and access", () => {
 
   test("consent before accepting is refused: it is chosen with the acceptance", () => {
     expect(run(seed, { type: "dr/consent", seekerId: pending.seekerId, providerId: pending.providerId, docId: deck, granted: true }, { kind: "applicant", appId: pending.seekerId }).refusal).toBe("Choose what to share when you accept the introduction");
+  });
+});
+
+describe("the teaser, the directory and expressions of interest", () => {
+  const sent = (s: AppState, n: number) => s.dealRoom.outbox.slice(0, n);
+
+  test("a qualified business writes its teaser; the reviewer is told; approval tells the business, once", () => {
+    // a qualified business that hasn't written its teaser yet
+    const s = dr.apps.find((a) => a.type === "seeker" && qualified(a) && a.assignee)!;
+    const base: AppState = { ...seed, dealRoom: { ...dr, apps: dr.apps.map((a) => (a.id === s.id ? { ...a, teaser: undefined } : a)) } };
+    const writer: Actor = { kind: "applicant", appId: s.id };
+    const wrote = run(base, { type: "dr/updateProfile", appId: s.id, patch: { teaser: { title: "Cold chain for smallholders", summary: "Cooling hubs in three counties.", anonymous: true } } }, writer);
+    expect(wrote.refusal).toBeUndefined();
+    expect(sent(wrote.state, 1)[0]).toMatchObject({ to: s.assignee, subject: `${s.ref}'s teaser is waiting for approval` });
+    const approved = run(wrote.state, { type: "dr/approveTeaser", appId: s.id }, reviewer);
+    expect(approved.refusal).toBeUndefined();
+    expect(approved.state.dealRoom.apps.find((a) => a.id === s.id)!.teaser!.approved).toEqual({ by: "st_rev1", at: NOW });
+    expect(sent(approved.state, 1)[0]).toMatchObject({ to: s.id, link: `/dr/${s.id}?profile=1` });
+    expect(run(approved.state, { type: "dr/approveTeaser", appId: s.id }, reviewer).refusal).toBe("This teaser is already approved");
+    // a change takes it out of the directory until it is approved again
+    const edited = run(approved.state, { type: "dr/updateProfile", appId: s.id, patch: { teaser: { title: "Cold chain for smallholders", summary: "Cooling hubs in four counties.", anonymous: true } } }, writer).state;
+    expect(edited.dealRoom.apps.find((a) => a.id === s.id)!.teaser!.approved).toBeUndefined();
+    expect(sent(edited, 1)[0].subject).toBe(`${s.ref}'s teaser is waiting for approval`);
+  });
+
+  test("a business not yet approved, and a counterparty, can't write a teaser", () => {
+    const draft = dr.apps.find((a) => a.type === "seeker" && !qualified(a))!;
+    const teaser = { title: "T", summary: "S", anonymous: false };
+    expect(run(seed, { type: "dr/updateProfile", appId: draft.id, patch: { teaser } }, { kind: "applicant", appId: draft.id }).refusal).toBe("The teaser opens once the application is approved");
+    const p = dr.apps.find((a) => a.type === "provider")!;
+    expect(run(seed, { type: "dr/updateProfile", appId: p.id, patch: { teaser } }, { kind: "applicant", appId: p.id }).refusal).toBe("Only a business seeking capital or partners writes a teaser");
+  });
+
+  test("a verified counterparty expresses interest in a published teaser: a suggestion for the team, never an introduction", () => {
+    const provider = dr.apps.find((a) => a.type === "provider" && a.verification?.state === "Verified")!;
+    const seeker = dr.apps.find((a) => a.type === "seeker" && matchable(a) && a.teaser?.approved && !dr.matches.some((m) => m.seekerId === a.id && m.providerId === provider.id))!;
+    const r = run(seed, { type: "dr/interest", providerId: provider.id, seekerId: seeker.id }, { kind: "applicant", appId: provider.id });
+    expect(r.refusal).toBeUndefined();
+    const m = r.state.dealRoom.matches.find((x) => x.seekerId === seeker.id && x.providerId === provider.id)!;
+    expect(m).toMatchObject({ origin: "interest", decision: "Suggested" });
+    expect(m.intro).toBeUndefined();
+    expect(sent(r.state, 1)[0].link).toBe("/dealroom/matching?tab=interest");
+    expect(run(r.state, { type: "dr/interest", providerId: provider.id, seekerId: seeker.id }, { kind: "applicant", appId: provider.id }).refusal).toBe("You've already shown interest in this opportunity");
+    const unverified = dr.apps.find((a) => a.type === "provider" && a.verification?.state !== "Verified")!;
+    expect(run(seed, { type: "dr/interest", providerId: unverified.id, seekerId: seeker.id }, { kind: "applicant", appId: unverified.id }).refusal).toMatch(/^Opens once your organisation is verified/);
+  });
+
+  test("only the business sets a document to view only, and a download is then refused", () => {
+    const s = dr.apps.find((x) => x.id === pending.seekerId)!;
+    const doc = s.documents[0];
+    const owner: Actor = { kind: "applicant", appId: s.id };
+    expect(run(seed, { type: "dr/docDownload", appId: s.id, docId: doc.id, download: false }, reviewer).refusal).toBe("Only the business whose document it is decides how it is shared");
+    expect(run(seed, { type: "dr/docDownload", appId: s.id, docId: doc.id, download: true }, owner).refusal).toBe("Downloads are already allowed");
+    const off = run(seed, { type: "dr/docDownload", appId: s.id, docId: doc.id, download: false }, owner);
+    expect(off.refusal).toBeUndefined();
+    expect(off.state.dealRoom.apps.find((x) => x.id === s.id)!.documents[0].download).toBe(false);
+  });
+
+  test("an introduction that expired unanswered is told to both sides and the team, once, by the system only", () => {
+    const old = dr.matches.find((m) => m.intro && !m.intro.seeker && !m.intro.provider && m.intro.sentAt < "2027-02-01")!;
+    const system: Actor = { kind: "system" };
+    expect(run(seed, { type: "dr/introLapse", matchId: old.id }, reviewer).refusal).toBe("Expiries are noted by the system");
+    expect(run(seed, { type: "dr/introLapse", matchId: pending.id }, system).refusal).toBe("This introduction hasn't expired");
+    const r = run(seed, { type: "dr/introLapse", matchId: old.id }, system);
+    expect(r.refusal).toBeUndefined();
+    expect(r.state.dealRoom.matches.find((m) => m.id === old.id)!.intro!.lapsedAt).toBe(NOW);
+    const [team, provider, seeker] = sent(r.state, 3);
+    expect(seeker).toMatchObject({ to: old.seekerId, subject: "Your Deal Room introduction expired before you answered", link: `/dr/${old.seekerId}?intros=1` });
+    expect(provider).toMatchObject({ to: old.providerId, link: `/dr/${old.providerId}?intros=1` });
+    expect(team.link).toBe(`/dealroom/matches/${old.id}`);
+    expect(run(r.state, { type: "dr/introLapse", matchId: old.id }, system).refusal).toBe("This expiry was already noted");
   });
 });

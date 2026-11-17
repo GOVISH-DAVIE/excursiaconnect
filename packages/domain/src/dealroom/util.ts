@@ -25,6 +25,8 @@ export const portal = (a: DrApplication) => `/dr/${a.id}`;
 export const badgeLink = (a: DrApplication) => `/dr/${a.id}?badge=1`;
 /** Where a message about an introduction points: the participant's introductions (on the server, the event's page for them). */
 export const introLink = (appId: string) => `/dr/${appId}?intros=1`;
+/** The business's own teaser and documents (M3.1). */
+export const profileLink = (a: DrApplication) => `/dr/${a.id}?profile=1`;
 
 /** The event's active lead: who gets the Deal Room's reports and unassigned work. The demo's is st_lead. */
 export const leadOf = (dr: DealRoomState, eventId: string) => dr.staff.find((s) => s.eventId === eventId && s.active && s.role === "Lead")?.id ?? "st_lead";

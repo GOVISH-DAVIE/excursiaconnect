@@ -1,6 +1,7 @@
 /**
  * Matching's endpoints. The team's under /v1/matching/:eventId (staff, then the service checks the team and the
- * rules the role); the participant's under /v1/introductions/:slug (signed in, their own introductions only). A
+ * rules the role); the participant's under /v1/introductions/:slug (signed in, their own introductions, teaser and,
+ * once verified, the directory only). A
  * stamped copy's link carries its own permission, like an upload's, so it needs no session.
  */
 import { Router } from "express";
@@ -22,6 +23,12 @@ export function matchingRoutes(c: MatchingController): Router {
 export function introductionsRoutes(c: MatchingController): Router {
   const r = Router();
   r.get("/files/:token", c.shared);
+  // the business's own teaser and documents, and the directory of teasers for verified counterparties
+  r.get("/:slug/teaser", requireSession(), c.myProfile);
+  r.put("/:slug/teaser", requireSession(), c.saveTeaser);
+  r.put("/:slug/teaser/documents/:docId", requireSession(), c.setDownload);
+  r.get("/:slug/directory", requireSession(), c.directory);
+  r.post("/:slug/directory/:seekerId/interest", requireSession(), c.interest);
   r.get("/:slug", requireSession(), c.mine);
   r.post("/:slug/:matchId/respond", requireSession(), c.respond);
   r.put("/:slug/:matchId/documents/:docId/consent", requireSession(), c.consent);

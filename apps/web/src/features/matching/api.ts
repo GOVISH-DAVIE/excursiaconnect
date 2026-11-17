@@ -1,7 +1,7 @@
 /** Matching's calls to the API (M3.1): the only file in the web app that knows these paths. */
 import {
-  Candidates, DecidedMatch, MatchingBoard, MatchView, MyIntroductions, SeekerProfile, SharedLink,
-  type BriefInput, type DecideMatchInput, type IntroduceInput, type RespondIntroInput,
+  Candidates, DecidedMatch, Directory, MatchingBoard, MatchView, MyIntroductions, MyProfile, SeekerProfile, SharedLink,
+  type BriefInput, type DecideMatchInput, type IntroduceInput, type RespondIntroInput, type TeaserInput,
 } from "@excursia/contracts/matching";
 import { http } from "../http";
 
@@ -23,4 +23,11 @@ export const matchingApi = {
   consent: (slug: string, matchId: string, docId: string, granted: boolean) => http.put(`${intro(slug, matchId)}/documents/${docId}/consent`, { body: { granted }, schema: MyIntroductions }),
   profile: (slug: string, matchId: string) => http.post(`${intro(slug, matchId)}/profile`, { schema: SeekerProfile }),
   open: (slug: string, matchId: string, docId: string, action: "view" | "download") => http.post(`${intro(slug, matchId)}/documents/${docId}/open`, { body: { action }, schema: SharedLink }),
+
+  /* the business's teaser, and the directory for verified counterparties */
+  myProfile: (slug: string) => http.get(`/v1/introductions/${slug}/teaser`, { schema: MyProfile }),
+  saveTeaser: (slug: string, input: TeaserInput) => http.put(`/v1/introductions/${slug}/teaser`, { body: input, schema: MyProfile }),
+  setDownload: (slug: string, docId: string, download: boolean) => http.put(`/v1/introductions/${slug}/teaser/documents/${docId}`, { body: { download }, schema: MyProfile }),
+  directory: (slug: string) => http.get(`/v1/introductions/${slug}/directory`, { schema: Directory }),
+  interest: (slug: string, seekerId: string) => http.post(`/v1/introductions/${slug}/directory/${seekerId}/interest`, { schema: Directory }),
 };

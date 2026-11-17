@@ -2,7 +2,8 @@
 import type { RequestHandler } from "express";
 import { SlugParams } from "@excursia/contracts/apply";
 import {
-  BriefInput, CandidateParams, ConsentInput, DecideMatchInput, IntroDocParams, IntroParams, IntroduceInput, MatchingParams, MatchParams, OpenDocInput, RespondIntroInput,
+  BriefInput, CandidateParams, ConsentInput, DecideMatchInput, DownloadInput, IntroDocParams, IntroParams, IntroduceInput, MatchingParams, MatchParams, OpenDocInput, ProfileDocParams,
+  RespondIntroInput, TeaserInput, TeaserParams,
 } from "@excursia/contracts/matching";
 import { sessionOf } from "../../http/session";
 import type { MatchingService } from "./matching.service";
@@ -69,6 +70,33 @@ export function createMatchingController(service: MatchingService) {
     openDocument: (async (req, res) => {
       const { slug, matchId, docId } = IntroDocParams.parse(req.params);
       res.set(PRIVATE).json(await service.openDocument(sessionOf(res), slug, matchId, docId, OpenDocInput.parse(req.body).action, ip(req)));
+    }) satisfies RequestHandler,
+
+    /* ----- the business's teaser and the directory, under /v1/introductions/:slug ----- */
+
+    myProfile: (async (req, res) => {
+      const { slug } = SlugParams.parse(req.params);
+      res.set(PRIVATE).json(await service.myProfile(sessionOf(res), slug));
+    }) satisfies RequestHandler,
+
+    saveTeaser: (async (req, res) => {
+      const { slug } = SlugParams.parse(req.params);
+      res.set(PRIVATE).json(await service.saveTeaser(sessionOf(res), slug, TeaserInput.parse(req.body), ip(req)));
+    }) satisfies RequestHandler,
+
+    setDownload: (async (req, res) => {
+      const { slug, docId } = ProfileDocParams.parse(req.params);
+      res.set(PRIVATE).json(await service.setDownload(sessionOf(res), slug, docId, DownloadInput.parse(req.body).download, ip(req)));
+    }) satisfies RequestHandler,
+
+    directory: (async (req, res) => {
+      const { slug } = SlugParams.parse(req.params);
+      res.set(PRIVATE).json(await service.directory(sessionOf(res), slug));
+    }) satisfies RequestHandler,
+
+    interest: (async (req, res) => {
+      const { slug, seekerId } = TeaserParams.parse(req.params);
+      res.set(PRIVATE).json(await service.interest(sessionOf(res), slug, seekerId, ip(req)));
     }) satisfies RequestHandler,
 
     /** The stamped copy behind a two-minute link. Shown in the browser's own viewer, or downloaded. */

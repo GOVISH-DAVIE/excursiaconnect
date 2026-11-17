@@ -69,6 +69,11 @@ export function createDealRoomController(service: DealRoomService) {
       res.json(await service.readiness(sessionOf(res), eventId, appId, ReadinessInput.parse(req.body), ip(req)));
     }) satisfies RequestHandler,
 
+    approveTeaser: (async (req, res) => {
+      const { eventId, appId } = AppIdParams.parse(req.params);
+      res.json(await service.approveTeaser(sessionOf(res), eventId, appId, ip(req)));
+    }) satisfies RequestHandler,
+
     checkKyc: (async (req, res) => {
       const { eventId, appId } = AppIdParams.parse(req.params);
       res.json(await service.checkKyc(sessionOf(res), eventId, appId, CheckKycInput.parse(req.body), ip(req)));

@@ -59,18 +59,26 @@ function Decision({ slug, app }: { slug: string; app: MyApplication }) {
           {app.fee.waived ? "Your participation fee is waived: your Deal Room badge is ready." : `Your participation fee is paid${app.fee.payment?.status === "confirmed" ? ` (${app.fee.payment.message.replace(/^Paid, |\.$/g, "")})` : ""}: your Deal Room badge is ready.`}
         </p>
       )}
-      {approved && !owed && <BadgeLink slug={slug} />}
+      {approved && <BadgeLink slug={slug} badge={!owed} next={{ path: "teaser", label: "My teaser" }} />}
       {approved && app.readiness === "Deal Room Ready" && <p className="mt-3 text-[14px] text-ok">You are Deal Room Ready: matching starts when the Deal Room opens.</p>}
     </Card>
   );
 }
 
-/** The badge has its own page, for the desk and the doors (M2.1); so do the introductions (M3.1). */
-function BadgeLink({ slug }: { slug: string }) {
+/**
+ * The badge has its own page, for the desk and the doors (M2.1); so do the introductions and, for a business, its
+ * teaser, or for a verified counterparty, the directory of teasers (M3.1).
+ */
+function BadgeLink({ slug, badge, next }: { slug: string; badge: boolean; next: { path: "teaser" | "directory"; label: string } }) {
   return (
     <div className="mt-4 flex flex-wrap gap-2">
-      <Link href={`/e/${slug}/badge`} className="btn btn-primary w-full sm:w-auto">
-        Open my Deal Room badge
+      {badge && (
+        <Link href={`/e/${slug}/badge`} className="btn btn-primary w-full sm:w-auto">
+          Open my Deal Room badge
+        </Link>
+      )}
+      <Link href={`/e/${slug}/deal-room/${next.path}`} className={`btn ${badge ? "btn-secondary" : "btn-primary"} w-full sm:w-auto`}>
+        {next.label}
       </Link>
       <Link href={`/e/${slug}/deal-room/introductions`} className="btn btn-secondary w-full sm:w-auto">
         My introductions
@@ -158,7 +166,7 @@ function Verification({ slug, app, maxBytes }: { slug: string; app: MyApplicatio
               : "Before the Deal Room opens to you, the review team checks who you are: your registration, who owns and controls the organisation, and the ID of the person signing. They also screen the organisation against the sanctions lists."}
         </p>
 
-        {v.state === "Verified" && <BadgeLink slug={slug} />}
+        {v.state === "Verified" && <BadgeLink slug={slug} badge next={{ path: "directory", label: "Browse the directory" }} />}
 
         <div className="mt-4">
           {v.kyc.map((k) => {

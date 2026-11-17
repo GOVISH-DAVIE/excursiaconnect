@@ -18,6 +18,10 @@ export function createMatchingRepo(db: Db) {
     /** One pair's two sides, in this event. */
     pairOf: (eventId: string, matchId: string) => db.drMatch.findFirst({ where: { id: matchId, eventId }, select: { seekerId: true, providerId: true } }),
 
+    /** Events with an introduction not yet noted as expired: the worker looks only at these. */
+    eventsWithOpenIntros: async () =>
+      (await db.$queryRaw<{ event_id: string }[]>`select distinct event_id from dr_match where decision = 'Approved' and record ? 'intro' and not (record -> 'intro' ? 'lapsedAt')`).map((r) => r.event_id),
+
     /** The stored file behind a seeker's document, if it has one (the demo seed's documents don't). */
     fileOf: (id: string, appId: string) => db.file.findFirst({ where: { id, ownerKind: "dr_application", ownerId: appId } }),
   };

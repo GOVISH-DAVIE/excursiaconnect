@@ -20,6 +20,7 @@ export type ReviewAction =
   | { kind: "meetCondition"; conditionId: string }
   | { kind: "confirmDecisionMaker" }
   | { kind: "readiness"; input: ReadinessInput }
+  | { kind: "approveTeaser" }
   | { kind: "checkKyc"; input: CheckKycInput }
   | { kind: "sanctions"; input: SanctionsInput }
   | { kind: "verify"; input: VerifyInput }
@@ -48,6 +49,8 @@ function send(eventId: string, appId: string, a: ReviewAction): Promise<ReviewVi
       return dealRoomApi.confirmDecisionMaker(eventId, appId);
     case "readiness":
       return dealRoomApi.readiness(eventId, appId, a.input);
+    case "approveTeaser":
+      return dealRoomApi.approveTeaser(eventId, appId);
     case "checkKyc":
       return dealRoomApi.checkKyc(eventId, appId, a.input);
     case "sanctions":

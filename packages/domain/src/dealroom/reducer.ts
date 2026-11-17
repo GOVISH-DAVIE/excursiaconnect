@@ -39,7 +39,7 @@ import type {
   Layer,
   Readiness,
 } from "./types";
-import { badgeLink, exception, leadOf, note, patchApp, portal, send, withDr } from "./util";
+import { badgeLink, exception, leadOf, note, patchApp, portal, profileLink, send, withDr } from "./util";
 import { drConvReducer, playForward, type DrConvAction } from "./conversion";
 import { drMeetReducer, type DrMeetAction } from "./meetings";
 import { drSessionReducer, type DrSessionAction } from "./sessions";
@@ -76,6 +76,8 @@ export type DrAction =
   | { type: "dr/updateProfile"; appId: string; patch: Partial<Pick<DrApplication, "org" | "contact" | "decisionMaker" | "ask" | "traction" | "mandate" | "teaser" | "challenge">> }
   | { type: "dr/completeProfile"; appId: string }
   | { type: "dr/approveTeaser"; appId: string }
+  /** the business lets counterparties download a document, or only view it as a stamped copy (M3.1) */
+  | { type: "dr/docDownload"; appId: string; docId: string; download: boolean }
   | { type: "dr/reReviewDone"; appId: string; note: string }
   | { type: "dr/addDoc"; appId: string; doc: DrDocument }
   | { type: "dr/kyc"; appId: string; item: KycItem; doc: DrDocument }
@@ -530,6 +532,11 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
 
     case "dr/updateProfile": {
       if (!app) return no(ctx, state, "No such application");
+      if (action.patch.teaser) {
+        // the teaser is tier 1 of the business's file: written once approved, and seen only after a reviewer approves it
+        if (app.type !== "seeker") return no(ctx, state, "Only a business seeking capital or partners writes a teaser");
+        if (!qualified(app)) return no(ctx, state, "The teaser opens once the application is approved");
+      }
       const decided = app.status === "Decided" || qualified(app);
       // a change to the ask or the mandate after a decision goes back for review; the status stays (PRD Qualification req. 7)
       const changed: string[] = [];
@@ -545,6 +552,10 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
         return note(next, "applicant", material.length && decided ? `Changed ${material.join(", ")}; sent for re-review` : p.challenge ? "Challenge updated" : "Profile updated", at);
       });
       if (decided && material.length && app.assignee) dr = send(ctx, dr, app.eventId, app.assignee, `${app.ref} changed its ${app.type === "seeker" ? "ask" : "mandate"}: re-review`, `/dealroom/applications/${app.id}`, "Email");
+      // a new or changed teaser leaves the directory until a reviewer approves it again
+      const teaser = dr.apps.find((a) => a.id === app.id)!.teaser;
+      if (p.teaser && teaser && teaser !== app.teaser && (!app.teaser || app.teaser.approved))
+        dr = send(ctx, dr, app.eventId, app.assignee ?? leadOf(dr, app.eventId), `${app.ref}'s teaser is waiting for approval`, `/dealroom/applications/${app.id}?teaser=1`, "Email");
       return withDr(state, dr);
     }
 
@@ -559,7 +570,24 @@ export function drReducer(state: AppState, action: DrAction, ctx: Ctx): AppState
       if (!app) return no(ctx, state, "No such application");
       if (!drCan(me, "review")) return no(ctx, state, "Your role cannot approve teasers");
       if (!app.teaser) return no(ctx, state, "There is no teaser to approve");
-      return withDr(state, patchApp(dr, app.id, (a) => note({ ...a, teaser: { ...a.teaser!, approved: { by: me!.id, at } } }, me!.id, "Teaser approved for the directory", at)));
+      if (app.teaser.approved) return no(ctx, state, "This teaser is already approved");
+      dr = patchApp(dr, app.id, (a) => note({ ...a, teaser: { ...a.teaser!, approved: { by: me!.id, at } } }, me!.id, "Teaser approved for the directory", at));
+      dr = send(ctx, dr, app.eventId, app.id, "Your teaser is approved: verified investors and partners see it in the Deal Room directory", profileLink(app), "Email");
+      return withDr(state, dr);
+    }
+
+    case "dr/docDownload": {
+      if (!app) return no(ctx, state, "No such application");
+      if (ctx.actor?.kind !== "applicant" || ctx.actor.appId !== app.id) return no(ctx, state, "Only the business whose document it is decides how it is shared");
+      const doc = app.documents.find((d) => d.id === action.docId);
+      if (!doc) return no(ctx, state, "No such document");
+      if (doc.download === action.download) return no(ctx, state, action.download ? "Downloads are already allowed" : "It is already view only");
+      return withDr(
+        state,
+        patchApp(dr, app.id, (a) =>
+          note({ ...a, documents: a.documents.map((d) => (d.id === doc.id ? { ...d, download: action.download } : d)) }, "applicant", `${doc.kind}: ${action.download ? "downloads allowed" : "view only"}`, at),
+        ),
+      );
     }
 
     case "dr/reReviewDone": {

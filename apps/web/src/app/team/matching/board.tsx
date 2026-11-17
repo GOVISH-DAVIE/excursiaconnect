@@ -3,23 +3,24 @@
 /**
  * Matching (M3.1), for the lead, reviewers and coordinators: the participants open to matching (Deal Room Ready
  * seekers, verified investors, partners and challenges), each one's candidates on the other side with what the pair
- * meets and misses, and a person's decision on each pair. Nothing is matched on its own. The pairs tab lists every
- * pair with its stage, to send introductions and follow them.
+ * meets and misses, and a person's decision on each pair. Nothing is matched on its own. The interest tab holds what
+ * verified counterparties flagged in the directory: suggestions to decide, never introductions. The pairs tab lists
+ * every pair with its stage, to send introductions and follow them.
  */
 import Link from "next/link";
 import { useState } from "react";
-import type { Candidate, MatchingBoard, MatchStage, PoolEntry } from "@excursia/contracts/matching";
+import type { Candidate, InterestRow, MatchingBoard, MatchStage, PoolEntry } from "@excursia/contracts/matching";
 import { fmtStamp } from "@excursia/domain/time";
 import { Empty, PageHeader, Section, Tabs } from "@/components/ui";
 import { useBoard, useCandidates, useDecide } from "@/features/matching/hooks/use-matching";
 import { Failed, Loading } from "../bits";
 import { FitDetail, FitPills, StagePill } from "./stage";
 
-const TABS = ["Find matches", "Pairs"] as const;
+const TABS = ["Find matches", "Interest", "Pairs"] as const;
 
-export function Board({ eventId, who, pairs }: { eventId: string; who: string; pairs: boolean }) {
+export function Board({ eventId, who, open }: { eventId: string; who: string; open: "pairs" | "interest" | null }) {
   const q = useBoard(eventId);
-  const [tab, setTab] = useState<(typeof TABS)[number]>(pairs ? "Pairs" : "Find matches");
+  const [tab, setTab] = useState<(typeof TABS)[number]>(open === "pairs" ? "Pairs" : open === "interest" ? "Interest" : "Find matches");
   if (q.isPending) return <Loading />;
   if (q.isError) return <Failed error={q.error} />;
   const b = q.data;
@@ -30,8 +31,8 @@ export function Board({ eventId, who, pairs }: { eventId: string; who: string; p
         title="Matching"
         kicker={`${b.event.name}. Only Deal Room Ready seekers and verified investors, partners and challenges are searched. Every pair shows what it meets and misses; a person approves, defers or rejects it.`}
       />
-      <Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Pairs: waiting }} />
-      {tab === "Find matches" ? <Find eventId={eventId} board={b} who={who} /> : <Pairs board={b} />}
+      <Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Interest: b.interest.filter((i) => i.stage === "Suggested").length, Pairs: waiting }} />
+      {tab === "Find matches" ? <Find eventId={eventId} board={b} who={who} /> : tab === "Interest" ? <Interest eventId={eventId} board={b} /> : <Pairs board={b} />}
     </>
   );
 }
@@ -115,19 +116,11 @@ function CandidateList({ eventId, board, who }: { eventId: string; board: Matchi
 }
 
 function CandidateRow({ eventId, c, lead }: { eventId: string; c: Candidate; lead: boolean }) {
-  const decide = useDecide(eventId);
   const [open, setOpen] = useState(false);
   const [show, setShow] = useState(false);
-  const [note, setNote] = useState("");
-  const [override, setOverride] = useState("");
   const decided = c.match && !["Suggested", "Deferred"].includes(c.match.stage);
   const canDecide = !decided || !!c.blocked;
   const provider = c.providerId === c.other.id ? c.other.org : "The counterparty";
-  const send = (decision: "Approved" | "Rejected" | "Deferred") =>
-    decide.mutate(
-      { seekerId: c.seekerId, providerId: c.providerId, decision, note, override: c.blocked ? override : undefined },
-      { onSuccess: () => { setOpen(false); setNote(""); setOverride(""); } },
-    );
   return (
     <li className="border-b border-line px-5 py-3 last:border-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -161,38 +154,104 @@ function CandidateRow({ eventId, c, lead }: { eventId: string; c: Candidate; lea
           {c.match?.note && <p className="mt-3 text-[13px] text-slate">The decision&apos;s note: {c.match.note}</p>}
         </div>
       )}
-      {open && (
-        <div className="mt-3 grid gap-2 rounded-md bg-paper p-3">
-          {c.blocked && (
-            <p className="text-[13px] text-bad">
-              This pair was {c.blocked.toLowerCase()} before. {lead ? "Proposing it again needs your reason; it is logged as an exception." : "Only the lead can propose it again."}
-            </p>
-          )}
-          {c.blocked && lead && <input className="input h-10 text-[14px]" placeholder="Why propose it again (logged)" value={override} onChange={(e) => setOverride(e.target.value)} />}
-          <textarea
-            className="input min-h-16 text-[14px]"
-            placeholder={c.needsNote ? "Why they should still meet: needed, as the pair misses a must-have" : "Why: needed to defer or reject, optional to approve"}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          {decide.error && (
-            <p role="alert" className="text-[13px] text-bad">
-              {decide.error.message}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <button className="btn-primary btn-sm" disabled={decide.isPending || (c.needsNote && !note.trim()) || (!!c.blocked && (!lead || !override.trim()))} onClick={() => send("Approved")}>
-              Approve
-            </button>
-            <button className="btn-secondary btn-sm" disabled={decide.isPending || !note.trim() || (!!c.blocked && !lead)} onClick={() => send("Deferred")}>
-              Defer
-            </button>
-            <button className="btn-secondary btn-sm text-bad" disabled={decide.isPending || !note.trim() || (!!c.blocked && !lead)} onClick={() => send("Rejected")}>
-              Reject
-            </button>
-          </div>
+      {open && <Decide eventId={eventId} seekerId={c.seekerId} providerId={c.providerId} needsNote={c.needsNote} blocked={c.blocked} lead={lead} onDone={() => setOpen(false)} />}
+    </li>
+  );
+}
+
+/** A person's decision on one pair: approve, defer or reject, with the reason the rules ask for. */
+function Decide({ eventId, seekerId, providerId, needsNote, blocked, lead, deferred, onDone }: { eventId: string; seekerId: string; providerId: string; needsNote: boolean; blocked: string | null; lead: boolean; deferred?: boolean; onDone?: () => void }) {
+  const decide = useDecide(eventId);
+  const [note, setNote] = useState("");
+  const [override, setOverride] = useState("");
+  const send = (decision: "Approved" | "Rejected" | "Deferred") =>
+    decide.mutate(
+      { seekerId, providerId, decision, note, override: blocked ? override : undefined },
+      { onSuccess: () => { setNote(""); setOverride(""); onDone?.(); } },
+    );
+  return (
+    <div className="mt-3 grid gap-2 rounded-md bg-paper p-3">
+      {blocked && (
+        <p className="text-[13px] text-bad">
+          This pair was {blocked.toLowerCase()} before. {lead ? "Proposing it again needs your reason; it is logged as an exception." : "Only the lead can propose it again."}
+        </p>
+      )}
+      {blocked && lead && <input className="input h-10 text-[14px]" placeholder="Why propose it again (logged)" value={override} onChange={(e) => setOverride(e.target.value)} />}
+      <textarea
+        className="input min-h-16 text-[14px]"
+        placeholder={needsNote ? "Why they should still meet: needed, as the pair misses a must-have" : "Why: needed to defer or reject, optional to approve"}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      {decide.error && (
+        <p role="alert" className="text-[13px] text-bad">
+          {decide.error.message}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-primary btn-sm" disabled={decide.isPending || (needsNote && !note.trim()) || (!!blocked && (!lead || !override.trim()))} onClick={() => send("Approved")}>
+          Approve
+        </button>
+        {!deferred && (
+          <button className="btn-secondary btn-sm" disabled={decide.isPending || !note.trim() || (!!blocked && !lead)} onClick={() => send("Deferred")}>
+            Defer
+          </button>
+        )}
+        <button className="btn-secondary btn-sm text-bad" disabled={decide.isPending || !note.trim() || (!!blocked && !lead)} onClick={() => send("Rejected")}>
+          Reject
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** What verified counterparties flagged in the directory: each a suggestion for a person to decide (DR-10). */
+function Interest({ eventId, board }: { eventId: string; board: MatchingBoard }) {
+  if (!board.interest.length)
+    return (
+      <Empty>
+        No expression of interest is waiting. A verified investor or partner can flag a business&apos;s teaser in the directory; it lands here as a suggestion, never as an introduction.
+      </Empty>
+    );
+  return (
+    <Section title="Expressions of interest" flush>
+      <p className="px-5 pb-3 text-[13px] text-slate">Approving makes it a match with its brief drafted; the introduction is still yours to send.</p>
+      <ul className="border-t border-line">
+        {board.interest.map((i) => (
+          <InterestItem key={i.matchId} eventId={eventId} i={i} lead={board.can.lead} />
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+function InterestItem({ eventId, i, lead }: { eventId: string; i: InterestRow; lead: boolean }) {
+  const [show, setShow] = useState(false);
+  return (
+    <li className="border-b border-line px-5 py-3 last:border-0">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 text-[14px]">
+          <span className="font-medium">{i.provider.org}</span> <span className="text-slate">({i.provider.label})</span> is interested in <span className="font-medium">{i.seeker.org}</span>
+          <span className="block text-[12px] text-slate">
+            {i.seeker.summary || i.seeker.label} · flagged {fmtStamp(i.at)}
+            {i.stage === "Deferred" && ` · deferred${i.note ? `: ${i.note}` : ""}`}
+          </span>
+          <FitPills fit={i.fit} exclusionHit={i.exclusionHit} />
+          <button type="button" className="mt-1 block text-[12px] text-slate hover:text-ink" aria-expanded={show} onClick={() => setShow(!show)}>
+            {show ? "Hide the fit ▴" : "The fit ▾"}
+          </button>
+        </div>
+        <StagePill stage={i.stage} />
+      </div>
+      {show && (
+        <div className="mt-3 rounded-md border border-line p-4">
+          <FitDetail fit={i.fit} provider={i.provider.org} />
         </div>
       )}
+      {i.blocked ? (
+        <p className="mt-2 text-[13px] text-bad">{i.blocked}, so it can&apos;t be approved yet. Defer it, or reject it with the reason.</p>
+      ) : null}
+      <Decide eventId={eventId} seekerId={i.seeker.id} providerId={i.provider.id} needsNote={i.needsNote} blocked={null} lead={lead} deferred={i.stage === "Deferred"} />
     </li>
   );
 }

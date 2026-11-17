@@ -237,6 +237,8 @@ export interface DrIntroduction {
   by: string;
   seeker?: { response: "Accepted" | "Declined"; reason?: string; at: string };
   provider?: { response: "Accepted" | "Declined"; reason?: string; at: string };
+  /** when both sides and the team were told it expired unanswered: once (M3.1) */
+  lapsedAt?: string;
 }
 
 export interface DrMatch {

@@ -1,7 +1,7 @@
 /**
  * The worker process (deploy.md, excursia-worker), as the worker database role, every few seconds: sends the
  * outbox, scans new uploads for viruses, deletes files past their retention date, confirms M-Pesa payments with
- * Daraja and settles them, and sends the fee's one reminder. Stops cleanly on SIGTERM, finishing the batch in hand.
+ * Daraja and settles them, sends the fee's one reminder, and tells both sides of an introduction that expired. Stops cleanly on SIGTERM, finishing the batch in hand.
  */
 import { createDb } from "@excursia/db";
 import { loadConfig } from "./config";
@@ -11,6 +11,7 @@ import { createFilesRepo } from "./modules/files/files.repo";
 import { SCAN_BATCH, createFilesService } from "./modules/files/files.service";
 import { createOutboxRepo } from "./modules/outbox/outbox.repo";
 import { createOutboxService } from "./modules/outbox/outbox.service";
+import { introLapses } from "./modules/matching";
 import { paymentsService } from "./modules/payments";
 import { mpesaFor } from "./payments/mpesa";
 import { rulesClock } from "./clock";
@@ -27,9 +28,11 @@ const files = createFilesService({ repo: createFilesRepo(db), storage: createLoc
 const mpesa = mpesaFor(config);
 // the worker never pushes, so it needs no callback address
 const payments = paymentsService({ db, now: rulesClock(config), mpesa, callbackBase: () => "" });
+const lapses = introLapses({ db, now: rulesClock(config) });
 /** Fee reminders are due by the day: looking every ten minutes is plenty. */
 const REMIND_EVERY_MS = 10 * 60_000;
 let remindedAt = 0;
+let lapsedAt = 0;
 /** How long one round may keep scanning while uploads are waiting; the outbox goes at its own, slower pace. */
 const SCAN_BUDGET_MS = 2_500;
 /** Retention is in days and months: looking once a minute is plenty. */
@@ -79,6 +82,16 @@ async function tick() {
     }
   } catch (e) {
     console.error("[worker] payments round failed", e);
+  }
+  try {
+    // introductions expire by the day: the same ten-minute pace as the fee reminders
+    if (Date.now() - lapsedAt > REMIND_EVERY_MS) {
+      lapsedAt = Date.now();
+      const n = await lapses();
+      if (n) console.log(`[worker] introductions: ${n} expired unanswered, both sides told`);
+    }
+  } catch (e) {
+    console.error("[worker] introductions round failed", e);
   }
   if (!stopping) timer = setTimeout(tick, EVERY_MS);
 }

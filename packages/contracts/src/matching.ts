@@ -49,6 +49,22 @@ export const MatchRow = z.object({
 });
 export type MatchRow = z.infer<typeof MatchRow>;
 
+/** A counterparty's expression of interest in a teaser, waiting for the team's decision (DR-10). */
+export const InterestRow = z.object({
+  matchId: z.string(),
+  at: z.string(),
+  stage: z.enum(["Suggested", "Deferred"]),
+  note: z.string(),
+  seeker: z.object({ id: z.string(), org: z.string(), label: z.string(), summary: z.string() }),
+  provider: z.object({ id: z.string(), org: z.string(), label: z.string(), summary: z.string() }),
+  fit: z.array(FitRow),
+  exclusionHit: z.string().nullable(),
+  needsNote: z.boolean(),
+  /** why the business can't be matched now, if it can't: approving would be refused */
+  blocked: z.string().nullable(),
+});
+export type InterestRow = z.infer<typeof InterestRow>;
+
 export const MatchingBoard = z.object({
   event: z.object({ id: z.string(), name: z.string() }),
   now: z.string(),
@@ -56,6 +72,7 @@ export const MatchingBoard = z.object({
   missions: z.array(z.object({ id: z.string(), code: z.string(), name: z.string() })),
   pool: z.array(PoolEntry),
   matches: z.array(MatchRow),
+  interest: z.array(InterestRow),
   can: z.object({ match: z.boolean(), introduce: z.boolean(), lead: z.boolean() }),
 });
 export type MatchingBoard = z.infer<typeof MatchingBoard>;
@@ -216,3 +233,76 @@ export type SeekerProfile = z.infer<typeof SeekerProfile>;
 /** A short-lived link to a stamped copy of a document. */
 export const SharedLink = z.object({ url: z.string(), expiresAt: z.string() });
 export type SharedLink = z.infer<typeof SharedLink>;
+
+/* ---------- the business's teaser, and the directory of teasers (CS-7, FP-5, FP-6) ---------- */
+
+export const ParticipantParams = z.object({ slug: Slug });
+export const ProfileDocParams = ParticipantParams.extend({ docId: DocId });
+export const TeaserParams = ParticipantParams.extend({ seekerId: AppId });
+
+/** Tier 1 of a business's file: what verified counterparties see in the directory. */
+export const TeaserCard = z.object({
+  /** the organisation's name, or the anonymous title until an introduction */
+  title: z.string(),
+  named: z.boolean(),
+  sector: z.string(),
+  country: z.string(),
+  askBand: z.string(),
+  pathway: z.string(),
+  mission: z.string(),
+  summary: z.string(),
+});
+export type TeaserCard = z.infer<typeof TeaserCard>;
+
+export const TeaserInput = z.object({
+  title: z.string().trim().min(1, "give the teaser a title").max(120),
+  summary: z.string().trim().min(1, "write the summary").max(1200),
+  anonymous: z.boolean(),
+});
+export type TeaserInput = z.infer<typeof TeaserInput>;
+
+export const DownloadInput = z.object({ download: z.boolean() });
+export type DownloadInput = z.infer<typeof DownloadInput>;
+
+/** The business's own page: its teaser, where it stands, and how each document may be shared. */
+export const MyProfile = z.object({
+  event: z.object({ name: z.string(), slug: z.string() }),
+  /** null when the email has no approved business application here; the reason says why */
+  app: z
+    .object({
+      id: z.string(),
+      ref: z.string().nullable(),
+      org: z.string(),
+      teaser: z.object({ title: z.string(), summary: z.string(), anonymous: z.boolean() }).nullable(),
+      state: z.enum(["none", "waiting", "approved"]),
+      approvedAt: z.string().nullable(),
+      /** the teaser shows in the directory only once the business is also Deal Room Ready */
+      listed: z.boolean(),
+      /** the card as the directory shows it; before a teaser is written, with its title and summary empty */
+      preview: TeaserCard,
+      deadline: z.string().nullable(),
+      completedAt: z.string().nullable(),
+      documents: z.array(z.object({ id: z.string(), kind: z.string(), name: z.string(), stamped: z.boolean(), download: z.boolean() })),
+    })
+    .nullable(),
+  reason: z.string().nullable(),
+});
+export type MyProfile = z.infer<typeof MyProfile>;
+
+/** A teaser in the directory, with where this counterparty stands with it. */
+export const DirectoryEntry = TeaserCard.extend({
+  seekerId: z.string(),
+  /** none: may express interest; sent: waiting for the team; preparing: approved, introduction to come; introduced; closed: not taken forward */
+  interest: z.enum(["none", "sent", "preparing", "introduced", "closed"]),
+});
+export type DirectoryEntry = z.infer<typeof DirectoryEntry>;
+
+export const Directory = z.object({
+  event: z.object({ name: z.string(), slug: z.string() }),
+  /** null when the directory isn't open to this account; the reason says why */
+  me: z.object({ org: z.string() }).nullable(),
+  reason: z.string().nullable(),
+  teasers: z.array(DirectoryEntry),
+  filters: z.object({ sectors: z.array(z.string()), countries: z.array(z.string()), bands: z.array(z.string()), pathways: z.array(z.string()) }),
+});
+export type Directory = z.infer<typeof Directory>;

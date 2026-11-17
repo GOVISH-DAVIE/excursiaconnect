@@ -30,6 +30,8 @@ export function dealRoomRoutes(c: DealRoomController): Router {
   r.post(`${one}/conditions/:conditionId/met`, requireSession({ staff: true }), c.meetCondition);
   r.post(`${one}/decision-maker/confirm`, requireSession({ staff: true }), c.confirmDecisionMaker);
   r.post(`${one}/readiness`, requireSession({ staff: true }), c.readiness);
+  // the business's teaser, approved for the directory (M3.1)
+  r.post(`${one}/teaser/approve`, requireSession({ staff: true }), c.approveTeaser);
   r.post(`${one}/kyc/check`, requireSession({ staff: true }), c.checkKyc);
   r.post(`${one}/sanctions`, requireSession({ staff: true }), c.sanctions);
   r.post(`${one}/verification`, requireSession({ staff: true }), c.verify);
