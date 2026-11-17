@@ -15,6 +15,8 @@ export function rolesOf(s: SessionView | null | undefined) {
     desk: m.some((x) => x.role === "dr_lead" || x.role === "dr_operations" || x.role === "dr_coordinator"),
     /** matches participants and sends introductions (M3.1): the lead, reviewers and coordinators */
     matching: m.some((x) => x.role === "dr_lead" || x.role === "dr_reviewer" || x.role === "dr_coordinator"),
+    /** schedules meetings (M3.2): the lead, operations and coordinators */
+    meetings: m.some((x) => x.role === "dr_lead" || x.role === "dr_operations" || x.role === "dr_coordinator"),
     /** opens applications: the lead and reviewers */
     reviews: m.some((x) => x.role === "dr_lead" || x.role === "dr_reviewer"),
     dealRoomEvent: dr?.eventId ?? null,

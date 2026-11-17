@@ -329,6 +329,10 @@ export interface DrMeeting {
   noShow?: "seeker" | "provider" | "both";
   outcome?: DrOutcome;
   override?: { reason: string; by: string };
+  /** When the server noted that the proposal lapsed unconfirmed and told both sides (M3.2); the lapse itself is derived from the clock. */
+  lapsedAt?: string;
+  /** The reminders sent: a day before and half an hour before a confirmed meeting (M3.2). */
+  reminded?: { day?: string; soon?: string };
   history: DrHistory[];
 }
 
@@ -464,7 +468,7 @@ export interface DrConfig {
   secondReview: { decline: boolean; askAbove: number }; // USD
   seekerFee: { amount: number; currency: Currency; reminderDays: number }; // 0 charges nothing
   multiplePerOrg: boolean;
-  rooms: Record<string, { tables: number; from: string; to: string }>;
+  rooms: Record<string, { tables: number; from: string; to: string; /** the room's name, where the event's rooms aren't on the server (M3.2) */ name?: string }>;
   sessionRooms: string[]; // the presentation area and roundtable room: sessions only, no meeting tables
   log: DrHistory[];
 }

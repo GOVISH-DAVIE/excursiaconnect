@@ -9,6 +9,9 @@ import { addMinutes, fmtStamp } from "../time";
 import {
   staffOf,
   blockedPair,
+  confirmBy,
+  reminderDue,
+  type ReminderKind,
   bothAccepted,
   canSee,
   drCan,
@@ -30,7 +33,7 @@ import {
   type SlotRequest,
 } from "./logic";
 import type { DealRoomState, DrMatch, DrMeeting, DrOpportunity, DrOutcome } from "./types";
-import { exception, introLink, leadOf, opsOf, send, withDr } from "./util";
+import { exception, introLink, leadOf, meetingsLink, opsOf, send, withDr } from "./util";
 
 export type DrMeetAction =
   | { type: "dr/matchDecide"; seekerId: string; providerId: string; decision: "Approved" | "Rejected" | "Deferred"; note: string; override?: string }
@@ -51,6 +54,10 @@ export type DrMeetAction =
   | { type: "dr/declineChange"; meetingId: string; reason: string }
   | { type: "dr/reschedule"; meetingId: string; req: SlotRequest; override?: string }
   | { type: "dr/cancelMeeting"; meetingId: string; reason: string }
+  /** the server's jobs: a proposal that lapsed unconfirmed is told to both sides and operations, once */
+  | { type: "dr/meetingLapse"; meetingId: string }
+  /** the server's jobs: a reminder the day before, and half an hour before, a confirmed meeting */
+  | { type: "dr/remindMeeting"; meetingId: string; kind: ReminderKind }
   | { type: "dr/arrive"; delegateId: string }
   | { type: "dr/startMeeting"; meetingId: string }
   | { type: "dr/outcome"; meetingId: string; attendance: "Held" | "No-show" | "Cancelled"; noShow?: "seeker" | "provider" | "both"; outcome?: Omit<DrOutcome, "by" | "at">; device?: string; paper?: string }
@@ -122,26 +129,44 @@ function where(state: AppState, m: DrMeeting) {
   return `${r?.name ?? "a Deal Room room"}${m.table && (state.dealRoom.configs[m.eventId].rooms[m.roomId!]?.tables ?? 1) > 1 ? `, table ${m.table}` : ""}`;
 }
 
-/** Book one slot if every rule allows it; otherwise the state is returned unchanged. */
-function book(ctx: Ctx, state: AppState, req: SlotRequest, by: string, override?: string): AppState {
+/**
+ * Book one slot if every rule allows it: the new state, or why not. A cap stops it unless operations or the lead
+ * give a reason to go over it, which is logged as an exception.
+ */
+function tryBook(ctx: Ctx, state: AppState, req: SlotRequest, by: string, override?: string): { state: AppState; why?: string } {
   const { clashes, caps, end } = slotProblems(state, req);
-  if (clashes.length) return state;
+  if (clashes.length) return { state, why: clashes.join("; ") };
   const me = staffOf(state.dealRoom, ctx.actor);
-  if (caps.length && !(override?.trim() && drCan(me, "overrideCap"))) return state;
+  if (caps.length && !(override?.trim() && drCan(me, "overrideCap"))) return { state, why: `${caps.join("; ")}${drCan(me, "overrideCap") ? ": give a reason to go over the cap" : ""}` };
   let dr = state.dealRoom;
   const mt = newMeeting(ctx, dr, req, end, by, caps.length ? override : undefined);
   dr = { ...dr, meetings: [...dr.meetings, mt] };
   if (caps.length) dr = exception(ctx, dr, mt.eventId, by, "Cap override", `${caps.join("; ")}. ${override}`, mt.id);
   const match = dr.matches.find((m) => m.id === req.matchId)!;
-  const cfg = dr.configs[mt.eventId];
-  const confirmByAt = (() => {
-    const w = addMinutes(mt.start, -cfg.rules.confirmHours * 60);
-    const f = addMinutes(mt.proposedAt, 120);
-    const b = w > f ? w : f;
-    return b < mt.start ? b : mt.start;
-  })();
-  for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `A Deal Room meeting is proposed for ${fmtStamp(mt.start)}; please confirm by ${fmtStamp(confirmByAt)}`, `/dr/${id}`);
-  return withDr(state, dr);
+  const by_ = confirmBy(mt, dr.configs[mt.eventId]);
+  for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `A Deal Room meeting is proposed for ${fmtStamp(mt.start)}; please confirm by ${fmtStamp(by_)}`, meetingsLink(id));
+  return { state: withDr(state, dr) };
+}
+
+/** A participant answers for its own side only. The team, and the prototype's acting staff, may act for either. */
+function notMySide(ctx: Ctx, match: DrMatch, side: "seeker" | "provider"): string | undefined {
+  if (ctx.actor?.kind !== "applicant") return undefined;
+  return ctx.actor.appId === (side === "seeker" ? match.seekerId : match.providerId) ? undefined : "You can answer only for your own side of a meeting";
+}
+
+/** Why a meeting can't be changed now, or undefined when it can. */
+function closed(m: DrMeeting, cfg: DealRoomState["configs"][string], now: string): string | undefined {
+  if (m.status === "Cancelled") return "This meeting is cancelled";
+  if (m.status === "Held" || m.status === "No-show") return "This meeting has already taken place";
+  if (m.status === "In progress") return "This meeting is under way";
+  if (lapsed(m, cfg, now)) return "This proposal lapsed unconfirmed and its slot was released; the Deal Room team will propose another";
+  return undefined;
+}
+
+/** A meeting's two parties, by side. */
+function partiesOf(dr: DealRoomState, mt: DrMeeting) {
+  const match = dr.matches.find((x) => x.id === mt.matchId)!;
+  return { match, seeker: dr.apps.find((a) => a.id === match.seekerId)!, provider: dr.apps.find((a) => a.id === match.providerId)! };
 }
 
 export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): AppState {
@@ -310,53 +335,73 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
 
     /* ----- scheduling (DO-2 to DO-6) ----- */
     case "dr/propose": {
-      if (!drCan(me, "schedule")) return state;
-      if (dr.meetings.some((m) => m.matchId === action.req.matchId && occupies(m, dr.configs[m.eventId], at))) return state;
-      return book(ctx, state, action.req, me!.id, action.override);
+      if (!drCan(me, "schedule")) return no(ctx, state, "Your role doesn't schedule meetings");
+      if (!dr.matches.some((m) => m.id === action.req.matchId)) return no(ctx, state, "No such match");
+      if (dr.meetings.some((m) => m.matchId === action.req.matchId && occupies(m, dr.configs[m.eventId], at))) return no(ctx, state, "This pair already has a meeting");
+      const r = tryBook(ctx, state, action.req, me!.id, action.override);
+      return r.why ? no(ctx, state, r.why) : r.state;
     }
 
     case "dr/autoPropose": {
       // a full draft inside the rules; it only creates proposals and never moves a confirmed meeting (PRD Meetings req. 5, 6)
-      if (!drCan(me, "schedule")) return state;
+      if (!drCan(me, "schedule")) return no(ctx, state, "Your role doesn't schedule meetings");
       const cfg = Object.values(dr.configs)[0];
       const event = state.events.find((e) => e.id === cfg.eventId)!;
+      const ready = readyToSchedule(dr, cfg);
+      if (!ready.length) return no(ctx, state, "Every pair both parties accepted already has a meeting");
       let next = state;
       let made = 0;
       const times = slotTimes(cfg);
-      const rooms = Object.entries(cfg.rooms);
-      for (const m of readyToSchedule(dr, cfg)) {
+      const tables = Object.entries(cfg.rooms).flatMap(([roomId, rc]) => Array.from({ length: rc.tables }, (_, i) => ({ roomId, table: i + 1 })));
+      const soonest = addMinutes(at, 60);
+      for (const m of ready) {
         if (made >= action.limit) break;
+        // a DFI's meetings take the longer slot (PRD Meetings req. 2)
+        const flagged = dr.apps.find((a) => a.id === m.providerId)?.providerKind === "DFI" || undefined;
         let done = false;
         for (let d = 0; d < event.days && !done; d++) {
           const day = addMinutes(`${event.startDate} 00:00`, d * 1440).slice(0, 10);
           for (const t of times) {
             const start = `${day} ${t}`;
-            if (start <= addMinutes(at, 60)) continue;
-            for (const [roomId, rc] of rooms) {
-              for (let table = 1; table <= rc.tables && !done; table++) {
-                const before = next;
-                next = book(ctx, next, { matchId: m.id, roomId, table, start }, me!.id);
-                if (next !== before) done = true;
+            if (start <= soonest) continue;
+            // the pair first, without a room: a party busy then, or at its cap, rules the time out for every table
+            const probe = slotProblems(next, { matchId: m.id, start, flagged, link: "probe" });
+            if (probe.clashes.length || probe.caps.length) continue;
+            for (const spot of tables) {
+              const r = tryBook(ctx, next, { matchId: m.id, start, flagged, ...spot }, me!.id);
+              if (!r.why) {
+                next = r.state;
+                done = true;
+                break;
               }
-              if (done) break;
             }
             if (done) break;
           }
         }
         if (done) made++;
       }
-      return next;
+      return made ? next : no(ctx, state, "No free slot was found for the pairs ready to schedule: every time is taken, or the parties are at their caps");
     }
 
     case "dr/confirm": {
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      if (!mt || (mt.status !== "Proposed" && mt.status !== "Change requested") || lapsed(mt, dr.configs[mt.eventId], at)) return state;
+      if (!mt) return no(ctx, state, "No such meeting");
+      const cfg = dr.configs[mt.eventId];
+      const { match } = partiesOf(dr, mt);
+      const mine = notMySide(ctx, match, action.side);
+      if (mine) return no(ctx, state, mine);
+      const shut = closed(mt, cfg, at);
+      if (shut) return no(ctx, state, shut);
+      if (mt.confirm[action.side]) return no(ctx, state, mt.status === "Confirmed" ? "This meeting is already confirmed" : "You've already confirmed this slot");
+      if (mt.status !== "Proposed" && mt.status !== "Change requested") return no(ctx, state, "This meeting is already confirmed");
       const confirm = { ...mt.confirm, [action.side]: at };
       const both = !!confirm.seeker && !!confirm.provider;
-      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, confirm, status: both ? "Confirmed" : m.status, change: both ? undefined : m.change, history: [...m.history, { at, by: action.side, what: both ? "Confirmed by both" : `Confirmed by the ${sideName(action.side)}` }] }));
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, confirm, status: both && m.status === "Proposed" ? "Confirmed" : m.status, history: [...m.history, { at, by: action.side, what: both ? "Confirmed by both" : `Confirmed by the ${sideName(action.side)}` }] }));
       if (both) {
-        const match = dr.matches.find((x) => x.id === mt.matchId)!;
-        for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Deal Room meeting confirmed: ${fmtStamp(mt.start)}, ${where(state, mt)}; calendar invite attached`, `/dr/${id}`);
+        for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Deal Room meeting confirmed: ${fmtStamp(mt.start)}, ${where(state, mt)}; add it to your calendar`, meetingsLink(id));
+      } else {
+        const otherId = action.side === "seeker" ? match.providerId : match.seekerId;
+        dr = send(ctx, dr, mt.eventId, otherId, `The other party confirmed your Deal Room meeting of ${fmtStamp(mt.start)}; please confirm by ${fmtStamp(confirmBy(mt, cfg))}`, meetingsLink(otherId), "Email");
       }
       return withDr(state, dr);
     }
@@ -364,67 +409,96 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
     /* ----- moving a meeting: the asker proposes a time, the other side agrees, then the team books it ----- */
     case "dr/requestChange": {
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      if (!mt || !["Proposed", "Confirmed"].includes(mt.status) || !action.reason.trim() || action.start === mt.start || !moveSpot(state, mt, action.start)) return state;
-      const match = dr.matches.find((x) => x.id === mt.matchId)!;
-      const asker = dr.apps.find((a) => a.id === (action.side === "seeker" ? match.seekerId : match.providerId))!;
+      if (!mt) return no(ctx, state, "No such meeting");
+      const { match, seeker, provider } = partiesOf(dr, mt);
+      const mine = notMySide(ctx, match, action.side);
+      if (mine) return no(ctx, state, mine);
+      const shut = closed(mt, dr.configs[mt.eventId], at);
+      if (shut) return no(ctx, state, shut);
+      if (mt.status === "Change requested") return no(ctx, state, "A move is already asked for; it is answered first");
+      if (mt.start <= at) return no(ctx, state, "This meeting has started");
+      const reason = action.reason.trim();
+      if (!reason) return no(ctx, state, "Say why, for the other party");
+      if (action.start === mt.start) return no(ctx, state, "Choose a different time");
+      if (action.start <= at) return no(ctx, state, "That time has passed");
+      if (!moveSpot(state, mt, action.start)) return no(ctx, state, "That time isn't free for both of you, or no table is open then");
+      const asker = action.side === "seeker" ? seeker : provider;
       const otherId = action.side === "seeker" ? match.providerId : match.seekerId;
-      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: "Change requested", change: { by: action.side, reason: action.reason.trim(), at, start: action.start, was: m.status }, history: [...m.history, { at, by: action.side, what: `The ${sideName(action.side)} asked to move it to ${fmtStamp(action.start)}: ${action.reason.trim()}` }] }));
-      dr = send(ctx, dr, mt.eventId, otherId, `${asker.org.name} asks to move your Deal Room meeting of ${fmtStamp(mt.start)} to ${fmtStamp(action.start)}; agree or decline`, `/dr/${otherId}`);
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: "Change requested", change: { by: action.side, reason, at, start: action.start, was: m.status }, history: [...m.history, { at, by: action.side, what: `The ${sideName(action.side)} asked to move it to ${fmtStamp(action.start)}: ${reason}` }] }));
+      dr = send(ctx, dr, mt.eventId, otherId, `${asker.org.name} asks to move your Deal Room meeting of ${fmtStamp(mt.start)} to ${fmtStamp(action.start)}; agree or decline`, meetingsLink(otherId));
       return withDr(state, dr);
     }
 
     case "dr/answerChange": {
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      const ch = mt?.change;
-      if (!mt || mt.status !== "Change requested" || !ch?.start || ch.agreed || ch.by === action.side) return state;
-      const match = dr.matches.find((x) => x.id === mt.matchId)!;
+      if (!mt) return no(ctx, state, "No such meeting");
+      const ch = mt.change;
+      const { match, seeker, provider } = partiesOf(dr, mt);
+      const mine = notMySide(ctx, match, action.side);
+      if (mine) return no(ctx, state, mine);
+      if (mt.status !== "Change requested" || !ch?.start) return no(ctx, state, "There's no move to answer");
+      if (ch.by === action.side) return no(ctx, state, "You asked for this move; the other party answers it");
+      if (ch.agreed) return no(ctx, state, "You've already agreed to this move; the Deal Room team confirms it");
       const askerId = ch.by === "seeker" ? match.seekerId : match.providerId;
-      const answerer = dr.apps.find((a) => a.id === (action.side === "seeker" ? match.seekerId : match.providerId))!;
+      const answerer = action.side === "seeker" ? seeker : provider;
       if (!action.agree) {
         dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: ch.was ?? "Confirmed", change: undefined, history: [...m.history, { at, by: action.side, what: `The ${sideName(action.side)} declined the move${action.reason?.trim() ? `: ${action.reason.trim().replace(/[.;\s]+$/, "")}` : ""}; the meeting stays at ${fmtStamp(m.start)}` }] }));
-        dr = send(ctx, dr, mt.eventId, askerId, `${answerer.org.name} declined moving your Deal Room meeting; it stays at ${fmtStamp(mt.start)}`, `/dr/${askerId}`);
+        dr = send(ctx, dr, mt.eventId, askerId, `${answerer.org.name} declined moving your Deal Room meeting; it stays at ${fmtStamp(mt.start)}`, meetingsLink(askerId));
         return withDr(state, dr);
       }
       dr = patchMeeting(dr, mt.id, (m) => ({ ...m, change: { ...ch, agreed: at }, history: [...m.history, { at, by: action.side, what: `The ${sideName(action.side)} agreed to ${fmtStamp(ch.start!)}; with the Deal Room team to accept` }] }));
-      dr = send(ctx, dr, mt.eventId, askerId, `${answerer.org.name} agreed to move your Deal Room meeting to ${fmtStamp(ch.start)}; the Deal Room team will confirm it`, `/dr/${askerId}`);
+      dr = send(ctx, dr, mt.eventId, askerId, `${answerer.org.name} agreed to move your Deal Room meeting to ${fmtStamp(ch.start)}; the Deal Room team will confirm it`, meetingsLink(askerId));
       dr = send(ctx, dr, mt.eventId, opsOf(dr, mt.eventId), `Both parties agreed to move a Deal Room meeting to ${fmtStamp(ch.start)}; accept it`, "/dealroom/meetings?tab=Changes", "Email");
       return withDr(state, dr);
     }
 
     case "dr/acceptChange": {
+      if (!drCan(me, "schedule")) return no(ctx, state, "Your role doesn't schedule meetings");
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      const ch = mt?.change;
-      if (!mt || !drCan(me, "schedule") || mt.status !== "Change requested" || !ch?.start || !ch.agreed) return state;
+      if (!mt) return no(ctx, state, "No such meeting");
+      const ch = mt.change;
+      if (mt.status !== "Change requested" || !ch) return no(ctx, state, "There's no move to accept");
+      if (!ch.start) return no(ctx, state, "This request names no time: move the meeting to a slot that suits, or decline the request");
+      if (!ch.agreed) return no(ctx, state, "The other party hasn't agreed to this move yet");
       const spot = moveSpot(state, mt, ch.start);
-      if (!spot) return state;
+      if (!spot) return no(ctx, state, `${fmtStamp(ch.start)} is no longer free: decline the move with a reason, or move the meeting yourself`);
       const { end } = slotProblems(state, { matchId: mt.matchId, start: ch.start, flagged: mt.flagged, ignore: mt.id, ...spot });
       const moved = { ...mt, ...spot, start: ch.start, end };
       // both sides agreed to this time, so their agreement stands as their confirmation
-      dr = patchMeeting(dr, mt.id, (m) => ({ ...moved, status: "Confirmed", confirm: { seeker: at, provider: at }, proposedAt: at, change: undefined, history: [...m.history, { at, by: me!.id, what: `Moved to ${fmtStamp(ch.start!)}, ${where(state, moved)}, as both parties agreed` }] }));
-      const match = dr.matches.find((x) => x.id === mt.matchId)!;
-      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Your Deal Room meeting moved to ${fmtStamp(ch.start)}, ${where(state, moved)}; calendar invite attached`, `/dr/${id}`);
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...moved, status: "Confirmed", confirm: { seeker: at, provider: at }, proposedAt: at, change: undefined, reminded: undefined, history: [...m.history, { at, by: me!.id, what: `Moved to ${fmtStamp(ch.start!)}, ${where(state, moved)}, as both parties agreed` }] }));
+      const { match } = partiesOf(dr, mt);
+      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Your Deal Room meeting moved to ${fmtStamp(ch.start)}, ${where(state, moved)}; add the new time to your calendar`, meetingsLink(id));
       return withDr(state, dr);
     }
 
     case "dr/declineChange": {
+      if (!drCan(me, "schedule")) return no(ctx, state, "Your role doesn't schedule meetings");
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      if (!mt || !drCan(me, "schedule") || mt.status !== "Change requested" || !mt.change || !action.reason.trim()) return state;
+      if (!mt) return no(ctx, state, "No such meeting");
+      if (mt.status !== "Change requested" || !mt.change) return no(ctx, state, "There's no move to decline");
+      const reason = action.reason.trim().replace(/[.;\s]+$/, "");
+      if (!reason) return no(ctx, state, "Say why, for both parties");
       const was = mt.change.was ?? "Confirmed";
-      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: was, change: undefined, history: [...m.history, { at, by: me!.id, what: `The move was declined: ${action.reason.trim().replace(/[.;\s]+$/, "")}; the meeting stays at ${fmtStamp(m.start)}` }] }));
-      const match = dr.matches.find((x) => x.id === mt.matchId)!;
-      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `The Deal Room team could not move your meeting (${action.reason.trim().replace(/[.;\s]+$/, "")}); it stays at ${fmtStamp(mt.start)}`, `/dr/${id}`);
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: was, change: undefined, history: [...m.history, { at, by: me!.id, what: `The move was declined: ${reason}; the meeting stays at ${fmtStamp(m.start)}` }] }));
+      const { match } = partiesOf(dr, mt);
+      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `The Deal Room team could not move your meeting (${reason}); it stays at ${fmtStamp(mt.start)}`, meetingsLink(id));
       return withDr(state, dr);
     }
 
     case "dr/reschedule": {
+      if (!drCan(me, "schedule")) return no(ctx, state, "Your role doesn't schedule meetings");
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      if (!mt || !drCan(me, "schedule") || !mutable(mt) || mt.status === "In progress") return state;
+      if (!mt) return no(ctx, state, "No such meeting");
+      const cfg = dr.configs[mt.eventId];
+      const shut = mt.status === "In progress" || !mutable(mt) ? closed(mt, cfg, at) : undefined;
+      if (shut) return no(ctx, state, shut);
       const req = { ...action.req, matchId: mt.matchId, ignore: mt.id, flagged: mt.flagged };
-      const { clashes, caps, end } = slotProblems(state, req);
-      if (clashes.length) return state;
-      if (caps.length && !(action.override?.trim() && drCan(me, "overrideCap"))) return state;
-      // a room change in the same slot keeps both confirmations; a new time needs both to confirm again (PRD Meetings req. 6)
       const sameSlot = req.start === mt.start;
+      if (sameSlot && (req.link ? req.link === mt.link : req.roomId === mt.roomId && req.table === mt.table)) return no(ctx, state, "The meeting is already there");
+      const { clashes, caps, end } = slotProblems(state, req);
+      if (clashes.length) return no(ctx, state, clashes.join("; "));
+      if (caps.length && !(action.override?.trim() && drCan(me, "overrideCap"))) return no(ctx, state, `${caps.join("; ")}${drCan(me, "overrideCap") ? ": give a reason to go over the cap" : ""}`);
+      // a room change in the same slot keeps both confirmations; a new time needs both to confirm again (PRD Meetings req. 6)
       dr = patchMeeting(dr, mt.id, (m) => ({
         ...m,
         roomId: req.link ? undefined : req.roomId,
@@ -436,19 +510,65 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
         confirm: sameSlot ? m.confirm : {},
         proposedAt: sameSlot ? m.proposedAt : at,
         change: undefined,
+        lapsedAt: sameSlot ? m.lapsedAt : undefined,
+        reminded: sameSlot ? m.reminded : undefined,
         history: [...m.history, { at, by: me!.id, what: sameSlot ? `Moved to ${where(state, { ...m, roomId: req.roomId, table: req.table, link: req.link })}, same time` : `Moved to ${fmtStamp(req.start)}; both to confirm again` }],
       }));
-      const match = dr.matches.find((x) => x.id === mt.matchId)!;
-      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, sameSlot ? "Your Deal Room meeting has a new room" : `Your Deal Room meeting moved to ${fmtStamp(req.start)}; please confirm`, `/dr/${id}`);
+      const { match } = partiesOf(dr, mt);
+      const moved = dr.meetings.find((m) => m.id === mt.id)!;
+      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, sameSlot ? `Your Deal Room meeting of ${fmtStamp(mt.start)} moved to ${where(state, moved)}` : `Your Deal Room meeting moved to ${fmtStamp(req.start)}; please confirm`, meetingsLink(id));
       return withDr(state, dr);
     }
 
     case "dr/cancelMeeting": {
+      if (!drCan(me, "schedule")) return no(ctx, state, "Your role doesn't schedule meetings");
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      if (!mt || !drCan(me, "schedule") || !mutable(mt) || !action.reason.trim()) return state;
-      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: "Cancelled", history: [...m.history, { at, by: me!.id, what: `Cancelled: ${action.reason}` }] }));
-      const match = dr.matches.find((x) => x.id === mt.matchId)!;
-      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Your Deal Room meeting on ${fmtStamp(mt.start)} is cancelled`, `/dr/${id}`);
+      if (!mt) return no(ctx, state, "No such meeting");
+      if (!mutable(mt)) return no(ctx, state, closed(mt, dr.configs[mt.eventId], at) ?? "This meeting can't be cancelled");
+      const reason = action.reason.trim();
+      if (!reason) return no(ctx, state, "Say why it is cancelled");
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, status: "Cancelled", change: undefined, history: [...m.history, { at, by: me!.id, what: `Cancelled: ${reason}` }] }));
+      const { match } = partiesOf(dr, mt);
+      for (const id of [match.seekerId, match.providerId]) dr = send(ctx, dr, mt.eventId, id, `Your Deal Room meeting on ${fmtStamp(mt.start)} is cancelled`, meetingsLink(id));
+      return withDr(state, dr);
+    }
+
+    /* ----- the server's jobs (M3.2): a lapsed proposal told once; reminders before a confirmed meeting ----- */
+    case "dr/meetingLapse": {
+      if (ctx.actor?.kind !== "system") return no(ctx, state, "Lapses are noted by the system");
+      const mt = dr.meetings.find((m) => m.id === action.meetingId);
+      if (!mt) return no(ctx, state, "No such meeting");
+      if (mt.lapsedAt) return no(ctx, state, "This lapse was already noted");
+      if (!lapsed(mt, dr.configs[mt.eventId], at)) return no(ctx, state, "This proposal hasn't lapsed");
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, lapsedAt: at, history: [...m.history, { at, by: "system", what: "The proposal lapsed unconfirmed; its slot was released" }] }));
+      const { match, seeker, provider } = partiesOf(dr, mt);
+      for (const side of ["seeker", "provider"] as const) {
+        const id = side === "seeker" ? match.seekerId : match.providerId;
+        const subject = mt.confirm[side]
+          ? `The Deal Room meeting proposed for ${fmtStamp(mt.start)} lapsed: the other party didn't confirm in time`
+          : `The Deal Room meeting proposed for ${fmtStamp(mt.start)} lapsed before you confirmed it`;
+        dr = send(ctx, dr, mt.eventId, id, `${subject}. The Deal Room team will propose another slot`, meetingsLink(id), "Email");
+      }
+      dr = send(ctx, dr, mt.eventId, opsOf(dr, mt.eventId), `A proposed meeting lapsed unconfirmed: ${seeker.org.name} and ${provider.org.name}`, "/dealroom/meetings", "Email");
+      return withDr(state, dr);
+    }
+
+    case "dr/remindMeeting": {
+      if (ctx.actor?.kind !== "system") return no(ctx, state, "Reminders are sent by the system");
+      const mt = dr.meetings.find((m) => m.id === action.meetingId);
+      if (!mt) return no(ctx, state, "No such meeting");
+      if (reminderDue(mt, at) !== action.kind) return no(ctx, state, "This reminder isn't due");
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, reminded: { ...m.reminded, [action.kind]: at } }));
+      const { match, seeker, provider } = partiesOf(dr, mt);
+      for (const side of ["seeker", "provider"] as const) {
+        const id = side === "seeker" ? match.seekerId : match.providerId;
+        const other = side === "seeker" ? provider : seeker;
+        const subject =
+          action.kind === "day"
+            ? `Reminder: your Deal Room meeting with ${other.org.name} is at ${fmtStamp(mt.start)}, ${where(state, mt)}`
+            : `Your Deal Room meeting with ${other.org.name} starts at ${mt.start.slice(11)}, ${where(state, mt)}${mt.link ? "" : "; check in with your badge at the Deal Room desk"}`;
+        dr = send(ctx, dr, mt.eventId, id, subject, meetingsLink(id), action.kind === "soon" ? "Email and SMS" : "Email");
+      }
       return withDr(state, dr);
     }
 
@@ -505,13 +625,11 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       if (!mt || mt.status !== "No-show") return state;
       const cfg = dr.configs[mt.eventId];
       const times = slotTimes(cfg).map((t) => `${at.slice(0, 10)} ${t}`).filter((s) => s > at);
-      let next = state;
       for (const start of times) {
-        const before = next;
-        next = book(ctx, next, { matchId: action.matchId, roomId: mt.roomId, table: mt.table, link: mt.link, start }, me!.id);
-        if (next !== before) break;
+        const r = tryBook(ctx, state, { matchId: action.matchId, roomId: mt.roomId, table: mt.table, link: mt.link, start }, me!.id);
+        if (!r.why) return r.state;
       }
-      return next;
+      return state;
     }
 
     case "dr/offline": {
@@ -567,7 +685,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       if (!drCan(me, "schedule") && me?.role !== "Lead") return state;
       const cfg = Object.values(dr.configs)[0];
       if (action.tables < 1 || action.from >= action.to) return state;
-      return withDr(state, { ...dr, configs: { ...dr.configs, [cfg.eventId]: { ...cfg, rooms: { ...cfg.rooms, [action.roomId]: { tables: action.tables, from: action.from, to: action.to } }, log: [...cfg.log, { at, by: me!.id, what: `Room set: ${action.tables} table${action.tables > 1 ? "s" : ""}, ${action.from} to ${action.to}` }] } } });
+      return withDr(state, { ...dr, configs: { ...dr.configs, [cfg.eventId]: { ...cfg, rooms: { ...cfg.rooms, [action.roomId]: { ...cfg.rooms[action.roomId], tables: action.tables, from: action.from, to: action.to } }, log: [...cfg.log, { at, by: me!.id, what: `Room set: ${action.tables} table${action.tables > 1 ? "s" : ""}, ${action.from} to ${action.to}` }] } } });
     }
 
     default:

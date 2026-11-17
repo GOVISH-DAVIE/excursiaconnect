@@ -28,6 +28,7 @@ export function Panel({ title, children, aside }: { title?: string; children: Re
 const PAGES = [
   { path: "apply", label: "My application" },
   { path: "introductions", label: "My introductions" },
+  { path: "meetings", label: "My meetings" },
 ] as const;
 
 /** The page's title and links, then its body once a participant is signed in. */

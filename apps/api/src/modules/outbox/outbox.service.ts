@@ -20,6 +20,8 @@ export function linkFor(web: string, r: Recipient, link: string): string {
     if (/[?&]intros=1/.test(link) && r.slug) return `${web}/e/${r.slug}/deal-room/introductions`;
     // the business's teaser, approved for the directory (M3.1)
     if (/[?&]profile=1/.test(link) && r.slug) return `${web}/e/${r.slug}/deal-room/teaser`;
+    // a meeting to confirm, move or add to a calendar, and the reminders before it (M3.2)
+    if (/[?&]meetings=1/.test(link) && r.slug) return `${web}/e/${r.slug}/deal-room/meetings`;
     const apply = r.slug ? `/e/${r.slug}/deal-room/apply` : "/signin";
     return `${web}${apply}${link.includes("invite=") && r.invite ? `?invite=${encodeURIComponent(r.invite)}` : ""}`;
   }
@@ -31,6 +33,9 @@ export function linkFor(web: string, r: Recipient, link: string): string {
     if (match) return `${web}/team/matching/${match}`;
     if (/\/dealroom\/matching\?tab=interest\b/.test(link)) return `${web}/team/matching?tab=interest`;
     if (/\/dealroom\/(matching|matches)\b/.test(link)) return `${web}/team/matching`;
+    // the schedule, or the moves both parties agreed, waiting for the team (M3.2)
+    if (/\/dealroom\/meetings\?tab=Changes\b/.test(link)) return `${web}/team/meetings?tab=changes`;
+    if (/\/dealroom\/meetings\b/.test(link)) return `${web}/team/meetings`;
     return `${web}/team`;
   }
   return `${web}${link.startsWith("/") ? link : "/team"}`;

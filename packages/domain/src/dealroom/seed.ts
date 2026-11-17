@@ -242,13 +242,13 @@ export const ca3Config: DrConfig = {
   seekerFee: { amount: 250, currency: "USD", reminderDays: 3 }, // asked of a capital seeker on approval, by payment link
   multiplePerOrg: true,
   rooms: {
-    r_dr1: { tables: 1, from: "09:00", to: "17:30" },
-    r_dr2: { tables: 1, from: "09:00", to: "17:30" },
-    r_dr3: { tables: 1, from: "09:00", to: "17:30" },
-    r_dr4: { tables: 1, from: "09:00", to: "17:30" },
-    r_dr5: { tables: 4, from: "09:00", to: "17:30" },
-    r_dr6: { tables: 4, from: "09:00", to: "17:30" },
-    r_dr7: { tables: 3, from: "09:00", to: "16:00" },
+    r_dr1: { tables: 1, from: "09:00", to: "17:30", name: "Boardroom 1" },
+    r_dr2: { tables: 1, from: "09:00", to: "17:30", name: "Boardroom 2" },
+    r_dr3: { tables: 1, from: "09:00", to: "17:30", name: "Boardroom 3" },
+    r_dr4: { tables: 1, from: "09:00", to: "17:30", name: "Boardroom 4" },
+    r_dr5: { tables: 4, from: "09:00", to: "17:30", name: "Deal floor A" },
+    r_dr6: { tables: 4, from: "09:00", to: "17:30", name: "Deal floor B" },
+    r_dr7: { tables: 3, from: "09:00", to: "16:00", name: "Deal floor C" },
   },
   sessionRooms: ["r_dr8", "r_dr9"],
   log: [

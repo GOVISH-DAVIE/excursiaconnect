@@ -17,14 +17,17 @@
 import { randomUUID } from "node:crypto";
 import { apply, type Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor, type Ctx } from "@excursia/domain/ctx";
-import type { AppState } from "@excursia/domain/types";
+import type { DrConfig } from "@excursia/domain/dealroom/types";
+import type { AppState, Room } from "@excursia/domain/types";
 import { HttpError } from "../../http/errors";
+import { toInstant } from "../../persistence/time";
 import { coreFromRows, coreToRows } from "../events/events.mapper";
 import { dealRoomFromRows, dealRoomToRows, type DealRoomRows } from "./dealroom.mapper";
 import type { AuditRow, Changes, DealRoomRepo, EventStored, StaffLink } from "./dealroom.repo";
 
-/** What the Deal Room's rules read beyond the Deal Room: the event's own core records. Rooms, zones and the
- *  programme join when the rules that read them move onto the server (M3.2, Phase 2). */
+/** What the Deal Room's rules read beyond the Deal Room: the event's own core records. Its rooms come from the
+ *  Deal Room's settings (roomsOf); zones and the programme join when the rules that read them move onto the
+ *  server (Phase 2). */
 const EMPTY_CORE = {
   formFields: [], exceptions: [], campaigns: [], payoutsPaid: [], banners: {}, floorPlans: {}, galleries: {}, speakerProfiles: [], sponsors: [],
   team: [], shifts: [], grants: {}, zones: [], rooms: [], sessions: [], orders: [], messages: [],
@@ -33,7 +36,18 @@ const EMPTY_CORE = {
 
 export function stateOf(eventId: string, stored: EventStored, now: string): AppState {
   const core = coreFromRows(stored.core);
-  return { ...EMPTY_CORE, ...core, dealRoom: dealRoomFromRows(eventId, stored.dealRoom, now) } as unknown as AppState;
+  const dealRoom = dealRoomFromRows(eventId, stored.dealRoom, now);
+  return { ...EMPTY_CORE, ...core, rooms: roomsOf(dealRoom.configs[eventId]), dealRoom } as unknown as AppState;
+}
+
+/**
+ * The Deal Room's rooms as the scheduling rules read them. The event's rooms aren't on the server yet (Phase 2),
+ * so they come from the Deal Room's settings: each meeting room with its name, and the session rooms.
+ */
+function roomsOf(cfg: DrConfig | undefined): Room[] {
+  if (!cfg) return [];
+  const ids = [...Object.keys(cfg.rooms), ...cfg.sessionRooms.filter((id) => !cfg.rooms[id])];
+  return ids.map((id) => ({ id, zoneId: `dr:${cfg.eventId}`, name: cfg.rooms[id]?.name ?? id, capacity: 0 }));
 }
 
 /** Rows that differ between before and after, by key; and keys that are gone. */
@@ -77,6 +91,7 @@ function changesBetween(eventId: string, before: AppState, after: AppState, now:
       counters: diff(b.counters, a.counters, (c) => c.kind),
       busy: diff(b.busy, a.busy, id),
     },
+    at: toInstant(now),
     core: {
       tiers: { upsert: diff(bc.tiers, ac.tiers, id).upsert },
       delegates: { upsert: diff(bc.delegates, ac.delegates, id).upsert },

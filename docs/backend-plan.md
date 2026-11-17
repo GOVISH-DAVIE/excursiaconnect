@@ -826,7 +826,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | # | Milestone | Done when |
 | --- | --- | --- |
 | M3.1 | **Matching and introductions**: candidates and fit, decisions, briefs, introductions and answers, intro expiry, consent per document, the access log, watermarked downloads | A pair is introduced and accepts; a document opens only under consent and is logged **Built 16 Nov 2026:** candidates with their fit, decisions with reasons, the brief, introductions with chosen documents, both answers, consent per document with withdrawal, the profile and stamped copies opened through two-minute links, every opening logged; then the business's teaser and its approval, the directory for verified counterparties, expressions of interest in the team's queue, view-only documents, and the email when an introduction expires unanswered. Notes below |
-| M3.2 | **Scheduling**: `DrBusy` with exclusion constraints, lapse release, caps under advisory locks, confirm and change, auto-propose as a job, .ics invites, reminders | The PRD's three 50-request bursts book no clash; auto-propose for 150 pairs finishes within 10 s |
+| M3.2 | **Scheduling**: `DrBusy` with exclusion constraints, lapse release, caps under advisory locks, confirm and change, auto-propose as a job, .ics invites, reminders | The PRD's three 50-request bursts book no clash; auto-propose for 150 pairs finishes within 10 s **Built 17 Nov 2026:** the team's schedule with a slot picker, auto-propose, moves, cancellations and caps; each participant confirms, asks to move, answers a move and adds a meeting to its calendar; lapsed proposals release their slot and are told once; reminders a day and half an hour before. The bursts book 1, 4 and 6 of 50 with no clash; auto-propose drafts 150 pairs in about 1.7 s. Notes below |
 | M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server |
 | M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds |
 | M3.5 | **Offline on the day**: live board and scanners queue offline and sync with client ids; conflicts go to the lead; incidents are logged | A forced 10-minute outage loses nothing |
@@ -916,6 +916,53 @@ Each milestone from here on builds its feature the same way, as in [architecture
     - **The walk-through database:** Kilimo Fresh wrote its teaser and set its pitch deck to view only. The lead approved the teaser from the banner. Savanna Freight found it in the directory, marked introduced.
     - **The demo database:** Lakeside Distribution filtered the 39 teasers and expressed interest in Atlas Pay. The lead approved it from the Interest tab with a note for the sector miss, and Lakeside's card turned to "preparing an introduction".
     - Fixed in the browser: the document rule cut off at phone width, and a cramped header on the Interest tab.
+
+**Notes on M3.2, scheduling, 17 Nov 2026:**
+
+- **The rules** (`domain dealroom/meetings.ts`): every scheduling refusal now says why, where before it was silent.
+  - A clash names what is in the way (the room and table, a party's meeting, a session, the hours). A cap names the party and the cap, and says a reason goes over it.
+  - A participant confirms, asks to move and answers only for its own side. The prototype's acting staff still act for either side.
+  - Confirming twice, confirming a lapsed proposal, a move with no reason, the same time or a time that isn't free, and answering your own request are each refused with their reason.
+  - An older move request with no time is accepted by moving the meeting, and the refusal says so.
+  - New, for the server's jobs only: `dr/meetingLapse` (a lapsed proposal told to both sides and operations, once) and `dr/remindMeeting` (a day before, then half an hour before by email and SMS, once each). A meeting moved to a new time gets its reminders again.
+  - Auto-propose checks the pair first without a room, so a busy time is skipped for every table at once. A DFI's meetings take the 30-minute slot. Party lookups in `slotProblems` use a map. 150 pairs take milliseconds in the rules.
+  - Meeting emails link to the participant's meetings (`/dr/<id>?meetings=1`) and say to add the meeting to a calendar, since emails carry no attachment.
+- **The database:**
+  - **Lapse release:** before any busy row is written, the save marks every unconfirmed proposal past its confirm-by time inactive, at the command's clock. Without it a lapsed proposal's rows stayed active until something rewrote them, and the exclusion constraint would have refused a booking the rules allowed.
+  - A write that still breaks the exclusion constraint (SQLSTATE 23P01) is refused with "That slot was just taken", and nothing is written.
+  - Caps hold under the event's advisory lock, as every write does.
+- **Rooms on the server:** the event's rooms aren't on the server yet (Phase 2), so the Deal Room's settings carry each meeting room's name, and `stateOf` builds the rooms from them. The reference file takes an optional `name` per room, and the demo seed has them. The local demo database was given the names directly.
+- **The team's side** (`/v1/meetings/:eventId`, `/team/meetings`, in the menu for the lead, operations and coordinators; reviewers are refused):
+  - **Ready to schedule:** each pair with a slot picker (a day, the free times with their table counts, the room and table, the 30-minute option, a reason when over a cap), and auto-propose for all.
+  - **Schedule:** day by day, a grid of rooms and tables on a wide screen and a list on a phone. Each meeting opens with who has confirmed, when it lapses, a move asked, its history, and Move, Cancel, Accept or Decline the move.
+  - **Changes:** the moves and unconfirmed proposals, moves first. **Caps:** each counterparty per day and in all, each seeker against the cap.
+  - Auto-propose runs in the request, as one command under the event's lock: 150 pairs in about 1.7 s, including the save.
+- **The participant's side** (`/v1/my-meetings/:slug`, `/e/:slug/deal-room/meetings`, linked from the other participant pages):
+  - Its own meetings only, with what to do: confirm by a date, waiting for them, asked to move, move agreed, confirmed, lapsed. A lapsed proposal the team has replaced is hidden.
+  - "Ask to move it" offers only the times when both sides and a table are free. The other side agrees or declines, then the team accepts.
+  - "Add to calendar" downloads an .ics file (Nairobi time, a 30-minute alarm) once both sides have confirmed.
+- **The worker:** once a minute, for events with meetings still ahead, one command per event notes the lapses and sends the reminders due, worked out again under the lock.
+- **Tested:**
+  - 10 rule tests: refusals with their reasons; confirming and moving one's own side; the lapse and the reminders, once each; auto-propose for 150 pairs with no clash.
+  - 10 API tests:
+    - the schedule and its refusals
+    - the slot picker
+    - a proposal: audited and emailed, with clashes refused
+    - each side confirming its own, and the calendar file
+    - a move from request to acceptance
+    - a cancellation's reason
+    - the worker's lapse and reminders, once each, with the released slot booked again
+    - the three 50-request bursts
+    - auto-propose for 150 pairs
+  - **The bursts** (one room and table at one time; Deal floor A's four tables; three times in two rooms) book 1, 4 and 6 of 50 over HTTP, exactly what the rules allow taken one by one, and the database holds no two overlapping active rows.
+  - **Not met yet:** the slowest answer in a burst takes 2.0 to 2.3 s against the 2 s target. The 50 requests queue on the event's lock, and each loads the whole aggregate. Loading less per booking is the fix, before the load tests.
+  - In the browser on the demo database, at phone width:
+    - Operations proposed Zambezi Irrigation and Turkana at 11:30 from the picker, then auto-proposed the other five ready pairs.
+    - Sahel Water confirmed its new meeting and asked to move its Lakeside meeting to 14:00. Lakeside agreed, and operations accepted the move.
+    - The calendar file was checked. The grid was checked at desktop width.
+  - Fixed in the browser:
+    - the calendar file's name, which the browser can't read across origins and the page now builds itself
+    - a request button too wide for a phone
 
 
 ### Phase 4: After the summit (22 February to 19 March 2027)

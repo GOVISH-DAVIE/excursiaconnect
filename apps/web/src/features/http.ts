@@ -59,7 +59,24 @@ async function exchange<T>(method: string, path: string, { body, query, schema, 
   return { data: schema ? schema.parse(json) : undefined, status: res.status, etag: res.headers.get("etag") };
 }
 
+/** A file the API serves as text (an .ics invite): its body and the name the API gives it. */
+async function textFile(path: string): Promise<{ text: string; filename: string | null }> {
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { credentials: "include" });
+  } catch {
+    throw new ApiError("network", "Can't reach ExcursiaConnect. Check your connection and try again.", 0);
+  }
+  const text = await res.text();
+  if (!res.ok) {
+    const parsed = ErrorBody.safeParse((() => { try { return JSON.parse(text); } catch { return undefined; } })());
+    throw new ApiError(parsed.success ? parsed.data.error.code : "internal", parsed.success ? parsed.data.error.message : "Something went wrong on our side. Try again in a moment.", res.status);
+  }
+  return { text, filename: /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? null };
+}
+
 export const http = {
+  file: textFile,
   get: <T>(path: string, opts?: Options<T>) => request<T>("GET", path, opts),
   post: <T>(path: string, opts?: Options<T>) => request<T>("POST", path, opts),
   patch: <T>(path: string, opts?: Options<T>) => request<T>("PATCH", path, opts),

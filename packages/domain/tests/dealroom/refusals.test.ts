@@ -29,8 +29,8 @@ describe("apply", () => {
   });
 
   test("a refusal a rule does not explain still comes back, never silent", () => {
-    // scheduling's refusals get their reasons with M3.2; until then the generic one stands in
-    const r = run({ type: "dr/confirm", meetingId: "nobody", side: "seeker" }, lead);
+    // the summit day's rules get their reasons with M3.4; until then the generic one stands in
+    const r = run({ type: "dr/refill", meetingId: "nobody", matchId: "nobody" }, lead);
     expect(r.refusal).toBe(UNEXPLAINED);
   });
 });

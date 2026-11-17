@@ -41,7 +41,7 @@ const DrConfig = z.looseObject({
   secondReview: z.object({ decline: z.boolean(), askAbove: z.number().min(0) }),
   seekerFee: z.object({ amount: z.number().min(0), currency: z.enum(["USD", "KES"]), reminderDays: z.number().int().min(0) }),
   multiplePerOrg: z.boolean(),
-  rooms: z.record(z.string(), z.object({ tables: z.number().int().min(0), from: z.string(), to: z.string() })),
+  rooms: z.record(z.string(), z.object({ tables: z.number().int().min(0), from: z.string(), to: z.string(), name: z.string().min(1).max(60).optional() })),
   sessionRooms: z.array(z.string()),
   log: z.array(z.unknown()).default([]),
 });

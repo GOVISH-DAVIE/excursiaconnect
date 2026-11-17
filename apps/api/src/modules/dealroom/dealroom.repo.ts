@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import type { Db, Prisma } from "@excursia/db";
 import type { CoreRows } from "../events/events.mapper";
 import type { DrStaff } from "@excursia/domain/dealroom/types";
+import { HttpError } from "../../http/errors";
 import type { BusyRow, DealRoomRows, DealRoomStored } from "./dealroom.mapper";
 
 type Client = Db | Prisma.TransactionClient;
@@ -28,6 +29,8 @@ export type Changes = {
     config: DealRoomRows["config"] | null;
     busy: { upsert: BusyRow[]; remove: string[] };
   };
+  /** The command's clock: an unconfirmed proposal whose confirm-by time is before it no longer holds its slot (M3.2). */
+  at: Date;
   core: { tiers: { upsert: CoreRows["tiers"] }; delegates: { upsert: CoreRows["delegates"] }; badges: { upsert: CoreRows["badges"]; remove: string[] } };
 };
 
@@ -99,6 +102,12 @@ async function linkStaffWith(tx: Prisma.TransactionClient, links: StaffLink[]): 
   return refused;
 }
 
+/** Whether a write broke the exclusion constraint against double-booking (SQLSTATE 23P01). */
+function doubleBooked(e: unknown): boolean {
+  const text = `${(e as Error)?.message ?? ""} ${JSON.stringify((e as { meta?: unknown })?.meta ?? {})} ${(e as { cause?: { code?: string } })?.cause?.code ?? ""}`;
+  return /23P01|dr_busy_no_overlap|exclusion constraint/i.test(text);
+}
+
 async function saveWith(tx: Prisma.TransactionClient, eventId: string, ch: Changes) {
   const d = ch.dealRoom;
   if (d.config) await tx.drConfig.update({ where: { eventId }, data: { record: d.config.record } });
@@ -131,10 +140,22 @@ async function saveWith(tx: Prisma.TransactionClient, eventId: string, ch: Chang
 
   // busy slots: removed first, so a meeting moved to a new slot never clashes with its own old one
   if (d.busy.remove.length) await tx.$executeRaw`DELETE FROM dr_busy WHERE event_id = ${eventId} AND id = ANY(${d.busy.remove})`;
+  if (d.busy.upsert.length) {
+    // lapse release: a proposal nobody confirmed in time stops holding its slot, though nothing has rewritten its
+    // rows since; the rules already treat it as free, so the exclusion constraint must too
+    await tx.$executeRaw`UPDATE dr_busy SET active = false WHERE event_id = ${eventId} AND active AND confirm_by IS NOT NULL AND confirm_by < ${ch.at}`;
+  }
   for (const b of d.busy.upsert) {
-    await tx.$executeRaw`INSERT INTO dr_busy (id, event_id, source, source_id, key, slot, active, confirm_by)
-      VALUES (${b.id}, ${b.eventId}, ${b.source}::"BusySource", ${b.sourceId}, ${b.key}, tstzrange(${b.from}, ${b.to}), ${b.active}, ${b.confirmBy})
-      ON CONFLICT (id) DO UPDATE SET slot = EXCLUDED.slot, active = EXCLUDED.active, confirm_by = EXCLUDED.confirm_by`;
+    try {
+      await tx.$executeRaw`INSERT INTO dr_busy (id, event_id, source, source_id, key, slot, active, confirm_by)
+        VALUES (${b.id}, ${b.eventId}, ${b.source}::"BusySource", ${b.sourceId}, ${b.key}, tstzrange(${b.from}, ${b.to}), ${b.active}, ${b.confirmBy})
+        ON CONFLICT (id) DO UPDATE SET slot = EXCLUDED.slot, active = EXCLUDED.active, confirm_by = EXCLUDED.confirm_by`;
+    } catch (e) {
+      // the database's last word on double-booking (dr_busy_no_overlap): the rules check first, under the event's
+      // lock, so this means the rows and the rules disagree; the whole change is refused
+      if (doubleBooked(e)) throw new HttpError("conflict", "That slot was just taken. Choose another.");
+      throw e;
+    }
   }
 
   // the Deal Room's tier first: an event's first badge makes it (drTierOf)

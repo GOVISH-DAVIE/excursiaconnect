@@ -795,10 +795,12 @@ export function slotProblems(
       if (other) clashes.push(`${room.name}${rc.tables > 1 ? `, table ${req.table}` : ""} is booked ${other.start.slice(11)} to ${other.end.slice(11)}`);
     }
   }
+  // the meetings that hold a slot now, with their pair: worked out once, since every party check reads them
+  const pairs = new Map(dr.matches.map((m) => [m.id, m]));
+  const holding = dr.meetings.filter((m) => m.id !== req.ignore && occupies(m, cfg, now));
   const mine = (appId: string) =>
-    dr.meetings.filter((m) => {
-      if (m.id === req.ignore || !occupies(m, cfg, now)) return false;
-      const mm = dr.matches.find((x) => x.id === m.matchId);
+    holding.filter((m) => {
+      const mm = pairs.get(m.matchId);
       return mm && (mm.seekerId === appId || mm.providerId === appId);
     });
   for (const [side, appId] of [["seeker", match.seekerId], ["provider", match.providerId]] as const) {
@@ -849,6 +851,30 @@ export function slotTimes(cfg: DrConfig) {
 export function readyToSchedule(dr: DealRoomState, cfg: DrConfig) {
   return dr.matches.filter((m) => m.eventId === cfg.eventId && bothAccepted(m) && !dr.meetings.some((x) => x.matchId === m.id && (occupies(x, cfg, dr.clock) || x.status === "Held")));
 }
+
+/** Proposals that lapsed unconfirmed and that the server hasn't yet told both sides about (M3.2). */
+export const dueMeetingLapses = (dr: DealRoomState, cfg: DrConfig, now: string) => dr.meetings.filter((m) => m.eventId === cfg.eventId && !m.lapsedAt && lapsed(m, cfg, now));
+
+/** How long before a confirmed meeting each reminder goes: the day before, and half an hour before (M3.2). */
+export const REMINDERS = { day: 24 * 60, soon: 30 } as const;
+export type ReminderKind = keyof typeof REMINDERS;
+
+/**
+ * The reminder a confirmed meeting is due now, if any: inside its window and not yet sent. A meeting confirmed
+ * inside the day's window gets only the half-hour one; one already started gets none.
+ */
+export function reminderDue(m: DrMeeting, now: string): ReminderKind | undefined {
+  if (m.status !== "Confirmed" || now >= m.start) return undefined;
+  if (now >= addMinutes(m.start, -REMINDERS.soon)) return m.reminded?.soon ? undefined : "soon";
+  if (now >= addMinutes(m.start, -REMINDERS.day)) return m.reminded?.day ? undefined : "day";
+  return undefined;
+}
+
+export const dueReminders = (dr: DealRoomState, cfg: DrConfig, now: string) =>
+  dr.meetings.filter((m) => m.eventId === cfg.eventId).flatMap((m) => {
+    const kind = reminderDue(m, now);
+    return kind ? [{ meetingId: m.id, kind }] : [];
+  });
 
 /** Live-board flags derived from arrivals and the clock (Flow 4 steps 3 and 4). */
 export function boardFlag(m: DrMeeting, cfg: DrConfig, now: string) {

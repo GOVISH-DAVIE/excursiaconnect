@@ -12,6 +12,7 @@ import { SCAN_BATCH, createFilesService } from "./modules/files/files.service";
 import { createOutboxRepo } from "./modules/outbox/outbox.repo";
 import { createOutboxService } from "./modules/outbox/outbox.service";
 import { introLapses } from "./modules/matching";
+import { meetingJobs } from "./modules/meetings";
 import { paymentsService } from "./modules/payments";
 import { mpesaFor } from "./payments/mpesa";
 import { rulesClock } from "./clock";
@@ -29,10 +30,14 @@ const mpesa = mpesaFor(config);
 // the worker never pushes, so it needs no callback address
 const payments = paymentsService({ db, now: rulesClock(config), mpesa, callbackBase: () => "" });
 const lapses = introLapses({ db, now: rulesClock(config) });
+const meetings = meetingJobs({ db, now: rulesClock(config) });
 /** Fee reminders are due by the day: looking every ten minutes is plenty. */
 const REMIND_EVERY_MS = 10 * 60_000;
 let remindedAt = 0;
 let lapsedAt = 0;
+/** The half-hour reminder before a meeting must go on time: meetings are looked at once a minute. */
+const MEETINGS_EVERY_MS = 60_000;
+let meetingsAt = 0;
 /** How long one round may keep scanning while uploads are waiting; the outbox goes at its own, slower pace. */
 const SCAN_BUDGET_MS = 2_500;
 /** Retention is in days and months: looking once a minute is plenty. */
@@ -92,6 +97,15 @@ async function tick() {
     }
   } catch (e) {
     console.error("[worker] introductions round failed", e);
+  }
+  try {
+    if (Date.now() - meetingsAt > MEETINGS_EVERY_MS) {
+      meetingsAt = Date.now();
+      const m = await meetings();
+      if (m.lapsed || m.reminded) console.log(`[worker] meetings: ${m.lapsed} proposal${m.lapsed === 1 ? "" : "s"} lapsed, ${m.reminded} reminder${m.reminded === 1 ? "" : "s"} sent`);
+    }
+  } catch (e) {
+    console.error("[worker] meetings round failed", e);
   }
   if (!stopping) timer = setTimeout(tick, EVERY_MS);
 }
