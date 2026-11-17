@@ -164,7 +164,8 @@ export const MyApplication = z.object({
 });
 export type MyApplication = z.infer<typeof MyApplication>;
 
-export const MyApplications = z.array(MyApplication.pick({ id: true, mode: true, status: true, ref: true, submittedAt: true, draftSavedAt: true }).extend({ org: z.string() }));
+/** Each application with what it opens: `admitted` once a business is approved, or a counterparty verified (M3.1). */
+export const MyApplications = z.array(MyApplication.pick({ id: true, mode: true, status: true, ref: true, submittedAt: true, draftSavedAt: true }).extend({ org: z.string(), admitted: z.boolean() }));
 export type MyApplications = z.infer<typeof MyApplications>;
 
 /** Answering an open information request: the text, and the files uploaded for it. */

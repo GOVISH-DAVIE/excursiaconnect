@@ -10,11 +10,18 @@ import { useState } from "react";
 import type { MyProfile } from "@excursia/contracts/matching";
 import { fmtStamp } from "@excursia/domain/time";
 import { useMyProfile, useTeaserActions } from "@/features/matching/hooks/use-teaser";
-import { Panel, ParticipantPage, Teaser } from "../participant";
+import { Panel, ParticipantPage, Skeleton, Teaser } from "../participant";
 
 export function MyTeaserPage({ slug }: { slug: string }) {
   return (
-    <ParticipantPage slug={slug} page="teaser" title="My teaser" signIn="Sign in to write your teaser">
+    <ParticipantPage
+      slug={slug}
+      page="teaser"
+      title="Your teaser"
+      lede="The first thing verified investors and partners see of your business in the directory. Keep your name back until an introduction if you prefer."
+      signIn="Sign in to write your teaser"
+      wide
+    >
       <Body slug={slug} />
     </ParticipantPage>
   );
@@ -22,19 +29,24 @@ export function MyTeaserPage({ slug }: { slug: string }) {
 
 function Body({ slug }: { slug: string }) {
   const q = useMyProfile(slug, true);
-  if (q.isPending) return <Panel>Loading…</Panel>;
-  if (q.isError) return <Panel>{q.error.message}</Panel>;
+  if (q.isPending) return <Skeleton rows={5} />;
+  if (q.isError)
+    return (
+      <Panel title="Your teaser didn't load">
+        <p className="mb-4 text-[15px] text-slate">{q.error.message}</p>
+        <button className="btn-secondary" onClick={() => q.refetch()}>
+          Try again
+        </button>
+      </Panel>
+    );
   const p = q.data;
-  if (!p.app) return <Panel title="Nothing to write yet">{<p className="text-[14px] text-slate">{p.reason}</p>}</Panel>;
-  return (
-    <>
-      <p className="-mt-3 text-[14px] text-slate">
-        {p.app.org} · {p.event.name} Deal Room
-      </p>
-      <Editor key={`${p.app.teaser?.title}|${p.app.teaser?.summary}|${p.app.teaser?.anonymous}`} slug={slug} app={p.app} />
-      <Documents slug={slug} app={p.app} />
-    </>
-  );
+  if (!p.app)
+    return (
+      <Panel title="Nothing to write yet">
+        <p className="max-w-[60ch] text-[15px] text-slate">{p.reason}</p>
+      </Panel>
+    );
+  return <Editor key={`${p.app.teaser?.title}|${p.app.teaser?.summary}|${p.app.teaser?.anonymous}`} slug={slug} app={p.app} />;
 }
 
 type App = NonNullable<MyProfile["app"]>;
@@ -54,8 +66,9 @@ function Editor({ slug, app }: { slug: string; app: App }) {
   const changed = !app.teaser || title.trim() !== app.teaser.title || summary.trim() !== app.teaser.summary || anonymous !== app.teaser.anonymous;
   const w = where(app);
   return (
-    <>
-      <Panel title="Your teaser" aside={<span className={`pill whitespace-nowrap ${w.tone}`}>{w.label}</span>}>
+    <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-8">
+      <div className="min-w-0 space-y-5">
+      <Panel title={app.org} aside={<span className={`pill whitespace-nowrap ${w.tone}`}>{w.label}</span>}>
         <p className="-mt-1 mb-4 text-[14px] text-slate">
           {w.text}
           {!app.completedAt && app.deadline && ` Due by ${fmtStamp(app.deadline, false)}.`}
@@ -71,7 +84,7 @@ function Editor({ slug, app }: { slug: string; app: App }) {
             <input type="checkbox" className="mt-1" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} />
             <span>
               Keep our name back until an introduction
-              <span className="block text-[12px] text-slate">The directory shows the title below instead of {app.org}.</span>
+              <span className="block text-[13px] text-slate">The directory shows the title below instead of {app.org}.</span>
             </span>
           </label>
           <label className="block">
@@ -81,24 +94,26 @@ function Editor({ slug, app }: { slug: string; app: App }) {
           <label className="block">
             <span className="label">Summary: what you do, your traction and what you are looking for</span>
             <textarea className="input min-h-32 leading-relaxed" maxLength={1200} value={summary} onChange={(e) => setSummary(e.target.value)} />
-            <span className="mt-1 block text-right text-[12px] text-slate">{summary.length} of 1,200</span>
+            <span className="mt-1 block text-right text-[13px] text-slate">{summary.length} of 1,200</span>
           </label>
           {act.save.error && (
             <p role="alert" className="rounded-md bg-bad-50 px-3 py-2 text-[14px] text-bad">
               {act.save.error.message}
             </p>
           )}
-          <button className="btn btn-primary w-full sm:w-auto" disabled={act.save.isPending || !changed || !title.trim() || !summary.trim()}>
+          <button className="btn-primary w-full sm:w-auto" disabled={act.save.isPending || !changed || !title.trim() || !summary.trim()}>
             {act.save.isPending ? "Sending…" : app.state === "none" ? "Send for approval" : "Save and send for approval"}
           </button>
-          {app.state === "approved" && changed && <p className="text-[12px] text-slate">A change leaves the directory until the team approves it again.</p>}
+          {app.state === "approved" && changed && <p className="text-[13px] text-slate">A change leaves the directory until the team approves it again.</p>}
         </form>
       </Panel>
-      <div>
-        <p className="mb-2 text-[13px] font-medium">How the directory shows it</p>
-        <Teaser t={{ ...app.preview, title: anonymous ? title.trim() : app.org, named: !anonymous, summary: summary.trim() }} />
+      <Documents slug={slug} app={app} />
       </div>
-    </>
+      <aside className="min-w-0 lg:sticky lg:top-[calc(var(--ptop)+24px)]" aria-label="Preview">
+        <p className="mb-2 text-[13px] font-medium text-slate">How the directory shows it</p>
+        <Teaser t={{ ...app.preview, title: anonymous ? title.trim() : app.org, named: !anonymous, summary: summary.trim() }} />
+      </aside>
+    </div>
   );
 }
 
@@ -120,8 +135,8 @@ function Documents({ slug, app }: { slug: string; app: App }) {
           <li key={d.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line py-2.5 last:border-0">
             <span className="min-w-0 text-[14px]">
               {d.kind}
-              <span className="block truncate text-[12px] text-slate">{d.name}</span>
-              <span className={`block text-[12px] ${!d.stamped && !d.download ? "text-bad" : "text-slate"}`}>
+              <span className="block truncate text-[13px] text-slate">{d.name}</span>
+              <span className={`block text-[13px] ${!d.stamped && !d.download ? "text-bad" : "text-slate"}`}>
                 {d.stamped
                   ? d.download
                     ? "Opens as a copy stamped with their name; may be downloaded"

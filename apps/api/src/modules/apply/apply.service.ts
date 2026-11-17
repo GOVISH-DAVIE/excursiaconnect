@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { KYC_DOC, KYC_ITEMS, type ApplyForm, type ApplyMode, type DraftChanges, type KycInput, type MyApplication, type MyApplications, type RespondInput, type ScanState, type SignNdaInput, type UploadTarget } from "@excursia/contracts/apply";
 import type { Action } from "@excursia/domain/core/reducer";
 import { blankApplication, modeOf, patchDraft, retentionDate } from "@excursia/domain/dealroom/apply";
-import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, decisionOf, feeInKes, formGaps, openRfi, rfiDue } from "@excursia/domain/dealroom/logic";
+import { CHALLENGE_KINDS, CHALLENGE_ROUTES, OWNER_KINDS, PATHWAYS, SEEKER_DOCS, decisionOf, feeInKes, formGaps, openRfi, qualified, rfiDue } from "@excursia/domain/dealroom/logic";
 import type { PaymentView } from "@excursia/contracts/pay";
 import { paymentView } from "../payments/payments.service";
 import type { DrApplication, DrConfig } from "@excursia/domain/dealroom/types";
@@ -194,8 +194,11 @@ export function createApplyService({ repo, commands, storage, uploadMaxBytes, pa
       const rows = await repo.mine(e.id, email);
       const scans = await repo.fileStates(rows.map((r) => r.id));
       return rows.map((r) => {
-        const v = view(r.record as unknown as DrApplication, e.cfg, r.version, scans);
-        return { id: v.id, mode: v.mode, status: v.status, ref: v.ref, submittedAt: v.submittedAt, draftSavedAt: v.draftSavedAt, org: v.form.org.name };
+        const app = r.record as unknown as DrApplication;
+        const v = view(app, e.cfg, r.version, scans);
+        // what the participant's own pages open: introductions and meetings once approved, or verified
+        const admitted = app.type === "seeker" ? qualified(app) : app.verification?.state === "Verified";
+        return { id: v.id, mode: v.mode, status: v.status, ref: v.ref, submittedAt: v.submittedAt, draftSavedAt: v.draftSavedAt, org: v.form.org.name, admitted };
       });
     },
 

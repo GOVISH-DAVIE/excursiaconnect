@@ -8,90 +8,92 @@
  * the business shares once both have accepted, as a copy stamped with its own name.
  */
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { MyIntroduction, MyIntroductions, SeekerProfile } from "@excursia/contracts/matching";
 import { fmtStamp } from "@excursia/domain/time";
-import { useSession } from "@/features/auth/hooks/use-session";
-import { useSignOut } from "@/features/auth/hooks/use-sign-in";
 import { useIntroActions, useIntroductions } from "@/features/matching/hooks/use-introductions";
+import { Panel, ParticipantPage, Skeleton } from "../participant";
 
 export function MyIntroductionsPage({ slug }: { slug: string }) {
-  const router = useRouter();
-  const session = useSession();
-  const participant = session.data?.user.kind === "participant";
-  const q = useIntroductions(slug, participant);
-  const signOut = useSignOut();
-  const here = `/e/${slug}/deal-room/introductions`;
-
-  let body: React.ReactNode;
-  if (session.isPending || (participant && q.isPending)) body = <Panel>Loading…</Panel>;
-  else if (!session.data)
-    body = (
-      <Panel title="Sign in to see your introductions">
-        <p className="mb-4 text-[14px] text-slate">Use the email you applied with. We email you a six-digit code; no password needed.</p>
-        <button className="btn btn-primary w-full sm:w-auto" onClick={() => router.push(`/signin?next=${encodeURIComponent(here)}`)}>
-          Sign in with your email
-        </button>
-      </Panel>
-    );
-  else if (!participant)
-    body = (
-      <Panel>
-        <p className="mb-4 text-[15px]">You are signed in with a staff account. To see your own introductions, sign out and sign in with the email you applied with.</p>
-        <button className="btn btn-secondary" disabled={signOut.isPending} onClick={() => signOut.mutate()}>
-          Sign out
-        </button>
-      </Panel>
-    );
-  else if (q.isError) body = <Panel>{q.error.message}</Panel>;
-  else if (!q.data?.introductions.length && !q.data?.access.length)
-    body = (
-      <Panel title="No introductions yet">
-        <p className="text-[14px] text-slate">
-          The Deal Room team introduces you to investors, partners or businesses that fit, once your application is approved. We email you when one is waiting. Signed in as {session.data.user.email}.
-        </p>
-      </Panel>
-    );
-  else
-    body = (
-      <>
-        {q.data.introductions.map((i) => (
-          <Introduction key={`${i.matchId}:${i.side}`} slug={slug} i={i} />
-        ))}
-        {q.data.access.length > 0 && <AccessLog access={q.data.access} />}
-      </>
-    );
-
   return (
-    <div className="min-h-screen bg-paper">
-      <main className="mx-auto max-w-2xl space-y-5 px-4 py-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="h2">My introductions</h1>
-            {q.data && <p className="text-[14px] text-slate">{q.data.event.name} Deal Room</p>}
-          </div>
-          <Link href={`/e/${slug}/deal-room/apply`} className="link text-[14px]">
-            My application
-          </Link>
-        </div>
-        {body}
-      </main>
-    </div>
+    <ParticipantPage
+      slug={slug}
+      page="introductions"
+      title="Introductions"
+      lede="The investors, partners and businesses the Deal Room team introduces you to. A meeting is booked once both of you accept."
+      signIn="Sign in to see your introductions"
+      aside={<Aside slug={slug} />}
+    >
+      <Body slug={slug} />
+    </ParticipantPage>
   );
 }
 
-function Panel({ title, children, aside }: { title?: string; children: React.ReactNode; aside?: React.ReactNode }) {
+function Body({ slug }: { slug: string }) {
+  const q = useIntroductions(slug, true);
+  if (q.isPending) return <Skeleton rows={5} />;
+  if (q.isError)
+    return (
+      <Panel title="Your introductions didn't load">
+        <p className="mb-4 text-[15px] text-slate">{q.error.message}</p>
+        <button className="btn-secondary" onClick={() => q.refetch()}>
+          Try again
+        </button>
+      </Panel>
+    );
+  if (!q.data.introductions.length)
+    return (
+      <Panel title="No introductions yet">
+        <p className="max-w-[60ch] text-[15px] text-slate">
+          Once your application is approved, the Deal Room team introduces you to investors, partners or businesses that fit. We email you when one is waiting for your answer.
+        </p>
+        <Link href={`/e/${slug}/deal-room/apply`} className="btn-secondary mt-4">
+          See your application
+        </Link>
+      </Panel>
+    );
+  const waiting = q.data.introductions.filter((i) => i.stage === "Introduced" && !i.mine);
+  const rest = q.data.introductions.filter((i) => !(i.stage === "Introduced" && !i.mine));
   return (
-    <section className="surface p-5">
-      {(title || aside) && (
-        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-          {title && <h2 className="h2">{title}</h2>}
-          {aside}
-        </div>
+    <>
+      {waiting.length > 0 && (
+        <h2 className="flex items-center gap-2 text-[17px] font-medium">
+          <span className="portal__count">{waiting.length}</span>
+          Waiting for your answer
+        </h2>
       )}
-      {children}
-    </section>
+      {waiting.map((i) => (
+        <Introduction key={`${i.matchId}:${i.side}`} slug={slug} i={i} />
+      ))}
+      {waiting.length > 0 && rest.length > 0 && <h2 className="pt-3 text-[17px] font-medium">Answered</h2>}
+      {rest.map((i) => (
+        <Introduction key={`${i.matchId}:${i.side}`} slug={slug} i={i} />
+      ))}
+    </>
+  );
+}
+
+/** Beside the list: who opened the business's file, or how introductions work. */
+function Aside({ slug }: { slug: string }) {
+  const q = useIntroductions(slug, true);
+  if (q.data?.access.length) return <AccessLog access={q.data.access} />;
+  return (
+    <Panel title="How introductions work">
+      <ul className="space-y-3 text-[14px] text-slate">
+        <li>
+          <b className="font-medium text-ink">Answer by the date.</b> An introduction left unanswered expires, and both of you are told.
+        </li>
+        <li>
+          <b className="font-medium text-ink">Your documents.</b> A business chooses which documents the other side may open, and can withdraw any of them later.
+        </li>
+        <li>
+          <b className="font-medium text-ink">Then a meeting.</b> Once both accept, the Deal Room team proposes a time for you to confirm.
+        </li>
+      </ul>
+      <Link href={`/e/${slug}/deal-room/meetings`} className="link mt-4 inline-block text-[14px]">
+        See your meetings
+      </Link>
+    </Panel>
   );
 }
 
@@ -107,11 +109,11 @@ function Introduction({ slug, i }: { slug: string; i: MyIntroduction }) {
   const status = i.stage === "Introduced" ? (i.mine ? `Waiting for ${i.other.org}` : `Answer by ${fmtStamp(i.expiresAt)}`) : i.stage === "Accepted" ? "Both accepted" : i.stage;
   const error = act.respond.error ?? act.consent.error ?? act.profile.error ?? act.open.error;
   return (
-    <Panel title={i.other.org} aside={<span className={`pill whitespace-nowrap ${STATUS[i.stage]}`}>{status}</span>}>
+    <Panel title={i.other.org} id={`intro-${i.matchId}`} aside={<span className={`pill whitespace-nowrap ${STATUS[i.stage]}`}>{status}</span>}>
       <p className="-mt-2 mb-3 text-[13px] text-slate">
         {i.other.label} · introduced {fmtStamp(i.sentAt)}
       </p>
-      <p className="whitespace-pre-line text-[15px] leading-relaxed">{i.brief.text}</p>
+      <p className="max-w-[68ch] whitespace-pre-line text-[15px] leading-relaxed">{i.brief.text}</p>
       {i.brief.agenda.length > 0 && (
         <>
           <p className="mt-3 text-[13px] font-medium">The meeting&apos;s agenda</p>
@@ -144,7 +146,7 @@ function Introduction({ slug, i }: { slug: string; i: MyIntroduction }) {
                 <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 text-[14px]">
                   <span>
                     {d.kind}
-                    {!d.opens.ok && d.opens.reason && <span className="block text-[12px] text-slate">{d.opens.reason}</span>}
+                    {!d.opens.ok && d.opens.reason && <span className="block text-[13px] text-slate">{d.opens.reason}</span>}
                   </span>
                   {d.opens.ok && (
                     <span className="flex gap-2">
@@ -164,7 +166,7 @@ function Introduction({ slug, i }: { slug: string; i: MyIntroduction }) {
               ))}
             </ul>
           )}
-          <p className="mt-3 text-[12px] text-slate">Documents open as a copy stamped with your name and organisation. The business sees each opening.</p>
+          <p className="mt-3 text-[13px] text-slate">Documents open as a copy stamped with your name and organisation. The business sees each opening.</p>
         </div>
       )}
 
@@ -176,7 +178,7 @@ function Introduction({ slug, i }: { slug: string; i: MyIntroduction }) {
               <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 text-[14px]">
                 <span>
                   {d.kind}
-                  <span className="block text-[12px] text-slate">
+                  <span className="block text-[13px] text-slate">
                     {d.shared ? "Shared" : "Not shared"} · {d.opened.length ? `${d.opened[0].action === "download" ? "downloaded" : "opened"} ${fmtStamp(d.opened[0].at)}` : "not opened"}
                   </span>
                 </span>
@@ -186,7 +188,7 @@ function Introduction({ slug, i }: { slug: string; i: MyIntroduction }) {
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-[12px] text-slate">Withdrawing stops access at once. What was already opened stays in the list below.</p>
+          <p className="mt-2 text-[13px] text-slate">Withdrawing stops access at once. What was already opened stays in the list below.</p>
         </div>
       )}
 
@@ -201,7 +203,7 @@ function Introduction({ slug, i }: { slug: string; i: MyIntroduction }) {
                   {d.kind}
                 </label>
               ))}
-              <p className="mt-1 text-[12px] text-slate">Your profile goes with the introduction. Each document goes only if ticked, and only once both of you accept.</p>
+              <p className="mt-1 text-[13px] text-slate">Your profile goes with the introduction. Each document goes only if ticked, and only once both of you accept.</p>
             </fieldset>
           )}
           {declining ? (
@@ -211,25 +213,25 @@ function Introduction({ slug, i }: { slug: string; i: MyIntroduction }) {
                 <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
               </label>
               <div className="flex flex-wrap gap-2">
-                <button className="btn-primary" disabled={!reason.trim() || act.respond.isPending} onClick={() => act.respond.mutate({ response: "Declined", reason })}>
+                <button className="btn-primary btn-sm" disabled={!reason.trim() || act.respond.isPending} onClick={() => act.respond.mutate({ response: "Declined", reason })}>
                   Decline the introduction
                 </button>
-                <button className="btn-quiet" onClick={() => setDeclining(false)}>
+                <button className="btn-quiet btn-sm" onClick={() => setDeclining(false)}>
                   Back
                 </button>
               </div>
             </div>
           ) : (
             <div className="mt-3 flex flex-wrap gap-2">
-              <button className="btn-primary" disabled={act.respond.isPending} onClick={() => act.respond.mutate({ response: "Accepted", consent: i.side === "seeker" ? consent : [] })}>
+              <button className="btn-primary btn-sm" disabled={act.respond.isPending} onClick={() => act.respond.mutate({ response: "Accepted", consent: i.side === "seeker" ? consent : [] })}>
                 Accept the introduction
               </button>
-              <button className="btn-secondary" onClick={() => setDeclining(true)}>
+              <button className="btn-secondary btn-sm" onClick={() => setDeclining(true)}>
                 Decline
               </button>
             </div>
           )}
-          <p className="mt-2 text-[12px] text-slate">
+          <p className="mt-2 text-[13px] text-slate">
             A meeting is booked only if both of you accept. {i.other.org} {i.theirs ? `has ${i.theirs.response.toLowerCase()}` : "hasn't answered yet"}.
           </p>
         </div>
@@ -256,7 +258,7 @@ function Profile({ p, onClose }: { p: SeekerProfile; onClose: () => void }) {
     ...(p.website ? ([["Website", p.website]] as [string, string][]) : []),
   ];
   return (
-    <div className="mt-3 rounded-lg border border-line bg-white p-4">
+    <div className="mt-3 rounded-[var(--r-sm)] bg-paper-200 p-4">
       <div className="flex items-start justify-between gap-3">
         <p className="font-medium">{p.org}: full profile</p>
         <button className="btn-quiet btn-sm" onClick={onClose}>
@@ -271,7 +273,7 @@ function Profile({ p, onClose }: { p: SeekerProfile; onClose: () => void }) {
           </div>
         ))}
       </dl>
-      <p className="mt-3 text-[12px] text-slate">Opened {fmtStamp(p.openedAt)}. The business sees this opening.</p>
+      <p className="mt-3 text-[13px] text-slate">Opened {fmtStamp(p.openedAt)}. The business sees this opening.</p>
     </div>
   );
 }
@@ -285,7 +287,7 @@ function AccessLog({ access }: { access: MyIntroductions["access"] }) {
             <span>
               <b className="font-medium">{a.who}</b> {a.action === "download" ? "downloaded" : "opened"} {a.what.toLowerCase()}
             </span>
-            <span className="text-[12px] text-slate">{fmtStamp(a.at)}</span>
+            <span className="text-[13px] text-slate">{fmtStamp(a.at)}</span>
           </li>
         ))}
       </ul>

@@ -14,7 +14,6 @@ import type { ApplyForm, ApplyMode, MyApplication, MyApplications } from "@excur
 import { APPLY_MODES, modeFromLink } from "@excursia/domain/dealroom/apply";
 import { ROLE_LABEL } from "@excursia/domain/dealroom/logic";
 import { fmtStamp } from "@excursia/domain/time";
-import { initials, readableOn } from "@/lib/brand";
 import { useSession } from "@/features/auth/hooks/use-session";
 import { useSignOut } from "@/features/auth/hooks/use-sign-in";
 import { useApplyForm, useMyApplication, useMyApplications, useStartApplication } from "@/features/apply/hooks/use-apply";
@@ -22,6 +21,7 @@ import { Answer } from "./answer";
 import { Editor } from "./editor";
 import { Card } from "./fields";
 import { Outcome } from "./outcome";
+import { ParticipantFrame } from "../participant";
 
 const OPEN = ["Lead", "Invited", "Draft"];
 const TITLE: Record<ApplyMode, string> = {
@@ -56,6 +56,7 @@ function Page({ slug, form, linked, invite }: { slug: string; form: ApplyForm; l
   const start = useStartApplication(slug);
   const signOut = useSignOut();
   const mode: ApplyMode = linked ?? "seeker";
+  // an application's id, or "list" for every application and the pathways to start another
   const [chosen, setChosen] = useState<string | null>(null);
   const pick = (m: ApplyMode | null) => {
     router.replace(m ? `/e/${slug}/deal-room/apply?type=${m}` : `/e/${slug}/deal-room/apply`, { scroll: false });
@@ -63,13 +64,17 @@ function Page({ slug, form, linked, invite }: { slug: string; form: ApplyForm; l
   };
 
   // the application to show: the one just started or chosen; else one waiting on the applicant's answer, else an
-  // open draft on the pathway they came for. Choosing a pathway shows the list of what they have instead.
+  // open draft on the pathway they came for; else, with no pathway named, their own application (the one submitted
+  // or decided, else the newest draft), so a participant's Application tab opens on what they have. "list" shows
+  // every application and the pathways to start another.
   const openOne = mine.data?.find((a) => a.status === "Information requested") ?? (linked ? mine.data?.find((a) => OPEN.includes(a.status) && a.mode === linked) : undefined);
-  const current = chosen ?? (invite ? null : (openOne?.id ?? null));
+  const ownOne = linked ? undefined : (mine.data?.find((a) => a.admitted) ?? mine.data?.find((a) => !OPEN.includes(a.status)) ?? mine.data?.[0]);
+  const current = chosen === "list" ? null : (chosen ?? (invite ? null : (openOne?.id ?? ownOne?.id ?? null)));
   const loaded = useMyApplication(slug, current);
   const shownMode = loaded.data?.mode ?? openOne?.mode ?? linked;
   // asking which pathway: a bare link, with nothing of theirs to open and no invitation
   const choosing = !linked && !current && !invite;
+  const several = (mine.data?.length ?? 0) > 1;
 
   // an invitation is taken up once, as soon as its applicant is signed in
   const tookInvite = useRef(false);
@@ -80,9 +85,6 @@ function Page({ slug, form, linked, invite }: { slug: string; form: ApplyForm; l
     startApp({ mode, invite }, { onSuccess: (a) => setChosen(a.id) });
   }, [invite, applicant, mode, startApp]);
 
-  const brand = form.brand.primary;
-  const ink = readableOn(brand);
-  const mark = (form.brand.logoText || initials(form.eventName)).slice(0, 4).toUpperCase();
   const back = `/e/${slug}/deal-room/apply${linked ? `?type=${linked}` : ""}${invite ? `${linked ? "&" : "?"}invite=${encodeURIComponent(invite)}` : ""}`;
 
   let body: React.ReactNode;
@@ -140,37 +142,47 @@ function Page({ slug, form, linked, invite }: { slug: string; form: ApplyForm; l
   // the form takes the page's full width; choosing a pathway and signing in stay a narrow column
   const wide = !!(current && loaded.data && OPEN.includes(loaded.data.status));
   const heading = shownMode ?? (choosing ? null : mode);
+  // a submitted application is the participant's own record, titled as such; drafts keep the pathway's title
+  const sent = current && loaded.data && !OPEN.includes(loaded.data.status) ? loaded.data : null;
 
   return (
-    <div className="brand min-h-screen bg-paper" style={{ "--accent": brand, "--accent-ink": ink } as React.CSSProperties}>
-      <header className="nav nav--static">
-        <div className="wrap nav__bar">
-          <Link href={`/e/${slug}/deal-room`} className="nav__logo">
-            <span className="mark" style={{ background: brand, color: ink, fontSize: mark.length > 2 ? 10 : 13 }} aria-hidden="true">
-              {mark}
-            </span>
-            <span className="nav__name">
-              {form.eventName}
-              <span className="hidden sm:inline"> Deal Room</span>
-            </span>
-          </Link>
-          <Link href={`/e/${slug}/deal-room`} className="link">
-            About<span className="hidden sm:inline"> the Deal Room</span>
-          </Link>
-        </div>
-      </header>
-
-      <main className={wide ? "wrap space-y-8 py-10" : "wrap wrap--narrow space-y-5 py-10"}>
-        <div>
-          <h1 className="h1">{heading ? TITLE[heading] : `Register for the ${form.eventName} Deal Room`}</h1>
-          <p className="mt-2 max-w-[60ch] text-[15px]">{heading ? WHO_FOR[heading] : "Select the registration pathway that best reflects your role and the purpose of your participation in the Deal Room."}</p>
-          <p className="mt-1 text-[15px] text-slate">Open until {fmtStamp(form.closes, false)}. Your answers save as you type.</p>
-          {linked && !current && !invite && (
-            <button type="button" className="link mt-3 text-[14px]" onClick={() => pick(null)}>
-              Choose another pathway
-            </button>
-          )}
-        </div>
+    <ParticipantFrame slug={slug} page="apply">
+      <main id="main" className={`${wide ? "wrap wrap--portal space-y-8" : "wrap wrap--narrow space-y-5"} pb-10 pt-8 sm:pt-10 md:pb-16`}>
+        {sent ? (
+          <div>
+            <h1 className="h1 text-balance sm:text-[30px]">Your application</h1>
+            <p className="mt-2 max-w-[60ch] text-[15px] text-slate">
+              {sent.form.org.name || "Your organisation"} · {ROLE_LABEL[sent.mode]}
+              {sent.ref ? (
+                <>
+                  {" "}
+                  · <span className="whitespace-nowrap font-mono text-[14px]">{sent.ref}</span>
+                </>
+              ) : null}
+            </p>
+            {(several || chosen) && (
+              <button type="button" className="link mt-3 text-[14px]" onClick={() => setChosen("list")}>
+                All your applications
+              </button>
+            )}
+          </div>
+        ) : (
+          <div>
+            <h1 className="h1 text-balance sm:text-[30px]">{heading ? TITLE[heading] : `Register for the ${form.eventName} Deal Room`}</h1>
+            <p className="mt-2 max-w-[60ch] text-[15px]">{heading ? WHO_FOR[heading] : "Select the registration pathway that best reflects your role and the purpose of your participation in the Deal Room."}</p>
+            <p className="mt-1 text-[15px] text-slate">Open until {fmtStamp(form.closes, false)}. Your answers save as you type.</p>
+            {linked && !current && !invite && (
+              <button type="button" className="link mt-3 text-[14px]" onClick={() => pick(null)}>
+                Choose another pathway
+              </button>
+            )}
+            {current && loaded.data && several && (
+              <button type="button" className="link mt-3 text-[14px]" onClick={() => setChosen("list")}>
+                All your applications
+              </button>
+            )}
+          </div>
+        )}
         {body}
         <p className="text-[13px] text-slate">
           What happens to what you send, who sees your documents and for how long:{" "}
@@ -180,7 +192,7 @@ function Page({ slug, form, linked, invite }: { slug: string; form: ApplyForm; l
           . Nothing is shared with an investor or partner without your consent, document by document.
         </p>
       </main>
-    </div>
+    </ParticipantFrame>
   );
 }
 
