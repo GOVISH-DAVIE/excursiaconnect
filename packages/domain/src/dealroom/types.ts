@@ -521,7 +521,8 @@ export interface DrConflict {
   id: string;
   meetingId: string;
   kept: DrOutcome;
-  incoming: DrOutcome & { device: string };
+  /** the record from the phone; a no-show carries its attendance, since it has no outcome of its own (M3.5) */
+  incoming: DrOutcome & { device: string; attendance?: "Held" | "No-show"; noShow?: "seeker" | "provider" | "both" };
   resolved?: { by: string; at: string; chose: "kept" | "incoming" };
 }
 

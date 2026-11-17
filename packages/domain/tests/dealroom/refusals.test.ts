@@ -29,8 +29,8 @@ describe("apply", () => {
   });
 
   test("a refusal a rule does not explain still comes back, never silent", () => {
-    // the offline conflicts get their reasons with M3.5; until then the generic one stands in
-    const r = run({ type: "dr/resolveConflict", conflictId: "nobody", chose: "kept" }, lead);
+    // the rooms' settings get their reasons when they move onto the server; until then the generic one stands in
+    const r = run({ type: "dr/roomConfig", roomId: "r_dr1", tables: 0, from: "09:00", to: "17:00" }, lead);
     expect(r.refusal).toBe(UNEXPLAINED);
   });
 });

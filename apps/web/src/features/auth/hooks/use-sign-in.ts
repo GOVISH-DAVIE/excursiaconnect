@@ -3,8 +3,9 @@
  * so every screen reading useSession sees the change.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { forgetLiveBoards } from "../../live/offline";
 import { authApi } from "../api";
-import { sessionQuery } from "../queries";
+import { forgetKeptSession, sessionQuery } from "../queries";
 import { useSessionMutation } from "./use-session-mutation";
 
 /** An applicant: the emailed code. */
@@ -28,5 +29,13 @@ export const useSetPassword = () => useSessionMutation(authApi.setPassword);
 /** Ends this session; nobody is signed in afterwards, so the answer is known without asking. */
 export function useSignOut() {
   const queryClient = useQueryClient();
-  return useMutation({ mutationFn: authApi.signOut, onSuccess: () => queryClient.setQueryData(sessionQuery.key, null) });
+  return useMutation({
+    mutationFn: authApi.signOut,
+    onSuccess: () => {
+      // the live board kept on this phone holds participants' names and outcomes: it goes with the sign-in
+      forgetLiveBoards();
+      forgetKeptSession();
+      queryClient.setQueryData(sessionQuery.key, null);
+    },
+  });
 }

@@ -829,7 +829,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | M3.2 | **Scheduling**: `DrBusy` with exclusion constraints, lapse release, caps under advisory locks, confirm and change, auto-propose as a job, .ics invites, reminders | The PRD's three 50-request bursts book no clash; auto-propose for 150 pairs finishes within 10 s **Built 17 Nov 2026:** the team's schedule with a slot picker, auto-propose, moves, cancellations and caps; each participant confirms, asks to move, answers a move and adds a meeting to its calendar; lapsed proposals release their slot and are told once; reminders a day and half an hour before. The bursts book 1, 4 and 6 of 50 with no clash; auto-propose drafts 150 pairs in about 1.7 s. Notes below |
 | M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server **Built 17 Nov 2026:** the team's Sessions page (plan, change, invite, cancel, attendance, outcomes) and sessions in each participant's schedule (accept or decline, with the reason when a meeting is in the way); every refusal says why; a session holds its room, host and whoever accepted in the database too. Door scans wait for the room doors (M2.2). Notes below |
 | M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds **Built 17 Nov 2026:** the team's Live board (phone-first: a sheet from the bottom; beside the board on a big screen), arrivals read from the desk's own table, start, outcome and refill with reasons, an outcome recorded once however often it is sent, the close-out, and the 19:00 report as a worker job. Phones poll every 3 seconds against the board's version (304 when nothing changed); a change on one phone shows on another at its next poll. Notes below |
-| M3.5 | **Offline on the day**: live board and scanners queue offline and sync with client ids; conflicts go to the lead; incidents are logged | A forced 10-minute outage loses nothing |
+| M3.5 | **Offline on the day**: live board and scanners queue offline and sync with client ids; conflicts go to the lead; incidents are logged | A forced 10-minute outage loses nothing **Built 17 Nov 2026:** the live board keeps its last copy and a queue on each phone, and syncs it in one request when the server answers again; each record is recorded once, a resend is dropped, a disagreement waits for the lead; each outage is logged and reported to the lead; a page reloaded offline opens on what the phone kept. The desk scanners already queue and sync once (M2.2). Notes below |
 | M3.6 | **Every role, walked through**: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight | No role sees a screen or a record it shouldn't, and no link ends in a refusal |
 | M3.7 | **Freeze and rehearsal**: freeze Fri 22 Jan; rehearsal on staging with real phones Wed 10 Feb; printed backups; restore drill and failover to the standby server | **The summit runs 15 to 18 Feb 2027** |
 
@@ -1037,6 +1037,44 @@ Each milestone from here on builds its feature the same way, as in [architecture
     - The screen-reader text in the sideways tile rows was positioned against the page, not the row. It made the page 1247 pixels wide on a phone, and put the bottom sheet off screen.
     - The checked-in count read only the desk's table.
     - A flex gap parted "Day 2" from its date on the day buttons, here and on Sessions.
+
+**Notes on M3.5, offline on the day, 17 Nov 2026:**
+
+- **On the phone** (`features/live/offline.ts`): the browser's storage keeps the last board, the outcomes recorded with no connection (each with its own id and the rules' time), when the connection went, and the phone's name.
+  - A failed poll notes when the connection went. The first poll that reaches the server again sends the queue in one sync.
+  - A blip under a minute with nothing recorded isn't reported.
+  - There are no effects: the poll writes a small store the page reads.
+  - Signing out clears the kept boards. Records not yet sent stay on the phone, as at the desk.
+- **Reloading offline:** a page reloaded with no connection opened on "Checking your sign-in…". The phone now keeps the last staff sign-in the server confirmed, for at most 12 hours, and uses it only when the server can't be reached.
+  - It unlocks nothing: every request still carries the real session, which the server checks.
+  - A participant's sign-in isn't kept, and signing out clears it.
+- **The rules** (`domain dealroom/meetings.ts`), for the server:
+  - `dr/syncOutcome` records an offline outcome at the phone's time, never later than now and never before half an hour before the start.
+  - A record whose id is already on file, or already waiting as a conflict, is a duplicate.
+  - A record for a meeting that already has a different one becomes a conflict. Both are kept, the record on file stands, and the lead chooses. A conflict is never settled by which phone reconnects first.
+  - `dr/resolveConflict` now says why it refuses, and applies a no-show from the phone as a no-show.
+  - `dr/logIncident` logs an outage with its tally and emails the lead.
+  - The prototype's own offline rules (`dr/offline`, `dr/sync`) are unchanged.
+- **The API** (`POST /v1/live/:eventId/sync`): each record is tried in turn, under the lock, and comes back as recorded, duplicate, conflict, or refused with the rule's reason. One refused record never stops the rest.
+  - `POST /v1/live/:eventId/conflicts/:id/resolve` is for the lead only.
+  - The conflicts are stored with the Deal Room's settings.
+- **The board:**
+  - **Offline:** "No connection since …", with how many records wait on the phone; a tile with one shows "On this phone".
+  - **Back online:** "Back online", with what the sync did and the reason for anything refused. If the server refuses the sync outright, the board keeps going and the records stay.
+  - **Conflicts:** "Two phones disagree", with both records side by side and the lead's two buttons.
+  - **Close-out:** the day's outages.
+- **Found and fixed in the browser:** the board's version didn't include who was asking. After another person signed in on the same phone, the server kept answering "nothing changed", and the phone kept the first person's board, with that person's permissions and sensitive notes. The version now includes the person.
+- **Tested:**
+  - 3 rule tests: recorded once at the phone's time, a conflict and the lead's choice, the incident.
+  - 2 API tests:
+    - a forced 10-minute outage on two phones: one record resent, one meeting recorded differently on each. Nothing is lost, and sending a queue again changes nothing.
+    - a refused record reported with its reason while the rest go
+  - The two-phones test now also checks that one person's version never answers another's poll.
+  - **In the browser, with the API stopped and started:**
+    - The phone kept its board through an offline reload, and queued a record.
+    - On reconnecting, operations' record synced first and the coordinator's became a conflict.
+    - The lead chose the coordinator's no-show.
+    - Close-out listed the outages.
 
 ### Phase 4: After the summit (22 February to 19 March 2027)
 

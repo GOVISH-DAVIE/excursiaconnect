@@ -10,5 +10,8 @@ export function liveRoutes(c: LiveController): Router {
   r.post("/:eventId/:meetingId/start", staff, c.start);
   r.post("/:eventId/:meetingId/outcome", staff, c.outcome);
   r.post("/:eventId/:meetingId/refill", staff, c.refill);
+  // a phone's queue after an outage, and the lead's choice on a conflict (M3.5)
+  r.post("/:eventId/sync", staff, c.sync);
+  r.post("/:eventId/conflicts/:conflictId/resolve", staff, c.resolve);
   return r;
 }

@@ -3,7 +3,7 @@
  * every 3 seconds cost a fingerprint query, not a load of the Deal Room.
  */
 import type { RequestHandler } from "express";
-import { LiveMeetingParams, LiveParams, LiveQuery, OutcomeEntry, RefillInput } from "@excursia/contracts/live";
+import { ConflictParams, LiveMeetingParams, LiveParams, LiveQuery, OutcomeEntry, RefillInput, ResolveInput, SyncInput } from "@excursia/contracts/live";
 import { sessionOf } from "../../http/session";
 import type { LiveService } from "./live.service";
 
@@ -43,6 +43,18 @@ export function createLiveController(service: LiveService) {
     refill: (async (req, res) => {
       const { eventId, meetingId } = LiveMeetingParams.parse(req.params);
       const board = await service.refill(sessionOf(res), eventId, meetingId, RefillInput.parse(req.body).matchId, LiveQuery.parse(req.query).day, ip(req));
+      res.set({ ...PRIVATE, ETag: tag(board.version) }).json(board);
+    }) satisfies RequestHandler,
+
+    sync: (async (req, res) => {
+      const { eventId } = LiveParams.parse(req.params);
+      const r = await service.sync(sessionOf(res), eventId, SyncInput.parse(req.body), LiveQuery.parse(req.query).day, ip(req));
+      res.set({ ...PRIVATE, ETag: tag(r.board.version) }).json(r);
+    }) satisfies RequestHandler,
+
+    resolve: (async (req, res) => {
+      const { eventId, conflictId } = ConflictParams.parse(req.params);
+      const board = await service.resolve(sessionOf(res), eventId, conflictId, ResolveInput.parse(req.body).chose, LiveQuery.parse(req.query).day, ip(req));
       res.set({ ...PRIVATE, ETag: tag(board.version) }).json(board);
     }) satisfies RequestHandler,
   };

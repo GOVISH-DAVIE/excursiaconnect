@@ -8,11 +8,14 @@
  * board changed, so the team sees the same board within seconds.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { LiveBoard, LiveMeeting } from "@excursia/contracts/live";
+import type { LiveBoard, LiveMeeting, OutcomeEntry } from "@excursia/contracts/live";
 import { OUTCOMES } from "@excursia/contracts/sessions";
 import { addMinutes, fmtStamp } from "@excursia/domain/time";
 import { Empty, PageHeader, Section } from "@/components/ui";
-import { useLiveActions, useLiveBoard } from "@/features/live/hooks/use-live";
+import { useSession } from "@/features/auth/hooks/use-session";
+import { useLiveActions, useLiveBoard, useLiveOffline } from "@/features/live/hooks/use-live";
+import { deviceName, type SyncedResults } from "@/features/live/offline";
+import type { OfflineRecord } from "@excursia/contracts/live";
 import { Failed, Loading } from "../bits";
 
 const STATUS: Record<LiveMeeting["status"], { label: string; tone: string }> = {
@@ -30,11 +33,15 @@ export function LiveBoardView({ eventId, day, closeOut }: { eventId: string; day
   const [shown, setShown] = useState<string | null>(day);
   const [tab, setTab] = useState<"board" | "closeout">(closeOut ? "closeout" : "board");
   const [pick, setPick] = useState<string | null>(null);
-  const q = useLiveBoard(eventId, shown);
+  const session = useSession();
+  const [device] = useState(() => deviceName(session.data?.user.name ?? ""));
+  const q = useLiveBoard(eventId, shown, device);
+  const off = useLiveOffline(eventId, q.data, q.dataUpdatedAt);
   if (q.isPending) return <Loading />;
   if (q.isError && !q.data) return <Failed error={q.error} />;
   const b = q.data!;
   const picked = b.meetings.find((m) => m.id === pick);
+  const queued = (meetingId: string) => off.queue.find((r) => r.meetingId === meetingId);
   return (
     <>
       <PageHeader
@@ -46,6 +53,24 @@ export function LiveBoardView({ eventId, day, closeOut }: { eventId: string; day
         }
         actions={<Freshness updatedAt={q.dataUpdatedAt} failing={q.isError} />}
       />
+      {q.isError && (
+        <p role="status" className="mb-4 rounded-md bg-warn-50 px-4 py-3 text-[14px] text-ink">
+          <b className="font-medium">No connection{off.since ? ` since ${off.since.slice(11)}` : ""}.</b> The board shows what this phone last had. Outcomes you record wait on this phone
+          {off.queue.length ? ` (${off.queue.length} waiting)` : ""} and send themselves when the connection is back.
+        </p>
+      )}
+      {off.failed && off.queue.length > 0 && (
+        <p role="alert" className="mb-4 rounded-md bg-bad-50 px-4 py-3 text-[14px] text-bad">
+          {off.queue.length} record{off.queue.length === 1 ? "" : "s"} on this phone couldn&apos;t be sent: {off.failed} They stay here; tell the Deal Room lead.
+        </p>
+      )}
+      {!q.isError && !off.failed && off.queue.length > 0 && (
+        <p role="status" className="mb-4 rounded-md bg-paper-200 px-4 py-3 text-[14px]">
+          Sending {off.queue.length} record{off.queue.length === 1 ? "" : "s"} kept on this phone…
+        </p>
+      )}
+      {off.synced && <Synced summary={off.synced} b={b} onDismiss={off.dismiss} />}
+      {b.conflicts.length > 0 && <Conflicts eventId={eventId} day={shown} b={b} record={off.record} />}
       {!b.inSummit && (
         <p className="mb-4 rounded-md bg-paper-200 px-4 py-3 text-[14px]">The summit isn&apos;t on today. This is {fmtStamp(`${b.day} 00:00`, false)} as planned; starting meetings and recording outcomes open on the day.</p>
       )}
@@ -86,7 +111,7 @@ export function LiveBoardView({ eventId, day, closeOut }: { eventId: string; day
           <Attention b={b} onPick={setPick} />
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
             <div className="min-w-0 space-y-3">
-              <Rooms b={b} pick={pick} onPick={setPick} />
+              <Rooms b={b} pick={pick} onPick={setPick} queued={(id) => !!queued(id)} />
             </div>
             {/* beside the board on a big screen; on a phone, a sheet from the bottom, where the thumb is */}
             {picked && <button className="fixed inset-0 z-30 bg-black/30 lg:hidden" aria-label="Close the meeting" onClick={() => setPick(null)} />}
@@ -107,7 +132,7 @@ export function LiveBoardView({ eventId, day, closeOut }: { eventId: string; day
                   </button>
                 </div>
               )}
-              {picked ? <Actions key={picked.id} eventId={eventId} day={shown} b={b} m={picked} /> : <Empty>Tap a meeting to start it, record its outcome or offer a no-show&apos;s slot.</Empty>}
+              {picked ? <Actions key={picked.id} eventId={eventId} day={shown} b={b} m={picked} waiting={queued(picked.id)} record={off.record} /> : <Empty>Tap a meeting to start it, record its outcome or offer a no-show&apos;s slot.</Empty>}
             </div>
           </div>
         </>
@@ -167,7 +192,7 @@ function Attention({ b, onPick }: { b: LiveBoard; onPick: (id: string) => void }
 }
 
 /** Each room and table as a row of the day's meetings, opened on the one happening now or next. */
-function Rooms({ b, pick, onPick }: { b: LiveBoard; pick: string | null; onPick: (id: string) => void }) {
+function Rooms({ b, pick, onPick, queued }: { b: LiveBoard; pick: string | null; onPick: (id: string) => void; queued: (meetingId: string) => boolean }) {
   const rows = useMemo(() => {
     const out: { key: string; label: string; list: LiveMeeting[] }[] = [];
     for (const r of b.rooms)
@@ -187,7 +212,7 @@ function Rooms({ b, pick, onPick }: { b: LiveBoard; pick: string | null; onPick:
           <h3 className="mb-2 text-[13px] font-medium">{r.label}</h3>
           <Row focus={r.list.find((m) => m.end > b.event.now)?.id}>
             {r.list.map((m) => (
-              <Tile key={m.id} m={m} now={b.event.now} on={pick === m.id} onPick={() => onPick(m.id)} />
+              <Tile key={m.id} m={m} now={b.event.now} on={pick === m.id} onPick={() => onPick(m.id)} waiting={queued(m.id)} />
             ))}
           </Row>
         </section>
@@ -216,8 +241,9 @@ function Row({ focus, children }: { focus?: string; children: ReactNode }) {
   );
 }
 
-function Tile({ m, now, on, onPick }: { m: LiveMeeting; now: string; on: boolean; onPick: () => void }) {
-  const s = STATUS[m.status];
+function Tile({ m, now, on, onPick, waiting }: { m: LiveMeeting; now: string; on: boolean; onPick: () => void; waiting: boolean }) {
+  // a record kept on this phone shows here until it is sent
+  const s = waiting ? { label: "On this phone", tone: "bg-warn-50 text-ink" } : STATUS[m.status];
   const nowish = m.start <= now && now < m.end;
   const ring = on ? "border-ink" : m.flag?.kind === "no-show" ? "border-bad" : m.flag ? "border-warn" : nowish ? "border-ok" : "border-line";
   return (
@@ -244,8 +270,8 @@ function Arrived({ label, at }: { label: string; at: string | null }) {
 }
 
 /** One meeting: who, whether they are in, and the one tap for what comes next. */
-function Actions({ eventId, day, b, m }: { eventId: string; day: string | null; b: LiveBoard; m: LiveMeeting }) {
-  const act = useLiveActions(eventId, day);
+function Actions({ eventId, day, b, m, waiting, record }: { eventId: string; day: string | null; b: LiveBoard; m: LiveMeeting; waiting?: OfflineRecord; record: (meetingId: string, input: OutcomeEntry) => void }) {
+  const act = useLiveActions(eventId, day, record);
   const recorded = m.status === "Held" || m.status === "No-show";
   const [paper, setPaper] = useState<string | null>(null);
   const [attendance, setAttendance] = useState<"Held" | "No-show">(!m.seeker.arrived || !m.provider.arrived ? (m.flag?.kind === "no-show" ? "No-show" : "Held") : "Held");
@@ -259,7 +285,7 @@ function Actions({ eventId, day, b, m }: { eventId: string; day: string | null; 
   // one id per record made here, so a retry or a second tap is recorded once
   const [clientId, setClientId] = useState(() => `web-${m.id}-${Date.now().toString(36)}`);
   const error = act.start.error ?? act.outcome.error ?? act.refill.error;
-  const canForm = m.can.record || (m.can.paper && paper !== null);
+  const canForm = !waiting && (m.can.record || (m.can.paper && paper !== null));
   const s = STATUS[m.status];
   const submit = () =>
     act.outcome.mutate(
@@ -303,6 +329,11 @@ function Actions({ eventId, day, b, m }: { eventId: string; day: string | null; 
         </p>
       )}
 
+      {waiting && (
+        <p className="mt-4 rounded-md bg-warn-50 px-3 py-2 text-[14px] text-ink">
+          <b className="font-medium">Recorded on this phone at {waiting.at.slice(11)}:</b> {waiting.attendance === "No-show" ? "a no-show" : `held, ${waiting.outcome?.category.toLowerCase()}`}. It is sent when the connection is back.
+        </p>
+      )}
       {m.can.start && (
         <button className="btn-secondary mt-4 w-full sm:w-auto" disabled={act.start.isPending} onClick={() => act.start.mutate(m.id)}>
           {act.start.isPending ? "Starting…" : "Mark it under way"}
@@ -488,6 +519,111 @@ function CloseOut({ b }: { b: LiveBoard }) {
         </ul>
         <p className="mt-4 border-t border-line pt-3 text-[13px] text-slate">{c.reportSentAt ? `The day's report went to the lead at ${c.reportSentAt.slice(11)}.` : "The day's report goes to the lead at 19:00."}</p>
       </Section>
+      {b.incidents.length > 0 && (
+        <Section title="Outages today" className="lg:col-span-2">
+          <ul className="space-y-2 text-[14px]">
+            {b.incidents.map((i) => (
+              <li key={i.id}>
+                <b className="font-medium">
+                  {i.startedAt.slice(11)} to {i.endedAt ? i.endedAt.slice(11) : "now"}
+                </b>
+                : {i.cause}.{" "}
+                {i.synced + i.duplicates + i.conflicts === 0
+                  ? "Nothing was recorded on it meanwhile."
+                  : [i.synced ? `${i.synced} synced` : "", i.duplicates ? `${i.duplicates} already on record` : "", i.conflicts ? `${i.conflicts} for the lead to choose` : ""].filter(Boolean).join(", ") + "."}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
     </div>
+  );
+}
+
+/** What the last sync did with this phone's records: nothing lost, and why anything was refused. */
+function Synced({ summary, b, onDismiss }: { summary: SyncedResults; b: LiveBoard; onDismiss: () => void }) {
+  const r = summary.results;
+  const n = (k: string) => r.filter((x) => x.result === k).length;
+  const refused = r.filter((x) => x.result === "refused");
+  const when = (id: string) => b.meetings.find((m) => m.id === id)?.start.slice(11) ?? "";
+  return (
+    <section role="status" className="mb-4 rounded-md bg-ok-50 px-4 py-3 text-[14px] text-ink">
+      <div className="flex items-start justify-between gap-3">
+        <p>
+          <b className="font-medium">Back online.</b>{" "}
+          {[
+            n("recorded") ? `${n("recorded")} record${n("recorded") === 1 ? "" : "s"} from this phone synced` : "",
+            n("duplicate") ? `${n("duplicate")} already on record` : "",
+            n("conflict") ? `${n("conflict")} disagree${n("conflict") === 1 ? "s" : ""} with another phone's record: the lead chooses` : "",
+            refused.length ? `${refused.length} not recorded` : "",
+          ]
+            .filter(Boolean)
+            .join(", ")
+            .replace(/^./, (c) => c.toUpperCase())}
+          .
+        </p>
+        <button className="btn-quiet btn-sm shrink-0" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+      {refused.length > 0 && (
+        <ul className="mt-2 list-disc pl-5">
+          {refused.map((x) => (
+            <li key={x.clientId}>
+              {when(x.meetingId)}: not recorded. {x.reason}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Two phones recorded a meeting differently during an outage: both kept, and the lead chooses. */
+function Conflicts({ eventId, day, b, record }: { eventId: string; day: string | null; b: LiveBoard; record: (meetingId: string, input: OutcomeEntry) => void }) {
+  const act = useLiveActions(eventId, day, record);
+  return (
+    <section className="mb-4 rounded-[var(--r-md)] border border-line-strong bg-white" aria-labelledby="conflicts-title">
+      <h2 id="conflicts-title" className="h2 px-4 pt-3">
+        Two phones disagree, {b.conflicts.length}
+      </h2>
+      <p className="px-4 text-[13px] text-slate">{b.can.resolve ? "Choose which record stands. The other is kept in the meeting's history." : "Recorded differently on two phones during an outage. The lead chooses; nothing is overwritten meanwhile."}</p>
+      {act.resolve.error && (
+        <p role="alert" className="mx-4 mt-2 rounded-md bg-bad-50 px-3 py-2 text-[14px] text-bad">
+          {act.resolve.error.message}
+        </p>
+      )}
+      <ul className="mt-2">
+        {b.conflicts.map((c) => (
+          <li key={c.id} className="border-t border-line px-4 py-3 text-[14px]">
+            <p>
+              <b className="font-medium tabular-nums">{c.start.slice(11)}</b> · {c.where} · {c.pair}
+            </p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <div className="rounded-md bg-paper-200 px-3 py-2">
+                <span className="block text-[13px] text-slate">On record, by {c.kept.by} at {c.kept.at.slice(11)}</span>
+                {c.kept.label}
+                {b.can.resolve && (
+                  <button className="btn-secondary btn-sm mt-2 w-full" disabled={act.resolve.isPending} onClick={() => act.resolve.mutate({ conflictId: c.id, chose: "kept" })}>
+                    Keep this one
+                  </button>
+                )}
+              </div>
+              <div className="rounded-md bg-paper-200 px-3 py-2">
+                <span className="block text-[13px] text-slate">
+                  From {c.incoming.device}, by {c.incoming.by} at {c.incoming.at.slice(11)}
+                </span>
+                {c.incoming.label}
+                {b.can.resolve && (
+                  <button className="btn-secondary btn-sm mt-2 w-full" disabled={act.resolve.isPending} onClick={() => act.resolve.mutate({ conflictId: c.id, chose: "incoming" })}>
+                    Use this one
+                  </button>
+                )}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

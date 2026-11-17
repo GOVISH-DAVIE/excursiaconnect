@@ -63,6 +63,10 @@ export type DrMeetAction =
   | { type: "dr/outcome"; meetingId: string; attendance: "Held" | "No-show" | "Cancelled"; noShow?: "seeker" | "provider" | "both"; outcome?: Omit<DrOutcome, "by" | "at">; device?: string; paper?: string }
   | { type: "dr/refill"; meetingId: string; matchId: string }
   | { type: "dr/dailyReport"; eventId: string; day: string }
+  /** an outcome recorded on a phone while it was offline, sent when it reconnects (M3.5) */
+  | { type: "dr/syncOutcome"; meetingId: string; device: string; record: OfflineRecord }
+  /** an outage a device lived through, with what its sync did: kept for the lead (M3.5) */
+  | { type: "dr/logIncident"; device: string; startedAt: string; synced: number; duplicates: number; conflicts: number }
   | { type: "dr/offline"; on: boolean }
   | { type: "dr/sync" }
   | { type: "dr/resolveConflict"; conflictId: string; chose: "kept" | "incoming" }
@@ -168,6 +172,28 @@ function closed(m: DrMeeting, cfg: DealRoomState["configs"][string], now: string
 function partiesOf(dr: DealRoomState, mt: DrMeeting) {
   const match = dr.matches.find((x) => x.id === mt.matchId)!;
   return { match, seeker: dr.apps.find((a) => a.id === match.seekerId)!, provider: dr.apps.find((a) => a.id === match.providerId)! };
+}
+
+/** An outcome as a phone recorded it while offline: its own id, and when it was recorded there. */
+export type OfflineRecord = { attendance: "Held" | "No-show"; noShow?: "seeker" | "provider" | "both"; outcome?: Omit<DrOutcome, "by" | "at" | "clientId">; clientId: string; at: string };
+
+/**
+ * What a record sent from an offline phone does, decided on what is stored now: recorded; a duplicate (the same id
+ * is already on record, or already waiting as a conflict); or a conflict, when the meeting already has a different
+ * record. A conflict is never settled by the order the phones reconnect in: the lead chooses.
+ */
+export function syncVerdict(dr: DealRoomState, meetingId: string, clientId: string): "record" | "duplicate" | "conflict" | "missing" {
+  const mt = dr.meetings.find((m) => m.id === meetingId);
+  if (!mt) return "missing";
+  if (mt.outcome?.clientId === clientId || dr.conflicts.some((c) => c.incoming.clientId === clientId)) return "duplicate";
+  if (mt.status === "Held" || mt.status === "No-show") return "conflict";
+  return "record";
+}
+
+/** A meeting's record as a conflict shows it: a no-show has no outcome of its own, so it is named as one. */
+function asRecorded(mt: DrMeeting, by: string, at: string): DrOutcome {
+  if (mt.outcome) return mt.outcome;
+  return { category: "No fit", notes: `Recorded as a no-show: ${mt.noShow === "both" ? "neither came" : mt.noShow === "seeker" ? "the seeker didn't come" : "the counterparty didn't come"}`, by, at, clientId: `noshow_${mt.id}` };
 }
 
 export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): AppState {
@@ -690,15 +716,58 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
       return withDr(state, dr);
     }
 
+    case "dr/syncOutcome": {
+      if (!drCan(me, "outcome")) return no(ctx, state, "Your role doesn't record outcomes");
+      const mt = dr.meetings.find((m) => m.id === action.meetingId);
+      if (!mt) return no(ctx, state, "No such meeting");
+      if (!["Confirmed", "In progress", "Held", "No-show"].includes(mt.status)) return no(ctx, state, mt.status === "Cancelled" ? "This meeting is cancelled" : "Only a confirmed meeting has an outcome");
+      const r = action.record;
+      if (r.attendance === "Held" && !r.outcome) return no(ctx, state, "Choose the outcome");
+      // as on the board: an outcome is recorded from half an hour before the start, never earlier
+      if (at < addMinutes(mt.start, -30)) return no(ctx, state, `It starts ${fmtStamp(mt.start)}: its outcome is recorded from half an hour before`);
+      // recorded on the phone at its own time, never later than the server's now and never long before the meeting
+      const when = r.at > at ? at : r.at < addMinutes(mt.start, -30) ? addMinutes(mt.start, -30) : r.at;
+      const verdict = syncVerdict(dr, mt.id, r.clientId);
+      if (verdict === "duplicate") return no(ctx, state, "Already recorded");
+      const device = action.device.trim().slice(0, 60) || "A phone";
+      const incoming: DrOutcome = r.outcome ? { ...r.outcome, by: me!.id, at: when, clientId: r.clientId } : { category: "No fit", notes: `Recorded as a no-show on ${device}: ${r.noShow === "both" || !r.noShow ? "neither came" : r.noShow === "seeker" ? "the seeker didn't come" : "the counterparty didn't come"}`, by: me!.id, at: when, clientId: r.clientId };
+      if (verdict === "conflict") {
+        // the meeting already has another record: both are kept, and the lead chooses
+        dr = { ...dr, conflicts: [...dr.conflicts, { id: ctx.newId("cf"), meetingId: mt.id, kept: asRecorded(mt, mt.history.at(-1)?.by ?? me!.id, mt.history.at(-1)?.at ?? at), incoming: { ...incoming, device, attendance: r.attendance, noShow: r.attendance === "No-show" ? (r.noShow ?? "both") : undefined } }] };
+        dr = patchMeeting(dr, mt.id, (m) => ({ ...m, history: [...m.history, { at, by: me!.id, what: `A different record came from ${device} after an outage: with the lead to choose` }] }));
+        return withDr(state, dr);
+      }
+      dr = patchMeeting(dr, mt.id, (m) => ({ ...m, history: [...m.history, { at, by: me!.id, what: `Recorded on ${device} at ${when.slice(11)} while offline; synced` }] }));
+      return withDr(state, applyOutcome(ctx, dr, dr.meetings.find((m) => m.id === mt.id)!, r.attendance, r.attendance === "No-show" ? (r.noShow ?? "both") : undefined, r.attendance === "Held" ? incoming : undefined, me!.id));
+    }
+
+    case "dr/logIncident": {
+      if (!drCan(me, "outcome") && !drCan(me, "liveboard")) return no(ctx, state, "Your role doesn't run the live board");
+      if (action.startedAt > at) return no(ctx, state, "An outage can't start in the future");
+      const device = action.device.trim().slice(0, 60) || "A phone";
+      const eventId = Object.keys(dr.configs)[0];
+      dr = { ...dr, incidents: [{ id: ctx.newId("inc"), startedAt: action.startedAt, endedAt: at, cause: `${device} lost the connection`, synced: action.synced, duplicates: action.duplicates, conflicts: action.conflicts }, ...dr.incidents] };
+      dr = send(ctx, dr, eventId, leadOf(dr, eventId), `Incident report: ${device} offline ${fmtStamp(action.startedAt)} to ${at.slice(11)}; ${action.synced} record${action.synced === 1 ? "" : "s"} synced, ${action.duplicates} duplicate${action.duplicates === 1 ? "" : "s"} dropped, ${action.conflicts} conflict${action.conflicts === 1 ? "" : "s"} to resolve`, "/dealroom/live", "Email");
+      return withDr(state, dr);
+    }
+
     case "dr/resolveConflict": {
-      if (me?.role !== "Lead") return state;
+      if (me?.role !== "Lead") return no(ctx, state, "Only the lead resolves a conflict");
       const c = dr.conflicts.find((x) => x.id === action.conflictId);
-      if (!c || c.resolved) return state;
+      if (!c) return no(ctx, state, "No such conflict");
+      if (c.resolved) return no(ctx, state, "This conflict is already resolved");
       dr = { ...dr, conflicts: dr.conflicts.map((x) => (x.id === c.id ? { ...x, resolved: { by: me.id, at, chose: action.chose } } : x)) };
       if (action.chose === "incoming") {
-        const { device, ...incoming } = c.incoming;
-        dr = patchMeeting(dr, c.meetingId, (m) => ({ ...m, outcome: incoming, history: [...m.history, { at, by: me.id, what: `Conflict resolved: kept the record from ${device}` }] }));
+        const { device, attendance, noShow, ...incoming } = c.incoming;
+        // a no-show from the phone makes the meeting a no-show; an outcome makes it held with that outcome
+        dr = patchMeeting(dr, c.meetingId, (m) =>
+          attendance === "No-show"
+            ? { ...m, status: "No-show", noShow: noShow ?? "both", outcome: undefined, history: [...m.history, { at, by: me.id, what: `Conflict resolved: kept the no-show from ${device}` }] }
+            : { ...m, status: "Held", noShow: undefined, outcome: incoming, history: [...m.history, { at, by: me.id, what: `Conflict resolved: kept the record from ${device}` }] },
+        );
         dr = exception(ctx, dr, Object.keys(dr.configs)[0], me.id, "Paper entry over an outcome", `Outcome replaced by the record from ${device}`, c.meetingId);
+      } else {
+        dr = patchMeeting(dr, c.meetingId, (m) => ({ ...m, history: [...m.history, { at, by: me.id, what: `Conflict resolved: kept the record on file over the one from ${c.incoming.device}` }] }));
       }
       return withDr(state, dr);
     }

@@ -23,9 +23,10 @@ export function createLiveRepo(db: Db) {
 
     /**
      * The board's version for a day: the day's meetings and sessions (how many, and the last change to any), the
-     * desk's arrivals, the settings (the evening report), and the minute, since late and no-show flags follow the clock.
+     * desk's arrivals, the settings (the evening report), the minute, since late and no-show flags follow the clock,
+     * and the person asking, since the board is shown by role.
      */
-    version: async (eventId: string, day: string, minute: string) => {
+    version: async (eventId: string, day: string, minute: string, who: string) => {
       const from = toInstant(`${day} 00:00`);
       const to = new Date(from.getTime() + 86_400_000);
       const [row] = await db.$queryRaw<{ m: string; s: string; a: string; c: string }[]>`
@@ -34,7 +35,8 @@ export function createLiveRepo(db: Db) {
           (select count(*)::text || ':' || coalesce(max(updated_at)::text, '') from dr_session where event_id = ${eventId} and starts_at >= ${from} and starts_at < ${to}) as s,
           (select count(*)::text || ':' || coalesce(max(at)::text, '') from arrival where event_id = ${eventId} and day = ${toDay(day)}) as a,
           (select coalesce(updated_at::text, '') from dr_config where event_id = ${eventId}) as c`;
-      return createHash("sha256").update(`${row.m}|${row.s}|${row.a}|${row.c}|${minute}`).digest("base64url").slice(0, 22);
+      // who is asking is part of it: the board shows each person what their role may do and see (sensitive notes)
+      return createHash("sha256").update(`${row.m}|${row.s}|${row.a}|${row.c}|${minute}|${who}`).digest("base64url").slice(0, 22);
     },
   };
 }

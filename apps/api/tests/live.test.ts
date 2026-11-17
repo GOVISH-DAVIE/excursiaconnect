@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { ErrorBody } from "@excursia/contracts/http";
-import { LiveBoard } from "@excursia/contracts/live";
+import { LiveBoard, SyncResult } from "@excursia/contracts/live";
 import { createDb } from "@excursia/db";
 import { seed } from "@excursia/domain/seed";
 import { createApp } from "../src/app";
@@ -18,6 +18,7 @@ import { dailyReports } from "../src/modules/live";
 import { createSeedRepo } from "../src/modules/seed/seed.repo";
 import { demoRows, demoUserId } from "../src/modules/seed/seed.service";
 import { toDay, toInstant } from "../src/persistence/time";
+import { addMinutes } from "@excursia/domain/time";
 import { hashToken, newToken } from "../src/security/secrets";
 
 const WEB = "https://events.example.co.ke";
@@ -87,8 +88,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("the live board", () => {
   test("two phones agree: unchanged, a poll is answered 304; after an outcome on one, the other's next poll has it", async () => {
     const a = await board("st_ops1");
     const b = await board("st_coord1");
-    expect(a.etag).toBe(b.etag);
     expect((await call("GET", L, "st_coord1", undefined, b.etag)).status).toBe(304);
+    // the board is shown by role: one person's version never answers another's poll on a shared phone
+    expect(a.etag).not.toBe(b.etag);
+    expect((await call("GET", L, "st_coord1", undefined, a.etag)).status).toBe(200);
     const target = a.board.meetings.find((m) => m.can.record && m.status === "In progress")!;
     const t0 = Date.now();
     const after = LiveBoard.parse(
@@ -131,6 +134,71 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("the live board", () => {
     const after = LiveBoard.parse((await call("POST", `${L}/${noShow.id}/refill`, "st_ops1", { matchId: noShow.refill[0].matchId })).json);
     expect(after.meetings.length).toBe(before + 1);
     expect(after.meetings.some((m) => m.status === "Proposed" || m.status === "Confirmed")).toBe(true);
+  });
+
+  test("a forced 10-minute outage loses nothing: two phones sync, a resend is dropped, a disagreement goes to the lead", async () => {
+    const { board: b } = await board("st_ops1");
+    const open = b.meetings.filter((m) => m.status === "In progress" || (m.status === "Confirmed" && m.start <= addMinutes(dr.clock, 25)));
+    expect(open.length).toBeGreaterThanOrEqual(3);
+    const [x, y, z] = open;
+    const down = dr.clock;
+    // phone A records x and y while the venue is offline; y reached the server before its answer was lost
+    const a = [
+      { meetingId: x.id, clientId: "phone-a-x", attendance: "Held", outcome: { category: "Follow-up meeting" }, at: addMinutes(down, 3) },
+      { meetingId: y.id, clientId: "phone-a-y", attendance: "Held", outcome: { category: "Information requested" }, at: addMinutes(down, 4) },
+    ];
+    expect((await call("POST", `${L}/${y.id}/outcome`, "st_ops1", { ...a[1], at: undefined, meetingId: undefined })).status).toBe(200);
+    // phone B records x differently, and z
+    const bq = [
+      { meetingId: x.id, clientId: "phone-b-x", attendance: "No-show", noShow: "provider", at: addMinutes(down, 6) },
+      { meetingId: z.id, clientId: "phone-b-z", attendance: "Held", outcome: { category: "Due diligence" }, at: addMinutes(down, 7) },
+    ];
+    // ten minutes later the connection is back: both phones send their queues
+    clock = toInstant(addMinutes(down, 10));
+    for (const id of ["st_ops1", "st_coord1", "st_lead"]) cookies[id] = await signedIn(demoUserId(id));
+    const ra = await call("POST", `${L}/sync`, "st_ops1", { device: "Joy's phone", offlineSince: down, records: a });
+    expect(ra.status).toBe(200);
+    expect(SyncResult.parse(ra.json).results.map((r) => [r.clientId, r.result])).toEqual([
+      ["phone-a-x", "recorded"],
+      ["phone-a-y", "duplicate"],
+    ]);
+    const rb = await call("POST", `${L}/sync`, "st_coord1", { device: "Achieng's phone", offlineSince: addMinutes(down, 1), records: bq });
+    expect(SyncResult.parse(rb.json).results.map((r) => [r.clientId, r.result])).toEqual([
+      ["phone-b-x", "conflict"],
+      ["phone-b-z", "recorded"],
+    ]);
+    // nothing lost: every record is on its meeting or waiting for the lead
+    const after = LiveBoard.parse((await call("GET", L, "st_lead")).json);
+    const on = (id: string) => after.meetings.find((m) => m.id === id)!;
+    expect(on(x.id)).toMatchObject({ status: "Held", outcome: { category: "Follow-up meeting" } });
+    expect(on(y.id).outcome!.category).toBe("Information requested");
+    expect(on(z.id).outcome!.category).toBe("Due diligence");
+    expect(after.conflicts).toEqual([expect.objectContaining({ meetingId: x.id, kept: expect.objectContaining({ label: "Follow-up meeting" }), incoming: expect.objectContaining({ device: "Achieng's phone", label: "No-show: the counterparty didn't come" }) })]);
+    expect(after.incidents.map((i) => [i.cause, i.synced, i.duplicates, i.conflicts]).sort()).toEqual([
+      ["Achieng's phone lost the connection", 1, 0, 1],
+      ["Joy's phone lost the connection", 1, 1, 0],
+    ]);
+    expect(await db.outboxMessage.count({ where: { recipient: "st_lead", subject: { startsWith: "Incident report:" } } })).toBe(2);
+    // sending a queue again changes nothing
+    expect(SyncResult.parse((await call("POST", `${L}/sync`, "st_coord1", { device: "Achieng's phone", offlineSince: null, records: bq })).json).results.map((r) => r.result)).toEqual(["duplicate", "duplicate"]);
+    // only the lead chooses; choosing the phone's record makes the meeting a no-show, logged
+    const c = after.conflicts[0];
+    expect(reason(await call("POST", `${L}/conflicts/${c.id}/resolve`, "st_coord1", { chose: "incoming" }))).toBe("Only the lead resolves a conflict");
+    const resolved = LiveBoard.parse((await call("POST", `${L}/conflicts/${c.id}/resolve`, "st_lead", { chose: "incoming" })).json);
+    expect(resolved.conflicts).toEqual([]);
+    expect(resolved.meetings.find((m) => m.id === x.id)).toMatchObject({ status: "No-show", noShow: "provider" });
+    clock = toInstant(dr.clock);
+    for (const id of ["st_ops1", "st_coord1", "st_lead"]) cookies[id] = await signedIn(demoUserId(id));
+  });
+
+  test("a record the rules refuse is reported with its reason, and the rest of the queue still goes", async () => {
+    const { board: b } = await board("st_ops1");
+    const target = b.meetings.find((m) => m.status === "Confirmed" && m.start > addMinutes(dr.clock, 60))!;
+    const ok = b.meetings.find((m) => m.status === "In progress" && !m.outcome);
+    const records = [{ meetingId: target.id, clientId: "c-early", attendance: "Held", outcome: { category: "No fit" }, at: dr.clock }, ...(ok ? [{ meetingId: ok.id, clientId: "c-ok", attendance: "Held", outcome: { category: "No fit" }, at: dr.clock }] : [])];
+    const r = SyncResult.parse((await call("POST", `${L}/sync`, "st_ops1", { device: "Joy's phone", offlineSince: null, records })).json);
+    expect(r.results[0]).toMatchObject({ clientId: "c-early", result: "refused" });
+    if (ok) expect(r.results[1]).toMatchObject({ clientId: "c-ok", result: "recorded" });
   });
 
   test("the 19:00 report goes to the lead once a summit evening", async () => {

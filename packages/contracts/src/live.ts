@@ -16,6 +16,7 @@ const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date");
 
 export const LiveParams = z.object({ eventId: EventId });
 export const LiveMeetingParams = LiveParams.extend({ meetingId: MeetingId });
+export const ConflictParams = LiveParams.extend({ conflictId: z.string().regex(/^cf_[a-z0-9_]{2,60}$/, "a conflict id") });
 export const LiveQuery = z.object({ day: Day.optional() });
 
 export const OutcomeEntry = z.object({
@@ -38,6 +39,19 @@ export const OutcomeEntry = z.object({
 });
 export type OutcomeEntry = z.infer<typeof OutcomeEntry>;
 export const RefillInput = z.object({ matchId: MatchId });
+
+/** An outcome a phone recorded while offline, with when it was recorded there (M3.5). */
+export const OfflineRecord = OutcomeEntry.omit({ paper: true }).extend({ meetingId: MeetingId, at: Wall });
+export type OfflineRecord = z.infer<typeof OfflineRecord>;
+
+/** A phone's queue, sent when it reconnects: the device, when it lost the connection, and what it recorded. */
+export const SyncInput = z.object({ device: z.string().trim().min(1).max(60), offlineSince: Wall.nullable(), records: z.array(OfflineRecord).max(200) });
+export type SyncInput = z.infer<typeof SyncInput>;
+export const SyncResult = z.object({
+  results: z.array(z.object({ clientId: z.string(), meetingId: z.string(), result: z.enum(["recorded", "duplicate", "conflict", "refused"]), reason: z.string().nullable() })),
+});
+export type SyncResult = z.infer<typeof SyncResult>;
+export const ResolveInput = z.object({ chose: z.enum(["kept", "incoming"]) });
 
 const Party = z.object({ id: z.string(), org: z.string(), person: z.string(), arrived: z.string().nullable() });
 
@@ -88,6 +102,20 @@ export const LiveBoard = z.object({
     arrivals: z.number(),
     reportSentAt: Wall.nullable(),
   }),
-  can: z.object({ liveboard: z.boolean(), outcome: z.boolean(), schedule: z.boolean() }),
+  /** records from offline phones that disagree with the one on file, still for the lead to choose (M3.5) */
+  conflicts: z.array(
+    z.object({
+      id: z.string(),
+      meetingId: z.string(),
+      start: Wall,
+      where: z.string(),
+      pair: z.string(),
+      kept: z.object({ label: z.string(), by: z.string(), at: Wall }),
+      incoming: z.object({ label: z.string(), by: z.string(), at: Wall, device: z.string() }),
+    }),
+  ),
+  /** the outages phones reported this day, with what their sync did */
+  incidents: z.array(z.object({ id: z.string(), startedAt: Wall, endedAt: Wall.nullable(), cause: z.string(), synced: z.number(), duplicates: z.number(), conflicts: z.number() })),
+  can: z.object({ liveboard: z.boolean(), outcome: z.boolean(), schedule: z.boolean(), resolve: z.boolean() }),
 });
 export type LiveBoard = z.infer<typeof LiveBoard>;

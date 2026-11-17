@@ -7,9 +7,10 @@
  * - Consents, access, the outbox and the counters are plain columns, with nothing left over.
  * - Busy slots are derived: every meeting that holds a room, a table or a person gets rows the database's
  *   exclusion constraints check. They are never read back; the meetings are the truth.
- * - What only the prototype has (the demo clock, the acting staff member, the scripted day, the offline queue)
- *   is not stored. The aggregate-wide extras with no table of their own (the live window, the archive date,
- *   support grants, the admin log) ride with the config.
+ * - What only the prototype has (the demo clock, the acting staff member, the scripted day, the offline queue,
+ *   which on the server waits on each phone) is not stored. The aggregate-wide extras with no table of their own
+ *   (the live window, the archive date, support grants, the admin log, the conflicts from offline phones) ride
+ *   with the config.
  *
  * Reading back returns the same DealRoomState, apart from the order of arrays (rows come back by id) and the
  * prototype-only fields (tests/mappers.test.ts).
@@ -21,6 +22,7 @@ import type {
   DrAccess,
   DrApplication,
   DrConfig,
+  DrConflict,
   DrConsent,
   DrException,
   DrHistory,
@@ -44,6 +46,8 @@ export type DrConfigRecord = {
   archivedAt?: string;
   grants: DrSupportGrant[];
   adminLog: DrHistory[];
+  /** outcomes from offline phones that disagree with the record on file, for the lead to choose (M3.5) */
+  conflicts?: DrConflict[];
 };
 
 /** A slot a meeting holds. Written with SQL, since Prisma cannot write a tstzrange. */
@@ -132,7 +136,7 @@ export function dealRoomToRows(dr: DealRoomState, eventId: string, now: string):
       busy.push({ id: `${x.id}:${key}`, eventId, source: "session" as const, sourceId: x.id, key, from: toInstant(x.start), to: toInstant(x.end), active: true, confirmBy: null });
   }
 
-  const record: DrConfigRecord = { config, liveWindow: dr.liveWindow, archivedAt: dr.archivedAt, grants: dr.grants, adminLog: dr.adminLog };
+  const record: DrConfigRecord = { config, liveWindow: dr.liveWindow, archivedAt: dr.archivedAt, grants: dr.grants, adminLog: dr.adminLog, ...(dr.conflicts.length ? { conflicts: dr.conflicts } : {}) };
 
   return {
     config: { eventId, record: json(record) },
@@ -271,7 +275,7 @@ export function dealRoomFromRows(eventId: string, rows: DealRoomStored, clock: s
         }),
       ),
     queue: [],
-    conflicts: [],
+    conflicts: cfg.conflicts ?? [],
     incidents: records<DrIncident>(rows.incidents),
     offline: false,
     liveWindow: cfg.liveWindow,

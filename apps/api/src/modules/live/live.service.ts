@@ -6,7 +6,9 @@
  * writing into meeting records. Starting a meeting, recording its outcome and refilling a no-show go through the
  * rules under the event's lock. An outcome carries the device's own id: sent twice, it is recorded once.
  */
-import type { LiveBoard, LiveMeeting, OutcomeEntry } from "@excursia/contracts/live";
+import type { LiveBoard, LiveMeeting, OutcomeEntry, SyncInput, SyncResult } from "@excursia/contracts/live";
+import { apply } from "@excursia/domain/core/reducer";
+import { syncVerdict } from "@excursia/domain/dealroom/meetings";
 import type { Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor } from "@excursia/domain/ctx";
 import { PROGRAMME_DAYS, boardFlag, drCan, occupies, readyToSchedule, sessionOpenOutcomes, staffName } from "@excursia/domain/dealroom/logic";
@@ -44,9 +46,9 @@ export function createLiveService({ repo, drRepo, commands, now }: LiveDeps) {
 
   /** The board's version for a day, without loading the Deal Room: what a poll asks first. */
   async function version(session: Resolved, eventId: string, asked: string | undefined): Promise<string> {
-    await member(session, eventId);
+    const { staff } = await member(session, eventId);
     const at = nairobiNow(now());
-    return repo.version(eventId, dayFor(await repo.days(eventId), asked, at), at);
+    return repo.version(eventId, dayFor(await repo.days(eventId), asked, at), at, staff.id);
   }
 
   async function board(session: Resolved, eventId: string, asked: string | undefined): Promise<LiveBoard> {
@@ -56,7 +58,7 @@ export function createLiveService({ repo, drRepo, commands, now }: LiveDeps) {
     const at = nairobiNow(now());
     const state = stateOf(eventId, stored, at);
     const day = dayFor(daysOf(state, eventId), asked, at);
-    const [arrivals, v] = await Promise.all([repo.arrivals(eventId, day), repo.version(eventId, day, at)]);
+    const [arrivals, v] = await Promise.all([repo.arrivals(eventId, day), repo.version(eventId, day, at, staff.id)]);
     return build(state, eventId, day, at, staff, arrivals, v);
   }
 
@@ -153,8 +155,91 @@ export function createLiveService({ repo, drRepo, commands, now }: LiveDeps) {
         arrivals: checkedIn,
         reportSentAt: cfg.dailyReports?.[day] ?? null,
       },
-      can: { liveboard: drCan(staff, "liveboard"), outcome: drCan(staff, "outcome"), schedule: drCan(staff, "schedule") },
+      conflicts: dr.conflicts
+        .filter((c) => !c.resolved)
+        .flatMap((c) => {
+          const m = dr.meetings.find((x) => x.id === c.meetingId && x.eventId === eventId);
+          if (!m) return [];
+          const match = dr.matches.find((x) => x.id === m.matchId)!;
+          const org = (id: string) => dr.apps.find((a) => a.id === id)?.org.name ?? "";
+          const label = (o: { category: string; notes?: string; attendance?: string; noShow?: string }) =>
+            o.attendance === "No-show" || o.notes?.startsWith("Recorded as a no-show") ? (o.notes?.replace(/^Recorded as a no-show( on [^:]+)?: /, "No-show: ") ?? "No-show") : o.category;
+          return [
+            {
+              id: c.id,
+              meetingId: m.id,
+              start: m.start,
+              where: m.link ? "Online" : room(m.roomId),
+              pair: `${org(match.seekerId)} with ${org(match.providerId)}`,
+              kept: { label: label(c.kept), by: staffName(dr, c.kept.by), at: c.kept.at },
+              incoming: { label: label(c.incoming), by: staffName(dr, c.incoming.by), at: c.incoming.at, device: c.incoming.device },
+            },
+          ];
+        }),
+      incidents: dr.incidents.filter((i) => i.startedAt.slice(0, 10) === day).map((i) => ({ id: i.id, startedAt: i.startedAt, endedAt: i.endedAt ?? null, cause: i.cause, synced: i.synced, duplicates: i.duplicates, conflicts: i.conflicts })),
+      can: { liveboard: drCan(staff, "liveboard"), outcome: drCan(staff, "outcome"), schedule: drCan(staff, "schedule"), resolve: staff.role === "Lead" },
     };
+  }
+
+  /**
+   * A phone's queue, sent when it reconnects. Each record is tried in turn against what is stored now, under the
+   * event's lock: recorded, a duplicate of one already there, a conflict for the lead, or refused with the rule's
+   * reason (a meeting cancelled meanwhile, say). None of them stops the others. The outage is logged with the tally.
+   */
+  async function sync(session: Resolved, eventId: string, input: SyncInput, day: string | undefined, ip: string | null): Promise<SyncResult & { board: LiveBoard }> {
+    const { actor } = await member(session, eventId);
+    let results: SyncResult["results"] = [];
+    await commands.run({
+      eventId,
+      actor,
+      userId: session.user.id,
+      ip,
+      actions: (s, ctx) => {
+        results = [];
+        const keep: Action[] = [];
+        let state = s;
+        for (const r of input.records) {
+          const verdict = syncVerdict(state.dealRoom, r.meetingId, r.clientId);
+          if (verdict === "duplicate") {
+            results.push({ clientId: r.clientId, meetingId: r.meetingId, result: "duplicate", reason: null });
+            continue;
+          }
+          const o = r.outcome;
+          const action: Action = {
+            type: "dr/syncOutcome",
+            meetingId: r.meetingId,
+            device: input.device,
+            record: {
+              attendance: r.attendance,
+              noShow: r.attendance === "No-show" ? (r.noShow ?? "both") : undefined,
+              outcome: r.attendance === "Held" && o ? { category: o.category, nextAction: o.nextAction || undefined, owner: o.nextAction ? o.owner : undefined, due: o.nextAction ? o.due : undefined, notes: o.notes || undefined, sensitive: o.sensitive || undefined } : undefined,
+              clientId: r.clientId,
+              at: r.at,
+            },
+          };
+          // tried here first, so one record the rules refuse doesn't stop the rest
+          const tried = apply(state, action, ctx);
+          if (tried.refusal) {
+            results.push({ clientId: r.clientId, meetingId: r.meetingId, result: "refused", reason: tried.refusal });
+            continue;
+          }
+          state = tried.state;
+          keep.push(action);
+          results.push({ clientId: r.clientId, meetingId: r.meetingId, result: verdict === "conflict" ? "conflict" : "recorded", reason: null });
+        }
+        if (input.offlineSince)
+          keep.push({
+            type: "dr/logIncident",
+            device: input.device,
+            startedAt: input.offlineSince > ctx.now ? ctx.now : input.offlineSince,
+            synced: results.filter((x) => x.result === "recorded").length,
+            duplicates: results.filter((x) => x.result === "duplicate").length,
+            conflicts: results.filter((x) => x.result === "conflict").length,
+          });
+        return keep;
+      },
+    });
+    return { results, board: await board(session, eventId, day) };
   }
 
   /** A change on the day, through the rules; then the board as it is now, so the phone shows it at once. */
@@ -197,6 +282,22 @@ export function createLiveService({ repo, drRepo, commands, now }: LiveDeps) {
         };
       }),
     refill: (session: Resolved, eventId: string, meetingId: string, matchId: string, day: string | undefined, ip: string | null) => onMeeting(session, eventId, meetingId, day, ip, () => ({ type: "dr/refill", meetingId, matchId })),
+    sync,
+    resolve: async (session: Resolved, eventId: string, conflictId: string, chose: "kept" | "incoming", day: string | undefined, ip: string | null) => {
+      const { actor } = await member(session, eventId);
+      await commands.run({
+        eventId,
+        actor,
+        userId: session.user.id,
+        ip,
+        owned: (s) => {
+          const c = s.dealRoom.conflicts.find((x) => x.id === conflictId);
+          if (!c || !s.dealRoom.meetings.some((m) => m.id === c.meetingId && m.eventId === eventId)) throw new HttpError("not_found", "No such conflict in this Deal Room.");
+        },
+        actions: () => [{ type: "dr/resolveConflict", conflictId, chose }],
+      });
+      return board(session, eventId, day);
+    },
   };
 }
 export type LiveService = ReturnType<typeof createLiveService>;
