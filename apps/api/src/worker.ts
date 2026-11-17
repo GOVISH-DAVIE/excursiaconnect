@@ -13,6 +13,7 @@ import { createOutboxRepo } from "./modules/outbox/outbox.repo";
 import { createOutboxService } from "./modules/outbox/outbox.service";
 import { introLapses } from "./modules/matching";
 import { meetingJobs } from "./modules/meetings";
+import { dailyReports } from "./modules/live";
 import { paymentsService } from "./modules/payments";
 import { mpesaFor } from "./payments/mpesa";
 import { rulesClock } from "./clock";
@@ -31,6 +32,7 @@ const mpesa = mpesaFor(config);
 const payments = paymentsService({ db, now: rulesClock(config), mpesa, callbackBase: () => "" });
 const lapses = introLapses({ db, now: rulesClock(config) });
 const meetings = meetingJobs({ db, now: rulesClock(config) });
+const reports = dailyReports({ db, now: rulesClock(config) });
 /** Fee reminders are due by the day: looking every ten minutes is plenty. */
 const REMIND_EVERY_MS = 10 * 60_000;
 let remindedAt = 0;
@@ -103,6 +105,9 @@ async function tick() {
       meetingsAt = Date.now();
       const m = await meetings();
       if (m.lapsed || m.reminded) console.log(`[worker] meetings: ${m.lapsed} proposal${m.lapsed === 1 ? "" : "s"} lapsed, ${m.reminded} reminder${m.reminded === 1 ? "" : "s"} sent`);
+      // each summit evening's report to the lead goes at 19:00, once: the same minute's round looks for it
+      const r = await reports();
+      if (r) console.log(`[worker] the daily Deal Room report went to ${r} lead${r === 1 ? "" : "s"}`);
     }
   } catch (e) {
     console.error("[worker] meetings round failed", e);

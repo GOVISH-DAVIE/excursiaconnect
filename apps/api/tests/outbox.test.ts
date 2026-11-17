@@ -32,6 +32,7 @@ describe("the email around a message", () => {
     expect(linkFor(WEB, staff, "/dealroom/meetings?tab=Changes")).toBe(`${WEB}/team/meetings?tab=changes`);
     expect(linkFor(WEB, staff, "/dealroom/meetings")).toBe(`${WEB}/team/meetings`);
     expect(linkFor(WEB, staff, "/dealroom/sessions")).toBe(`${WEB}/team/sessions`);
+    expect(linkFor(WEB, staff, "/dealroom/reports?day=2027-02-15")).toBe(`${WEB}/team/live?tab=closeout&day=2027-02-15`);
     expect(linkFor(WEB, staff, "/dealroom/matches/mx_abc123")).toBe(`${WEB}/team/matching/mx_abc123`);
     expect(linkFor(WEB, { ...staff, kind: "user" }, "/team/organisation")).toBe(`${WEB}/team/organisation`);
   });

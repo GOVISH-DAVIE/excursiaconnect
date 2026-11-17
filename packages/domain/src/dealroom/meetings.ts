@@ -62,6 +62,7 @@ export type DrMeetAction =
   | { type: "dr/startMeeting"; meetingId: string }
   | { type: "dr/outcome"; meetingId: string; attendance: "Held" | "No-show" | "Cancelled"; noShow?: "seeker" | "provider" | "both"; outcome?: Omit<DrOutcome, "by" | "at">; device?: string; paper?: string }
   | { type: "dr/refill"; meetingId: string; matchId: string }
+  | { type: "dr/dailyReport"; eventId: string; day: string }
   | { type: "dr/offline"; on: boolean }
   | { type: "dr/sync" }
   | { type: "dr/resolveConflict"; conflictId: string; chose: "kept" | "incoming" }
@@ -575,7 +576,7 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
     /* ----- summit day (DO-7 to DO-11) ----- */
     case "dr/arrive": {
       const app = dr.apps.find((a) => a.delegateId === action.delegateId);
-      if (!app) return state;
+      if (!app) return no(ctx, state, "This badge isn't a Deal Room participant's");
       const day = at.slice(0, 10);
       const side = app.type;
       dr = {
@@ -591,19 +592,27 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
     }
 
     case "dr/startMeeting": {
+      // a member of the team on the day; the prototype's door may start one too
+      if (ctx.actor?.kind === "staff" && !drCan(me, "liveboard") && !drCan(me, "outcome")) return no(ctx, state, "Your role doesn't run the live board");
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      if (!mt || mt.status !== "Confirmed") return state;
+      if (!mt) return no(ctx, state, "No such meeting");
+      if (mt.status === "In progress") return no(ctx, state, "This meeting is already under way");
+      if (mt.status !== "Confirmed") return no(ctx, state, mt.status === "Proposed" ? "Both sides haven't confirmed this meeting" : `This meeting is ${mt.status.toLowerCase()}`);
+      if (at.slice(0, 10) !== mt.start.slice(0, 10) || at < addMinutes(mt.start, -15)) return no(ctx, state, `It starts ${fmtStamp(mt.start)}: a meeting is marked under way from 15 minutes before`);
       return withDr(state, patchMeeting(dr, mt.id, (m) => ({ ...m, status: "In progress", history: [...m.history, { at, by: me?.id ?? "door", what: "In progress" }] })));
     }
 
     case "dr/outcome": {
-      if (!drCan(me, "outcome")) return state;
+      if (!drCan(me, "outcome")) return no(ctx, state, "Your role doesn't record outcomes");
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      if (!mt || !["Confirmed", "In progress", "Held", "No-show"].includes(mt.status)) return state;
-      if (action.attendance === "Held" && !action.outcome) return state;
+      if (!mt) return no(ctx, state, "No such meeting");
+      if (!["Confirmed", "In progress", "Held", "No-show"].includes(mt.status)) return no(ctx, state, mt.status === "Cancelled" ? "This meeting is cancelled" : "Only a confirmed meeting has an outcome");
+      if (action.attendance === "Held" && !action.outcome) return no(ctx, state, "Choose the outcome");
+      if (action.attendance === "Held" && action.outcome?.nextAction?.trim() && !action.outcome.owner) return no(ctx, state, "A next action needs its owner");
       // an outcome already on record is never silently replaced: only a paper-sheet entry with a reason, logged (Flow 7 step 6)
       const recorded = mt.status === "Held" || mt.status === "No-show";
-      if (recorded && !action.paper?.trim()) return state;
+      if (recorded && !action.paper?.trim()) return no(ctx, state, "This meeting already has an outcome: give the reason the paper sheet replaces it");
+      if (!recorded && at < addMinutes(mt.start, -30)) return no(ctx, state, `It starts ${fmtStamp(mt.start)}: its outcome is recorded from half an hour before`);
       const outcome: DrOutcome | undefined = action.outcome ? { ...action.outcome, by: me!.id, at } : undefined;
       if (recorded) {
         const was = mt.outcome ? `${mt.outcome.category} by ${staffName(dr, mt.outcome.by)}` : mt.status;
@@ -620,16 +629,32 @@ export function drMeetReducer(state: AppState, action: DrMeetAction, ctx: Ctx): 
 
     case "dr/refill": {
       // a no-show frees the slot: offer it to the next ready match of the party who came (PRD Meetings req. 10)
-      if (!drCan(me, "schedule")) return state;
+      if (!drCan(me, "schedule")) return no(ctx, state, "Your role doesn't schedule meetings");
       const mt = dr.meetings.find((m) => m.id === action.meetingId);
-      if (!mt || mt.status !== "No-show") return state;
+      if (!mt) return no(ctx, state, "No such meeting");
+      if (mt.status !== "No-show") return no(ctx, state, "Only a no-show's slot is offered again");
       const cfg = dr.configs[mt.eventId];
+      if (!readyToSchedule(dr, cfg).some((m) => m.id === action.matchId)) return no(ctx, state, "That pair isn't waiting for a slot");
       const times = slotTimes(cfg).map((t) => `${at.slice(0, 10)} ${t}`).filter((s) => s > at);
       for (const start of times) {
         const r = tryBook(ctx, state, { matchId: action.matchId, roomId: mt.roomId, table: mt.table, link: mt.link, start }, me!.id);
         if (!r.why) return r.state;
       }
-      return state;
+      return no(ctx, state, "No time is free later today at this table for both of them");
+    }
+
+    /** the server's job: the day's report to the lead at 19:00 each evening of summit week, once (DL-9) */
+    case "dr/dailyReport": {
+      if (ctx.actor?.kind !== "system") return no(ctx, state, "The daily report is sent by the system");
+      const cfg = dr.configs[action.eventId];
+      const ev = state.events.find((e) => e.id === action.eventId);
+      if (!cfg || !ev) return no(ctx, state, "No Deal Room for this event");
+      if (action.day < ev.startDate || action.day > ev.endDate) return no(ctx, state, "That day isn't in summit week");
+      if (at < `${action.day} 19:00`) return no(ctx, state, "The daily report goes at 19:00");
+      if (cfg.dailyReports?.[action.day]) return no(ctx, state, "That day's report was already sent");
+      dr = { ...dr, configs: { ...dr.configs, [cfg.eventId]: { ...cfg, dailyReports: { ...cfg.dailyReports, [action.day]: at } } } };
+      dr = send(ctx, dr, cfg.eventId, leadOf(dr, cfg.eventId), `Daily Deal Room report, ${fmtStamp(`${action.day} 00:00`, false)}`, `/dealroom/reports?day=${action.day}`, "Email");
+      return withDr(state, dr);
     }
 
     case "dr/offline": {

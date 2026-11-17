@@ -828,7 +828,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | M3.1 | **Matching and introductions**: candidates and fit, decisions, briefs, introductions and answers, intro expiry, consent per document, the access log, watermarked downloads | A pair is introduced and accepts; a document opens only under consent and is logged **Built 16 Nov 2026:** candidates with their fit, decisions with reasons, the brief, introductions with chosen documents, both answers, consent per document with withdrawal, the profile and stamped copies opened through two-minute links, every opening logged; then the business's teaser and its approval, the directory for verified counterparties, expressions of interest in the team's queue, view-only documents, and the email when an introduction expires unanswered. Notes below |
 | M3.2 | **Scheduling**: `DrBusy` with exclusion constraints, lapse release, caps under advisory locks, confirm and change, auto-propose as a job, .ics invites, reminders | The PRD's three 50-request bursts book no clash; auto-propose for 150 pairs finishes within 10 s **Built 17 Nov 2026:** the team's schedule with a slot picker, auto-propose, moves, cancellations and caps; each participant confirms, asks to move, answers a move and adds a meeting to its calendar; lapsed proposals release their slot and are told once; reminders a day and half an hour before. The bursts book 1, 4 and 6 of 50 with no clash; auto-propose drafts 150 pairs in about 1.7 s. Notes below |
 | M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server **Built 17 Nov 2026:** the team's Sessions page (plan, change, invite, cancel, attendance, outcomes) and sessions in each participant's schedule (accept or decline, with the reason when a meeting is in the way); every refusal says why; a session holds its room, host and whoever accepted in the database too. Door scans wait for the room doors (M2.2). Notes below |
-| M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds |
+| M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds **Built 17 Nov 2026:** the team's Live board (phone-first: a sheet from the bottom; beside the board on a big screen), arrivals read from the desk's own table, start, outcome and refill with reasons, an outcome recorded once however often it is sent, the close-out, and the 19:00 report as a worker job. Phones poll every 3 seconds against the board's version (304 when nothing changed); a change on one phone shows on another at its next poll. Notes below |
 | M3.5 | **Offline on the day**: live board and scanners queue offline and sync with client ids; conflicts go to the lead; incidents are logged | A forced 10-minute outage loses nothing |
 | M3.6 | **Every role, walked through**: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight | No role sees a screen or a record it shouldn't, and no link ends in a refusal |
 | M3.7 | **Freeze and rehearsal**: freeze Fri 22 Jan; rehearsal on staging with real phones Wed 10 Feb; printed backups; restore drill and failover to the standby server | **The summit runs 15 to 18 Feb 2027** |
@@ -1002,6 +1002,41 @@ Each milestone from here on builds its feature the same way, as in [architecture
       - waiting items' dates wrapping after a comma
       - an amber message under the contrast floor
       - the day buttons stacking on a phone
+
+**Notes on M3.4, the live board, 17 Nov 2026:**
+
+- **Arrivals:** the board reads them from the desk's own `arrival` table, which the scanners write (M2.2), and from what a meeting recorded itself.
+  - A check-in counts for all of that day's meetings, so the scanners never write into meeting records.
+  - Late and no-show flags follow from these arrivals and the clock (`boardFlag`).
+- **Staying in step:** each phone asks every 3 seconds with the board's version (`ETag`). The server answers 304 from a fingerprint query alone when nothing changed, without loading the Deal Room.
+  - The fingerprint covers the day's meetings and sessions (how many, and the last change), the day's arrivals, the settings (for the evening report) and the minute (so time-based flags refresh).
+  - A phone in a pocket stops asking, and catches up when it is looked at.
+- **The rules** (`domain dealroom/meetings.ts`): starting, recording and refilling now say why they refuse.
+  - **Start:** from 15 minutes before; not twice.
+  - **Outcome:** from half an hour before; it needs its category, and a next action needs its owner.
+  - **An outcome already on record** is replaced only from the paper sheet, with the reason, logged as an exception.
+  - **Refill:** only a no-show's slot, and only for a pair waiting for one.
+  - **New:** `dr/dailyReport`, the system's, from 19:00, once a day; it is recorded in the settings (`dailyReports`).
+- **Recorded once:** an outcome carries the device's own id. A retry or a second tap with the same id changes nothing, which M3.5's offline queue relies on.
+- **The page** (`/team/live`, in the menu for the lead, operations, coordinators and reviewers; Oversight is refused until M4.3):
+  - **Board:** "Needs attention" first. Then each room and table as a row of the day's meetings, opened on the one happening now; a row a poll updates doesn't move under the thumb.
+  - **A meeting:** opens as a sheet from the bottom on a phone, beside the board on a big screen. It shows who has checked in, with Mark it under way, Held or No-show, the outcome, the next action with its owner and due date, notes (sensitive ones for the lead and owner only), the paper-sheet entry, and the pairs that can take a no-show's slot.
+  - **Close-out:** the paper's checklist for the day beside what the records show, and when the report went.
+  - **Freshness:** a line at the top says "Up to date", or that the server can't be reached.
+- **The 19:00 report:** the worker looks once a minute and sends each summit evening's report to the lead once, decided again under the lock. Its email link opens the Close-out tab for that day.
+- **Tested:**
+  - 5 rule tests: the refusals, the paper sheet, the refill and the report.
+  - 5 API tests:
+    - the board and who may see it
+    - two phones: a 304 when nothing changed, the other phone's next poll carrying an outcome, and a resend recorded once
+    - a desk check-in shown at the next poll
+    - the paper-sheet refusal and a refill
+    - the report, once
+  - **Two phones in the browser,** with the API's clock set to 16 Feb 10:40: operations, at phone width, recorded "Held, follow-up meeting" at 09:17:07. The coordinator's board in Chrome showed it as Held at the 09:17:12 check.
+  - **Found and fixed in the browser:**
+    - The screen-reader text in the sideways tile rows was positioned against the page, not the row. It made the page 1247 pixels wide on a phone, and put the bottom sheet off screen.
+    - The checked-in count read only the desk's table.
+    - A flex gap parted "Day 2" from its date on the day buttons, here and on Sessions.
 
 ### Phase 4: After the summit (22 February to 19 March 2027)
 

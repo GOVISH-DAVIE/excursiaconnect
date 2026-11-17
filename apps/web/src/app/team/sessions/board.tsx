@@ -57,8 +57,11 @@ export function SessionsBoardView({ eventId, opened }: { eventId: string; opened
       <div className="mb-4 flex flex-wrap gap-1" role="tablist" aria-label="Summit days">
         {b.event.days.map((d, i) => (
           <button key={d} role="tab" aria-selected={d === current} className={d === current ? "btn-primary btn-sm" : "btn-secondary btn-sm"} onClick={() => setDay(d)}>
-            Day {i + 1}
-            <span className="hidden sm:inline">, {fmtStamp(`${d} 00:00`, false)}</span> · {b.sessions.filter((s) => s.start.slice(0, 10) === d && s.phase !== "Cancelled").length}
+            {/* one span: the button's flex gap would part the day's number from its date */}
+            <span>
+              Day {i + 1}
+              <span className="hidden sm:inline">, {fmtStamp(`${d} 00:00`, false)}</span> · {b.sessions.filter((s) => s.start.slice(0, 10) === d && s.phase !== "Cancelled").length}
+            </span>
           </button>
         ))}
       </div>

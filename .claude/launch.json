@@ -85,6 +85,21 @@
         "3013"
       ],
       "port": 3013
+    },
+    {
+      "name": "excursiaconnect-api-4001-summit",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "API_PORT=4001",
+        "WEB_ORIGINS=http://localhost:3013",
+        "RULES_CLOCK=2027-02-16 10:40",
+        "npm",
+        "run",
+        "dev",
+        "-w",
+        "@excursia/api"
+      ],
+      "port": 4001
     }
   ]
 }

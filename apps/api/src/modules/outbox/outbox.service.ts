@@ -38,6 +38,10 @@ export function linkFor(web: string, r: Recipient, link: string): string {
     if (/\/dealroom\/meetings\?tab=Changes\b/.test(link)) return `${web}/team/meetings?tab=changes`;
     if (/\/dealroom\/meetings\b/.test(link)) return `${web}/team/meetings`;
     if (/\/dealroom\/sessions\b/.test(link)) return `${web}/team/sessions`;
+    // the evening's report, and the live board (M3.4)
+    const report = /\/dealroom\/reports\?day=(\d{4}-\d{2}-\d{2})/.exec(link)?.[1];
+    if (report) return `${web}/team/live?tab=closeout&day=${report}`;
+    if (/\/dealroom\/live\b/.test(link)) return `${web}/team/live`;
     return `${web}/team`;
   }
   return `${web}${link.startsWith("/") ? link : "/team"}`;

@@ -470,6 +470,8 @@ export interface DrConfig {
   multiplePerOrg: boolean;
   rooms: Record<string, { tables: number; from: string; to: string; /** the room's name, where the event's rooms aren't on the server (M3.2) */ name?: string }>;
   sessionRooms: string[];
+  /** when each summit day's 19:00 report went to the lead, by day (M3.4) */
+  dailyReports?: Record<string, string>;
   /** the session rooms' names, where the event's rooms aren't on the server (M3.3) */
   sessionRoomNames?: Record<string, string>; // the presentation area and roundtable room: sessions only, no meeting tables
   log: DrHistory[];
