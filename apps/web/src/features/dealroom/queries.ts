@@ -1,0 +1,27 @@
+/** The Deal Room's query contracts: every key under ["dealroom", eventId], so one event's data invalidates together. */
+import { queryOptions } from "@tanstack/react-query";
+import { dealRoomApi, type QueueFilter } from "./api";
+
+export const dealRoomKeys = {
+  event: (eventId: string) => ["dealroom", eventId] as const,
+  applications: (eventId: string) => ["dealroom", eventId, "applications"] as const,
+  /** one application's review: kept apart from the queue's keys, so the queue's refresh doesn't refetch it */
+  review: (eventId: string, appId: string) => ["dealroom", eventId, "review", appId] as const,
+};
+
+export const reviewQuery = (eventId: string, appId: string) =>
+  queryOptions({ queryKey: dealRoomKeys.review(eventId, appId), queryFn: () => dealRoomApi.review(eventId, appId), staleTime: 10_000 });
+
+export const teamQuery = (eventId: string) =>
+  queryOptions({ queryKey: [...dealRoomKeys.event(eventId), "team"], queryFn: () => dealRoomApi.team(eventId), staleTime: 60_000 });
+
+export const applicationsQuery = (eventId: string, filter: QueueFilter) =>
+  queryOptions({ queryKey: [...dealRoomKeys.applications(eventId), filter], queryFn: () => dealRoomApi.applications(eventId, filter), staleTime: 15_000 });
+
+/** What the Deal Room sent: asked again every 15 seconds while open, as the worker sends in the background. */
+export const messagesQuery = (eventId: string) =>
+  queryOptions({ queryKey: [...dealRoomKeys.event(eventId), "messages"], queryFn: () => dealRoomApi.messages(eventId), staleTime: 5_000, refetchInterval: 15_000 });
+
+/** The Deal Room at a glance: counts only, asked again every minute while open. */
+export const overviewQuery = (eventId: string) =>
+  queryOptions({ queryKey: [...dealRoomKeys.event(eventId), "overview"], queryFn: () => dealRoomApi.overview(eventId), staleTime: 30_000, refetchInterval: 60_000 });

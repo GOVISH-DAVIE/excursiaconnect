@@ -1,0 +1,133 @@
+/**
+ * The worker process (deploy.md, excursia-worker), as the worker database role, every few seconds: sends the
+ * outbox, scans new uploads for viruses, deletes files past their retention date, confirms M-Pesa payments with
+ * Daraja and settles them, sends the fee's one reminder, and tells both sides of an introduction that expired. Stops cleanly on SIGTERM, finishing the batch in hand.
+ */
+import { createDb } from "@excursia/db";
+import { loadConfig } from "./config";
+import { loadLocalEnv } from "./env";
+import { mailerFor } from "./mail/mailer";
+import { createFilesRepo } from "./modules/files/files.repo";
+import { SCAN_BATCH, createFilesService } from "./modules/files/files.service";
+import { createOutboxRepo } from "./modules/outbox/outbox.repo";
+import { createOutboxService } from "./modules/outbox/outbox.service";
+import { introLapses } from "./modules/matching";
+import { meetingJobs } from "./modules/meetings";
+import { dailyReports } from "./modules/live";
+import { paymentsService } from "./modules/payments";
+import { mpesaFor } from "./payments/mpesa";
+import { rulesClock } from "./clock";
+import { clamdScanner, testScanner } from "./scan/scanner";
+import { deriveKeys } from "./security/secrets";
+import { createLocalStorage, uploadsDir } from "./storage/local";
+
+loadLocalEnv();
+const config = loadConfig({ ...process.env, DATABASE_URL: process.env.WORKER_DATABASE_URL ?? process.env.DATABASE_URL });
+const db = createDb(config.DATABASE_URL, 3);
+const outbox = createOutboxService({ repo: createOutboxRepo(db), mailer: mailerFor(config), web: config.WEB_ORIGINS[0] });
+const scanner = config.CLAMD_ADDRESS ? clamdScanner(config.CLAMD_ADDRESS) : testScanner;
+const files = createFilesService({ repo: createFilesRepo(db), storage: createLocalStorage({ dir: uploadsDir(config), key: deriveKeys(config.AUTH_SECRET).upload }), scanner });
+const mpesa = mpesaFor(config);
+// the worker never pushes, so it needs no callback address
+const payments = paymentsService({ db, now: rulesClock(config), mpesa, callbackBase: () => "" });
+const lapses = introLapses({ db, now: rulesClock(config) });
+const meetings = meetingJobs({ db, now: rulesClock(config) });
+const reports = dailyReports({ db, now: rulesClock(config) });
+/** Fee reminders are due by the day: looking every ten minutes is plenty. */
+const REMIND_EVERY_MS = 10 * 60_000;
+let remindedAt = 0;
+let lapsedAt = 0;
+/** The half-hour reminder before a meeting must go on time: meetings are looked at once a minute. */
+const MEETINGS_EVERY_MS = 60_000;
+let meetingsAt = 0;
+/** How long one round may keep scanning while uploads are waiting; the outbox goes at its own, slower pace. */
+const SCAN_BUDGET_MS = 2_500;
+/** Retention is in days and months: looking once a minute is plenty. */
+const PURGE_EVERY_MS = 60_000;
+let purgedAt = 0;
+
+const EVERY_MS = 3_000;
+let stopping = false;
+let timer: NodeJS.Timeout | undefined;
+
+async function tick() {
+  try {
+    const r = await outbox.drain();
+    if (r.claimed) console.log(`[worker] outbox: ${r.sent} sent, ${r.retrying} to retry, ${r.failed} failed`);
+  } catch (e) {
+    console.error("[worker] outbox batch failed", e);
+  }
+  try {
+    // a full batch means more are waiting: keep scanning for a moment, so a burst of uploads (or a backlog after the
+    // worker was down) clears in seconds rather than five files a round
+    const s = { clean: 0, rejected: 0, dropped: 0, failed: 0 };
+    const until = Date.now() + SCAN_BUDGET_MS;
+    for (;;) {
+      const r = await files.scan();
+      s.clean += r.clean;
+      s.rejected += r.rejected;
+      s.dropped += r.dropped;
+      s.failed += r.failed;
+      if (stopping || r.claimed < SCAN_BATCH || r.failed || Date.now() > until) break;
+    }
+    if (s.clean || s.rejected || s.dropped || s.failed) console.log(`[worker] scan: ${s.clean} clean, ${s.rejected} rejected, ${s.dropped} abandoned, ${s.failed} to retry`);
+    if (Date.now() - purgedAt > PURGE_EVERY_MS) {
+      purgedAt = Date.now();
+      const n = await files.purge();
+      if (n) console.log(`[worker] retention: ${n} file${n === 1 ? "" : "s"} deleted`);
+    }
+  } catch (e) {
+    console.error("[worker] file batch failed", e);
+  }
+  try {
+    const p = await payments.confirm();
+    if (p.paid || p.failed) console.log(`[worker] M-Pesa: ${p.paid} paid, ${p.failed} failed`);
+    if (Date.now() - remindedAt > REMIND_EVERY_MS) {
+      remindedAt = Date.now();
+      const n = await payments.remindFees();
+      if (n) console.log(`[worker] fees: ${n} reminder${n === 1 ? "" : "s"} sent`);
+    }
+  } catch (e) {
+    console.error("[worker] payments round failed", e);
+  }
+  try {
+    // introductions expire by the day: the same ten-minute pace as the fee reminders
+    if (Date.now() - lapsedAt > REMIND_EVERY_MS) {
+      lapsedAt = Date.now();
+      const n = await lapses();
+      if (n) console.log(`[worker] introductions: ${n} expired unanswered, both sides told`);
+    }
+  } catch (e) {
+    console.error("[worker] introductions round failed", e);
+  }
+  try {
+    if (Date.now() - meetingsAt > MEETINGS_EVERY_MS) {
+      meetingsAt = Date.now();
+      const m = await meetings();
+      if (m.lapsed || m.reminded) console.log(`[worker] meetings: ${m.lapsed} proposal${m.lapsed === 1 ? "" : "s"} lapsed, ${m.reminded} reminder${m.reminded === 1 ? "" : "s"} sent`);
+      // each summit evening's report to the lead goes at 19:00, once: the same minute's round looks for it
+      const r = await reports();
+      if (r) console.log(`[worker] the daily Deal Room report went to ${r} lead${r === 1 ? "" : "s"}`);
+    }
+  } catch (e) {
+    console.error("[worker] meetings round failed", e);
+  }
+  if (!stopping) timer = setTimeout(tick, EVERY_MS);
+}
+
+console.log(`[worker] M-Pesa: ${mpesa ? (mpesa.name === "test" ? "the test M-Pesa (no MPESA_ keys)" : `Daraja, ${config.MPESA_ENV}`) : "off (no MPESA_ keys)"}`);
+if (!config.CLAMD_ADDRESS) console.log("[worker] no CLAMD_ADDRESS: uploads are checked by the test scanner, which catches only the EICAR test file");
+console.log(`[worker] sending the outbox every ${EVERY_MS / 1000} s (${config.MAIL_TRANSPORT}${config.MAIL_TRANSPORT === "smtp" && config.APP_ENV !== "production" ? `, real mail only to MAIL_ALLOW: ${config.MAIL_ALLOW.join(", ") || "nobody"}` : ""})`);
+void tick();
+
+async function stop(signal: string) {
+  if (stopping) return;
+  stopping = true;
+  clearTimeout(timer);
+  console.log(`[worker] ${signal}: stopping`);
+  setTimeout(() => process.exit(1), 10_000).unref();
+  await db.$disconnect();
+  process.exit(0);
+}
+process.on("SIGTERM", () => void stop("SIGTERM"));
+process.on("SIGINT", () => void stop("SIGINT"));

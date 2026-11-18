@@ -1,0 +1,81 @@
+/**
+ * Applying's hooks. The form keeps its own copy of the fields while someone types; these save the changed fields,
+ * submit, and upload, and keep the cached application (status, gaps, documents) current.
+ */
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ApplyMode, DraftChanges, KycItem, MyApplication } from "@excursia/contracts/apply";
+import { applyApi } from "../api";
+import { applyFormQuery, applyKeys, myApplicationQuery, myApplicationsQuery } from "../queries";
+
+/** The form's settings: missions, options, required fields, the window. No sign-in needed. */
+export const useApplyForm = (slug: string) => useQuery(applyFormQuery(slug));
+
+/** The signed-in applicant's applications to this event. */
+export const useMyApplications = (slug: string, enabled: boolean) => useQuery({ ...myApplicationsQuery(slug), enabled });
+
+/** One application, loaded into the form. */
+// while a document is still being checked for viruses, look again every few seconds: the worker takes seconds
+// and while an M-Pesa payment waits for the payer's PIN and the provider's confirmation, every three
+export const useMyApplication = (slug: string, id: string | null) =>
+  useQuery({
+    ...myApplicationQuery(slug, id ?? ""),
+    enabled: !!id,
+    refetchInterval: (q) => (q.state.data?.fee?.payment?.status === "pending" ? 3000 : q.state.data?.documents.some((d) => d.scan === "checking") ? 4000 : false),
+  });
+
+function useKeepCurrent(slug: string) {
+  const queryClient = useQueryClient();
+  return (app: MyApplication) => {
+    queryClient.setQueryData(applyKeys.one(slug, app.id), app);
+    void queryClient.invalidateQueries({ queryKey: applyKeys.mine(slug), exact: true });
+  };
+}
+
+export function useStartApplication(slug: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: (input: { mode: ApplyMode; invite?: string }) => applyApi.start(slug, input), onSuccess: keep });
+}
+
+/** Autosave. Its result carries the new version, gaps and save time; the form keeps the fields it has. */
+export function useSaveDraft(slug: string, id: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: (changes: DraftChanges) => applyApi.save(slug, id, changes), onSuccess: keep, scope: { id: `draft:${id}` } });
+}
+
+/** The last changes and the submission, as one command. Shares the autosave's queue, so it goes after any save in flight. */
+export function useSubmitApplication(slug: string, id: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: (changes: DraftChanges) => applyApi.submit(slug, id, changes), onSuccess: keep, scope: { id: `draft:${id}` } });
+}
+
+export function useUploadDocument(slug: string, id: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: ({ kind, file }: { kind: string; file: File }) => applyApi.upload(slug, id, kind, file), onSuccess: (r) => keep(r.app) });
+}
+
+/** Answers the team's open request: the text, and the files uploaded for it. */
+export function useRespond(slug: string, id: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: (input: { text: string; fileIds: string[] }) => applyApi.respond(slug, id, input), onSuccess: keep });
+}
+
+/** A provider's KYC document, uploaded and attached as its item. */
+export function useUploadKyc(slug: string, id: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: ({ item, file }: { item: KycItem; file: File }) => applyApi.uploadKyc(slug, id, item, file), onSuccess: keep });
+}
+
+/** Signs the Deal Room's NDA online, for the organisation. */
+export function useSignNda(slug: string, id: string) {
+  const keep = useKeepCurrent(slug);
+  return useMutation({ mutationFn: (input: { name: string; title: string }) => applyApi.signNda(slug, id, input), onSuccess: keep });
+}
+
+/** Sends the M-Pesa request; the application is then asked again until the payment is settled or fails. */
+export function usePayMpesa(slug: string, id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (phone: string) => applyApi.payMpesa(slug, id, phone),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: applyKeys.one(slug, id) }),
+  });
+}

@@ -1,0 +1,419 @@
+/**
+ * The Deal Room team's use cases. Deny by default: the signed-in person must be on this event's Deal Room team; the
+ * rules then check their role. Every change goes through runCommand (dealroom.commands.ts).
+ */
+import type { ApplicationSummary, AssignReviewerInput, DealRoomOverview, MessageRow, StaffMember, TeamView } from "@excursia/contracts/dealroom";
+import type { CheckKycInput, DecideInput, DocumentLink, ReadinessInput, RecommendInput, RequestInfoInput, ReviewView, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput, WaiveFeeInput } from "@excursia/contracts/review";
+import type { Action } from "@excursia/domain/core/reducer";
+import { nairobiNow, type Actor } from "@excursia/domain/ctx";
+import { bothAccepted, decisionOf, drCan, funnel, oppOpen, oppOverdue, roleOf } from "@excursia/domain/dealroom/logic";
+import { stateOf } from "./dealroom.commands";
+import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
+import type { DealRoomSettings, DealRoomSettingsInput, ExtendRetentionInput } from "@excursia/contracts/onboarding";
+import { retentionDate } from "@excursia/domain/dealroom/apply";
+import type { DrApplication, DrStaff } from "@excursia/domain/dealroom/types";
+import type { AppState, Delegate } from "@excursia/domain/types";
+import type { BadgeDetailsInput, ReissueBadgeInput, StaffBadge } from "@excursia/contracts/badge";
+import type { Storage } from "../../storage/storage";
+import type { DrConfigRecord } from "./dealroom.mapper";
+import { HttpError } from "../../http/errors";
+import type { Resolved } from "../auth/auth.service";
+import type { Commands } from "./dealroom.commands";
+import type { DealRoomRepo } from "./dealroom.repo";
+
+/** Still with the applicant: nothing is decided or verified on these. */
+const OPEN = ["Lead", "Invited", "Draft"];
+
+const toStaff = (s: DrStaff): StaffMember => ({ id: s.id, name: s.name, role: s.role, canDecide: s.canDecide, canReview: s.active && s.role !== "Operations" });
+
+type AppRow = Awaited<ReturnType<DealRoomRepo["listApplications"]>>[number];
+const toSummary = (r: AppRow): ApplicationSummary => {
+  const app = r.record as unknown as DrApplication;
+  return {
+    id: r.id,
+    ref: r.ref,
+    type: r.type as ApplicationSummary["type"],
+    pathway: roleOf(app),
+    org: app.org?.name ?? "(no name yet)",
+    country: app.org?.country || null,
+    status: r.status as ApplicationSummary["status"],
+    assigneeId: r.assigneeId,
+    mission: r.mission,
+    decision: r.decision,
+    readiness: r.readiness,
+    version: r.version,
+    updatedAt: r.updatedAt.toISOString(),
+  };
+};
+
+export type DealRoomDeps = {
+  repo: DealRoomRepo;
+  commands: Commands;
+  storage: Storage;
+  /** the rules' clock, for the due dates the reviewer's screen shows */
+  now: () => Date;
+  /** Local and staging only: open files still waiting for the virus scan (M1.2). Production refuses them. */
+  allowUnscanned: boolean;
+};
+
+export function createDealRoomService({ repo, commands, storage, now, allowUnscanned }: DealRoomDeps) {
+  /** Deny by default: the signed-in person must be on this event's Deal Room team. */
+  async function staffActor(session: Resolved, eventId: string): Promise<{ actor: Actor; staff: DrStaff }> {
+    const row = await repo.staffForUser(session.user.id, eventId);
+    if (!row) throw new HttpError("forbidden", "You're not on this event's Deal Room team.");
+    return { actor: { kind: "staff", id: row.id }, staff: row.record as unknown as DrStaff };
+  }
+
+  /** The person, if their role has any of these rights; refused with the reason otherwise. */
+  function drCanAny<T extends { staff: DrStaff }>(s: T, rights: Parameters<typeof drCan>[1][], what: string): T {
+    if (!rights.some((r) => drCan(s.staff, r))) throw new HttpError("forbidden", `Your role, ${s.staff.role}, ${what}.`);
+    return s;
+  }
+
+  /** Reviewers and the people who assign them: the roles that open applications. */
+  async function reviewer(session: Resolved, eventId: string) {
+    const s = await staffActor(session, eventId);
+    if (!drCan(s.staff, "review") && !drCan(s.staff, "assign")) throw new HttpError("forbidden", `Your role, ${s.staff.role}, doesn't open applications.`);
+    return s;
+  }
+
+  async function review(session: Resolved, eventId: string, appId: string): Promise<ReviewView> {
+    const { staff } = await reviewer(session, eventId);
+    const [found, all] = await Promise.all([repo.forReview(eventId, appId), repo.listStaff(eventId)]);
+    if (!found) throw new HttpError("not_found", "No such application in this Deal Room.");
+    const cfg = (found.config as unknown as DrConfigRecord).config;
+    const app = found.record as unknown as DrApplication;
+    return {
+      application: found.record as unknown as ReviewView["application"],
+      config: { rubric: cfg.rubric, rfiDays: cfg.rules.rfiDays, missions: cfg.missions, tracks: cfg.tracks, secondReview: cfg.secondReview },
+      now: nairobiNow(now()),
+      me: toStaff(staff),
+      staff: all.map((s) => toStaff(s.record as unknown as DrStaff)),
+      badge: app.delegateId ? await badgeOf(eventId, app.delegateId) : null,
+      can: {
+        review: drCan(staff, "review"), assign: drCan(staff, "assign"), decideExpiry: staff.role === "Lead" && staff.active, decide: drCan(staff, "decide"), readiness: drCan(staff, "readiness"),
+        waiveFee: staff.role === "Lead" && staff.active, badge: drCan(staff, "liveboard"),
+      },
+    };
+  }
+
+  async function badgeOf(eventId: string, delegateId: string): Promise<StaffBadge | null> {
+    const row = await repo.delegateOf(eventId, delegateId);
+    if (!row) return null;
+    const d = row.record as unknown as Delegate;
+    return { code: d.badgeCode, status: d.cancelled ? "revoked" : "valid", name: d.name, jobTitle: d.jobTitle, accredited: d.accredited };
+  }
+
+  /**
+   * The desk's change to a badge: the lead, operations or a coordinator, whom the rules name (M2.1). Any of the team
+   * may ask; the rules refuse the others. It answers with the badge, so a desk without the review page can use it.
+   */
+  async function onBadge(session: Resolved, eventId: string, appId: string, ip: string | null, action: Action): Promise<StaffBadge> {
+    const { actor } = await staffActor(session, eventId);
+    const state = await commands.run({
+      eventId,
+      actor,
+      userId: session.user.id,
+      ip,
+      owned: (s) => {
+        if (!s.dealRoom.apps.some((a) => a.id === appId)) throw new HttpError("not_found", "No such application in this Deal Room.");
+      },
+      actions: () => [action],
+    });
+    const d = state.delegates.find((x) => x.id === state.dealRoom.apps.find((a) => a.id === appId)!.delegateId)!;
+    return { code: d.badgeCode, status: d.cancelled ? "revoked" : "valid", name: d.name, jobTitle: d.jobTitle, accredited: d.accredited };
+  }
+
+  /** A reviewer's change to one application: in this event, through the rules, then the screen's new view. */
+  async function act(session: Resolved, eventId: string, appId: string, ip: string | null, build: (app: DrApplication, state: AppState) => Action[]) {
+    const { actor } = await reviewer(session, eventId);
+    await commands.run({
+      eventId,
+      actor,
+      userId: session.user.id,
+      ip,
+      owned: (s) => {
+        if (!s.dealRoom.apps.some((a) => a.id === appId)) throw new HttpError("not_found", "No such application in this Deal Room.");
+      },
+      actions: (s) => build(s.dealRoom.apps.find((a) => a.id === appId)!, s),
+    });
+    return review(session, eventId, appId);
+  }
+
+  return {
+    review,
+
+    startReview: (session: Resolved, eventId: string, appId: string, ip: string | null) => act(session, eventId, appId, ip, () => [{ type: "dr/startReview", appId }]),
+
+    /** One score against one criterion of the rubric, resting on one of this application's documents or a note. */
+    score: (session: Resolved, eventId: string, appId: string, input: ScoreInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (app, s) => {
+        const rubric = s.dealRoom.configs[eventId].rubric[input.layer];
+        if (!rubric.some((c) => c.id === input.criterion)) throw new HttpError("bad_request", "That isn't a criterion of this rubric.", ["criterion"]);
+        if (input.docId && !app.documents.some((d) => d.id === input.docId)) throw new HttpError("bad_request", "That document isn't part of this application.", ["docId"]);
+        if (input.layer === "eligibility" ? input.pass === undefined : input.score === undefined)
+          throw new HttpError("bad_request", input.layer === "eligibility" ? "Choose pass or fail." : "Give a score from 0 to 100.", [input.layer === "eligibility" ? "pass" : "score"]);
+        return [
+          {
+            type: "dr/score",
+            appId,
+            layer: input.layer,
+            criterion: input.criterion,
+            pass: input.layer === "eligibility" ? input.pass : undefined,
+            score: input.layer === "eligibility" ? undefined : input.score,
+            docId: input.docId,
+            note: input.note?.trim() || undefined,
+          },
+        ];
+      }),
+
+    requestInfo: (session: Resolved, eventId: string, appId: string, input: RequestInfoInput, ip: string | null) =>
+      act(session, eventId, appId, ip, () => [{ type: "dr/requestInfo", appId, questions: input.questions, docs: input.docs }]),
+
+    /** The lead's call on a request that expired unanswered. */
+    rfiExpiry: (session: Resolved, eventId: string, appId: string, input: RfiExpiryInput, ip: string | null) =>
+      act(session, eventId, appId, ip, () => [{ type: "dr/rfiExpiry", appId, how: input.how, note: input.note }]),
+
+    /* ----- M1.6: recommendations, decisions, conditions, readiness ----- */
+
+    /** A reviewer who doesn't decide recommends; the rules keep it on record for the decider. */
+    recommend: (session: Resolved, eventId: string, appId: string, input: RecommendInput, ip: string | null) =>
+      act(session, eventId, appId, ip, () => [{ type: "dr/recommend", appId, decision: input.decision, reason: input.reason }]),
+
+    /**
+     * A decision with its reason. A decline, or an ask over the lead's threshold, waits for a second decider; any
+     * other takes effect at once, emails the applicant and, for an approval, asks for the fee or issues the badge.
+     */
+    decide: (session: Resolved, eventId: string, appId: string, input: DecideInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (_app, s) => {
+        const today = s.dealRoom.clock.slice(0, 10);
+        const conditions = input.decision === "Conditional" ? input.conditions : [];
+        if (conditions.some((c) => c.due < today)) throw new HttpError("bad_request", "A condition's due date can't be in the past.", ["conditions"]);
+        return [{ type: "dr/decide", appId, decision: input.decision, reason: input.reason, conditions }];
+      }),
+
+    /** A second, different decider confirms the decision waiting for one; it then takes effect. */
+    confirmSecond: (session: Resolved, eventId: string, appId: string, ip: string | null) => act(session, eventId, appId, ip, () => [{ type: "dr/confirmSecond", appId }]),
+
+    /** One condition of the decision in force is met. */
+    meetCondition: (session: Resolved, eventId: string, appId: string, conditionId: string, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        const c = decisionOf(app)?.conditions.find((x) => x.id === conditionId);
+        if (!c) throw new HttpError("not_found", "No such condition on the decision in force.");
+        return c.met ? [] : [{ type: "dr/meetCondition", appId, conditionId }];
+      }),
+
+    /** The person who will take part in meetings is who they say: needed for readiness and for verification. */
+    confirmDecisionMaker: (session: Resolved, eventId: string, appId: string, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        if (OPEN.includes(app.status)) throw new HttpError("conflict", "The applicant is still drafting.");
+        if (!app.decisionMaker.name.trim()) throw new HttpError("conflict", "The application names no decision-maker.");
+        return app.decisionMaker.confirmed ? [] : [{ type: "dr/confirmDecisionMaker", appId }];
+      }),
+
+    readiness: (session: Resolved, eventId: string, appId: string, input: ReadinessInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => (app.readiness === input.readiness ? [] : [{ type: "dr/readiness", appId, readiness: input.readiness }])),
+
+    /** A reviewer approves the business's teaser for the directory; verified counterparties see it once it is ready (M3.1). */
+    approveTeaser: (session: Resolved, eventId: string, appId: string, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        if (!app.teaser) throw new HttpError("conflict", "The business hasn't written its teaser yet.");
+        return app.teaser.approved ? [] : [{ type: "dr/approveTeaser", appId }];
+      }),
+
+    /** The lead waives the fee, with a reason: the badge is issued at once (M1.7). */
+    waiveFee: (session: Resolved, eventId: string, appId: string, input: WaiveFeeInput, ip: string | null) =>
+      act(session, eventId, appId, ip, () => [{ type: "dr/waiveFee", appId, reason: input.reason }]),
+
+    /* ----- M2.1: the badge, at the desk ----- */
+
+    badgeDetails: (session: Resolved, eventId: string, appId: string, input: BadgeDetailsInput, ip: string | null) =>
+      onBadge(session, eventId, appId, ip, { type: "dr/badgeDetails", appId, name: input.name, jobTitle: input.jobTitle }),
+
+    reissueBadge: (session: Resolved, eventId: string, appId: string, input: ReissueBadgeInput, ip: string | null) =>
+      onBadge(session, eventId, appId, ip, { type: "dr/reissueBadge", appId, reason: input.reason }),
+
+    /* ----- M1.6: a provider's verification ----- */
+
+    /** One KYC document, looked at and found in order. */
+    checkKyc: (session: Resolved, eventId: string, appId: string, input: CheckKycInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => (app.verification?.kyc[input.item]?.checked ? [] : [{ type: "dr/checkKyc", appId, item: input.item }])),
+
+    /** The sanctions screening's result, entered by the reviewer who ran it; a new result replaces the last. */
+    sanctions: (session: Resolved, eventId: string, appId: string, input: SanctionsInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        if (OPEN.includes(app.status)) throw new HttpError("conflict", "The applicant is still drafting.");
+        return [{ type: "dr/sanctions", appId, result: input.result, note: input.note }];
+      }),
+
+    /** Verified (every KYC item checked, screening clear, NDA signed, decision-maker confirmed) or declined. */
+    verify: (session: Resolved, eventId: string, appId: string, input: VerifyInput, ip: string | null) =>
+      act(session, eventId, appId, ip, (app) => {
+        if (OPEN.includes(app.status)) throw new HttpError("conflict", "The applicant is still drafting.");
+        if (app.verification?.state === input.outcome) throw new HttpError("conflict", `This organisation is already ${input.outcome.toLowerCase()}.`);
+        return [{ type: "dr/verify", appId, outcome: input.outcome, reason: input.reason }];
+      }),
+
+    /** A two-minute link to one of the application's documents; every opening is in the audit log. */
+    async documentLink(session: Resolved, eventId: string, appId: string, docId: string, ip: string | null): Promise<DocumentLink> {
+      const { actor } = await reviewer(session, eventId);
+      const found = await repo.forReview(eventId, appId);
+      const app = found?.record as unknown as DrApplication | undefined;
+      if (!app?.documents.some((d) => d.id === docId)) throw new HttpError("not_found", "No such document on this application.");
+      const file = await repo.fileOf(docId, appId);
+      if (!file) throw new HttpError("not_found", "This document has no file to open: it is demo data.");
+      if (file.state === "rejected") throw new HttpError("conflict", "This file failed its virus scan and can't be opened.");
+      if (file.deletedAt) throw new HttpError("conflict", "This file was deleted at its retention date.");
+      if (file.state !== "clean" && !allowUnscanned) throw new HttpError("conflict", "This file is waiting for its virus scan. Try again in a few minutes.");
+      const link = storage.downloadUrl(file.storageKey, { name: file.name, contentType: file.contentType });
+      await repo.audit({ actorKind: actor.kind, actorId: session.user.id, eventId, entity: "file", entityId: file.id, action: "file/open", detail: { appId, kind: file.kind, scanned: file.state === "clean" }, ip });
+      return { url: link.url, expiresAt: link.expiresAt.toISOString() };
+    },
+
+    /** The Deal Room's settings: everyone on the team reads them; the lead changes them. */
+    async settings(session: Resolved, eventId: string): Promise<DealRoomSettings> {
+      // the lead sets it up; reviewers read it, as the rubric and windows they work to (M3.6); the rest of the team doesn't
+      const { staff } = drCanAny(await staffActor(session, eventId), ["configure", "review", "assign"], "doesn't read the Deal Room's set-up");
+      const row = await repo.settings(eventId);
+      if (!row) throw new HttpError("not_found", "This event has no Deal Room.");
+      const cfg = (row.record as unknown as DrConfigRecord).config;
+      return {
+        event: { id: row.event.id, name: row.event.name, slug: row.event.slug, startDate: row.event.startDate.toISOString().slice(0, 10), state: row.event.state },
+        missions: cfg.missions,
+        tracks: cfg.tracks,
+        appOpen: cfg.rules.appOpen,
+        appClose: cfg.rules.appClose,
+        rfiDays: cfg.rules.rfiDays,
+        rubric: cfg.rubric,
+        gaps: dealRoomGaps(cfg),
+        canEdit: drCan(staff, "configure"),
+        log: [...cfg.log].reverse(),
+        retention: { months: cfg.rules.retentionMonths, conversionEnd: cfg.rules.conversionEnd, deleteOn: retentionDate(cfg.rules), canExtend: staff.role === "Lead" && staff.active },
+      };
+    },
+
+    /**
+     * The lead keeps the documents longer, with a reason (PRD, Document retention): the months go up, and every
+     * document still kept moves to the new date in the same transaction. Allowed after the Deal Room is archived.
+     */
+    async extendRetention(session: Resolved, eventId: string, input: ExtendRetentionInput, ip: string | null): Promise<DealRoomSettings> {
+      const { actor } = await staffActor(session, eventId);
+      await commands.run({
+        eventId,
+        actor,
+        userId: session.user.id,
+        ip,
+        actions: () => [{ type: "dr/retention", eventId, months: input.months, reason: input.reason }],
+        // the end of that day in Nairobi, as uploads are given (apply.service.ts)
+        retentionUntil: (after) => new Date(`${retentionDate(after.dealRoom.configs[eventId].rules)}T23:59:59+03:00`),
+      });
+      return this.settings(session, eventId);
+    },
+
+    /** The lead sets the missions, tracks and dates, through the rules' own dr/config (lead only, logged). */
+    async saveSettings(session: Resolved, eventId: string, input: DealRoomSettingsInput, ip: string | null): Promise<DealRoomSettings> {
+      const { actor } = await staffActor(session, eventId);
+      await commands.run({
+        eventId,
+        actor,
+        userId: session.user.id,
+        ip,
+        actions: (s) => {
+          const cfg = s.dealRoom.configs[eventId];
+          const what = [`${input.missions.length} mission${input.missions.length === 1 ? "" : "s"}`, `${input.tracks.length} track${input.tracks.length === 1 ? "" : "s"}`, `applications ${input.appOpen} to ${input.appClose}`, `${input.rfiDays} days to answer a request`];
+          return [
+            {
+              type: "dr/config",
+              eventId,
+              patch: {
+                missions: input.missions.map((m) => ({ ...m, description: m.description ?? "" })),
+                tracks: input.tracks.map((t) => ({ ...t, description: t.description ?? "" })),
+                rules: { ...cfg.rules, appOpen: input.appOpen, appClose: input.appClose, rfiDays: input.rfiDays },
+              },
+              note: `Settings: ${what.join(", ")}`,
+            },
+          ];
+        },
+      });
+      return this.settings(session, eventId);
+    },
+
+    /** The Deal Room at a glance, for anyone on the team: counts only (see the contract). */
+    async overview(session: Resolved, eventId: string): Promise<DealRoomOverview> {
+      await staffActor(session, eventId);
+      const stored = await repo.load(eventId);
+      if (!stored) throw new HttpError("not_found", "This event has no Deal Room.");
+      const at = nairobiNow(now());
+      const state = stateOf(eventId, stored, at);
+      const dr = state.dealRoom;
+      const f = funnel(dr, eventId);
+      const event = state.events.find((e) => e.id === eventId);
+      const matches = dr.matches.filter((m) => m.eventId === eventId);
+      const meetings = dr.meetings.filter((m) => m.eventId === eventId);
+      const sessions = dr.sessions.filter((x) => x.eventId === eventId && !x.cancelled);
+      const opps = dr.opportunities.filter((o) => o.eventId === eventId);
+      return {
+        event: { id: eventId, name: event?.name ?? eventId, now: at },
+        applications: { started: f.started, submitted: f.submitted, inReview: f.inReview, infoRequested: f.infoRequested, decided: f.decided },
+        participants: { seekers: f.seekers, approved: f.qualifiedSeekers, ready: f.ready, providers: f.providers, verified: f.verified, verifiedCapital: f.verifiedCapital, verifiedPartners: f.verifiedPartners, challenges: f.challenges },
+        matching: { approved: matches.filter((m) => m.decision === "Approved").length, introduced: matches.filter((m) => !!m.intro).length, accepted: matches.filter(bothAccepted).length },
+        meetings: {
+          proposed: meetings.filter((m) => m.status === "Proposed" || m.status === "Change requested").length,
+          confirmed: meetings.filter((m) => m.status === "Confirmed" || m.status === "In progress").length,
+          held: meetings.filter((m) => m.status === "Held").length,
+          noShow: meetings.filter((m) => m.status === "No-show").length,
+        },
+        sessions: { planned: sessions.filter((x) => x.start > at).length, held: sessions.filter((x) => x.end <= at).length, attended: sessions.reduce((n, x) => n + x.attended.length, 0) },
+        followUps: { open: opps.filter(oppOpen).length, overdue: opps.filter((o) => oppOverdue(o, at)).length },
+      };
+    },
+
+    /** What the Deal Room has sent, and whether it went (M1.4). Everyone on the team reads it. */
+    async messages(session: Resolved, eventId: string): Promise<MessageRow[]> {
+      await staffActor(session, eventId);
+      return (await repo.messages(eventId)).map((m) => ({
+        id: m.id,
+        to: m.toName,
+        kind: m.recipient.startsWith("st_") ? "staff" : m.recipient.startsWith("user:") ? "organiser" : "applicant",
+        subject: m.subject,
+        status: m.status,
+        attempts: m.attempts,
+        at: m.createdAt.toISOString(),
+        sentAt: m.sentAt?.toISOString() ?? null,
+      }));
+    },
+
+    async team(session: Resolved, eventId: string): Promise<TeamView> {
+      const { staff } = await staffActor(session, eventId);
+      const [all, name] = await Promise.all([repo.listStaff(eventId), repo.eventName(eventId)]);
+      return { event: { id: eventId, name }, me: toStaff(staff), canAssign: drCan(staff, "assign"), staff: all.map((s) => toStaff(s.record as unknown as DrStaff)) };
+    },
+
+    async applications(session: Resolved, eventId: string, query: { status?: string; assignee?: string }): Promise<ApplicationSummary[]> {
+      // the queue names every applicant: only the roles that open applications read it (M3.6)
+      const { staff } = await reviewer(session, eventId);
+      const assigneeId = query.assignee === "me" ? staff.id : query.assignee === "none" ? null : query.assignee;
+      return (await repo.listApplications(eventId, { status: query.status, assigneeId })).map(toSummary);
+    },
+
+    /** The worked example (docs/architecture.md): assign applications to a reviewer. */
+    async assignReviewer(session: Resolved, eventId: string, input: AssignReviewerInput, ip: string | null): Promise<ApplicationSummary[]> {
+      const ids = [...new Set(input.appIds)];
+      const { actor } = await staffActor(session, eventId);
+      await commands.run({
+        eventId,
+        actor,
+        userId: session.user.id,
+        ip,
+        owned: (state) => {
+          const here = new Set(state.dealRoom.apps.map((a) => a.id));
+          const missing = ids.filter((id) => !here.has(id));
+          if (missing.length) throw new HttpError("not_found", `Not an application in this Deal Room: ${missing.join(", ")}`);
+        },
+        actions: () => [{ type: "dr/assign", appIds: ids, staffId: input.staffId }],
+      });
+      return (await repo.listApplications(eventId, { ids })).map(toSummary);
+    },
+  };
+}
+export type DealRoomService = ReturnType<typeof createDealRoomService>;

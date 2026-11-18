@@ -1,0 +1,305 @@
+/**
+ * The Deal Room in PostgreSQL: one event's aggregate read and written under that event's lock, the audit log, and
+ * the list queries screens use (summary columns, never the whole aggregate).
+ *
+ * Writes go through `inEventLock` (backend-plan.md, "How a write runs on the server"): a transaction holding
+ * pg_advisory_xact_lock for the event, so two writes to one Deal Room never interleave, while writes to different
+ * events run side by side. Inside it, `load` reads the rows and `save` writes back only the rows that changed.
+ *
+ * An applicant's autosave reads and writes only their own application, so it needn't wait for the whole Deal Room:
+ * with `{ appId }` the transaction takes the event's lock *shared* and that application's row lock, and loads only
+ * that row and the config. Autosaves to different applications then run side by side; two to the same application
+ * queue on its row; and every other write still takes the event's lock alone, so it never interleaves with one.
+ */
+import { randomUUID } from "node:crypto";
+import type { Db, Prisma } from "@excursia/db";
+import type { CoreRows } from "../events/events.mapper";
+import type { DrStaff } from "@excursia/domain/dealroom/types";
+import { HttpError } from "../../http/errors";
+import type { BusyRow, DealRoomRows, DealRoomStored } from "./dealroom.mapper";
+
+type Client = Db | Prisma.TransactionClient;
+
+/** The rows of one event's aggregate: the Deal Room, and the core records its rules read. */
+export type EventStored = { dealRoom: DealRoomStored; core: { organisers: { record: Prisma.JsonValue }[]; events: { record: Prisma.JsonValue }[]; tiers: { record: Prisma.JsonValue }[]; delegates: { record: Prisma.JsonValue }[] } };
+
+/** What a command changed, worked out by comparing the rows before and after (dealroom.service.ts). */
+export type Changes = {
+  dealRoom: { [K in Exclude<keyof DealRoomRows, "config" | "busy">]: { upsert: DealRoomRows[K]; remove: string[] } } & {
+    config: DealRoomRows["config"] | null;
+    busy: { upsert: BusyRow[]; remove: string[] };
+  };
+  /** The command's clock: an unconfirmed proposal whose confirm-by time is before it no longer holds its slot (M3.2). */
+  at: Date;
+  core: { tiers: { upsert: CoreRows["tiers"] }; delegates: { upsert: CoreRows["delegates"] }; badges: { upsert: CoreRows["badges"]; remove: string[] } };
+};
+
+export type AuditRow = { actorKind: string; actorId: string | null; eventId: string; entity: string; entityId: string; action: string; detail: Prisma.InputJsonValue; ip: string | null };
+
+async function loadWith(c: Client, eventId: string): Promise<EventStored | null> {
+  const where = { eventId };
+  const byId = { orderBy: { id: "asc" as const } };
+  const config = await c.drConfig.findUnique({ where: { eventId } });
+  const event = await c.event.findUnique({ where: { id: eventId } });
+  if (!config || !event) return null;
+  const [staff, apps, matches, meetings, sessions, opportunities, exceptions, incidents, consents, access, outbox, counters, organisers, tiers, delegates] = await Promise.all([
+    c.drStaff.findMany({ where, ...byId }),
+    c.drApplication.findMany({ where, ...byId }),
+    c.drMatch.findMany({ where, ...byId }),
+    c.drMeeting.findMany({ where, ...byId }),
+    c.drSession.findMany({ where, ...byId }),
+    c.drOpportunity.findMany({ where, ...byId }),
+    c.drException.findMany({ where, ...byId }),
+    c.drIncident.findMany({ where, ...byId }),
+    c.drConsent.findMany({ where, ...byId }),
+    c.drAccess.findMany({ where, ...byId }),
+    c.outboxMessage.findMany({ where, ...byId }),
+    c.drCounter.findMany({ where }),
+    c.organiser.findMany({ where: { id: event.organiserId } }),
+    c.tier.findMany({ where, ...byId }),
+    c.delegate.findMany({ where, ...byId }),
+  ]);
+  return {
+    dealRoom: { config, staff, apps, matches, meetings, sessions, opportunities, exceptions, incidents, consents, access, outbox, counters },
+    core: { organisers, events: [event], tiers, delegates },
+  };
+}
+
+/** One application of the event and what its own rules read with it (the config, the event): nothing else. */
+async function loadOneWith(c: Client, eventId: string, appId: string): Promise<EventStored | null> {
+  const config = await c.drConfig.findUnique({ where: { eventId } });
+  const event = await c.event.findUnique({ where: { id: eventId } });
+  if (!config || !event) return null;
+  const [apps, organisers] = await Promise.all([c.drApplication.findMany({ where: { eventId, id: appId } }), c.organiser.findMany({ where: { id: event.organiserId } })]);
+  const none = { staff: [], matches: [], meetings: [], sessions: [], opportunities: [], exceptions: [], incidents: [], consents: [], access: [], outbox: [], counters: [] };
+  return { dealRoom: { config, apps, ...none }, core: { organisers, events: [event], tiers: [], delegates: [] } };
+}
+
+/** Upserts by id; an application's version goes up with every save, for optimistic checks outside the lock. */
+/** A Deal Room staff member's sign-in: the user behind their email, and the membership giving their role. */
+export type StaffLink = { staffId: string; eventId: string; email: string; name: string; role: DrStaff["role"]; canDecide: boolean };
+
+const MEMBERSHIP_ROLE = { Lead: "dr_lead", Reviewer: "dr_reviewer", Operations: "dr_operations", Coordinator: "dr_coordinator", Oversight: "dr_oversight" } as const;
+
+/**
+ * Gives each new staff member a sign-in: the staff account behind their email (made if there is none; it has no
+ * password until they set one), linked to the staff record, with a membership for the role. Returns the emails it
+ * refused: an applicant's account can't also be staff.
+ */
+async function linkStaffWith(tx: Prisma.TransactionClient, links: StaffLink[]): Promise<string[]> {
+  const refused: string[] = [];
+  for (const l of links) {
+    const existing = await tx.user.findUnique({ where: { email: l.email }, select: { id: true, kind: true } });
+    if (existing?.kind === "participant") {
+      refused.push(l.email);
+      continue;
+    }
+    const user = existing ?? (await tx.user.create({ data: { kind: "staff", email: l.email, name: l.name }, select: { id: true, kind: true } }));
+    await tx.drStaff.update({ where: { id: l.staffId }, data: { userId: user.id } });
+    const membership = { userId: user.id, role: MEMBERSHIP_ROLE[l.role], eventId: l.eventId, canDecide: l.canDecide, revokedAt: null };
+    await tx.membership.upsert({ where: { id: `mem_${l.staffId}` }, create: { id: `mem_${l.staffId}`, ...membership }, update: membership });
+  }
+  return refused;
+}
+
+/** Whether a write broke the exclusion constraint against double-booking (SQLSTATE 23P01). */
+function doubleBooked(e: unknown): boolean {
+  const text = `${(e as Error)?.message ?? ""} ${JSON.stringify((e as { meta?: unknown })?.meta ?? {})} ${(e as { cause?: { code?: string } })?.cause?.code ?? ""}`;
+  return /23P01|dr_busy_no_overlap|exclusion constraint/i.test(text);
+}
+
+async function saveWith(tx: Prisma.TransactionClient, eventId: string, ch: Changes) {
+  const d = ch.dealRoom;
+  if (d.config) await tx.drConfig.update({ where: { eventId }, data: { record: d.config.record } });
+  const each = async <T extends { id: string }>(rows: T[], up: (row: T) => Promise<unknown>) => {
+    for (const row of rows) await up(row);
+  };
+  await each(d.staff.upsert, (r) => tx.drStaff.upsert({ where: { id: r.id }, create: r, update: r }));
+  await each(d.apps.upsert, (r) => tx.drApplication.upsert({ where: { id: r.id }, create: r, update: { ...r, version: { increment: 1 } } }));
+  await each(d.matches.upsert, (r) => tx.drMatch.upsert({ where: { id: r.id }, create: r, update: r }));
+  await each(d.meetings.upsert, (r) => tx.drMeeting.upsert({ where: { id: r.id }, create: r, update: r }));
+  await each(d.sessions.upsert, (r) => tx.drSession.upsert({ where: { id: r.id }, create: r, update: r }));
+  await each(d.opportunities.upsert, (r) => tx.drOpportunity.upsert({ where: { id: r.id }, create: r, update: r }));
+  await each(d.exceptions.upsert, (r) => tx.drException.upsert({ where: { id: r.id }, create: r, update: r }));
+  await each(d.incidents.upsert, (r) => tx.drIncident.upsert({ where: { id: r.id }, create: r, update: r }));
+  await each(d.consents.upsert, (r) => tx.drConsent.upsert({ where: { id: r.id }, create: r, update: r }));
+  await each(d.access.upsert, (r) => tx.drAccess.upsert({ where: { id: r.id }, create: r, update: r }));
+  // the outbox is the worker's once a message is in it: a command only adds new messages, waiting to be sent
+  // (whatever the rules called them; the prototype marks its own "Delivered" at once), and never rewrites one
+  if (d.outbox.upsert.length) await tx.outboxMessage.createMany({ data: d.outbox.upsert.map((r) => ({ ...r, status: "queued" as const, sentAt: null })), skipDuplicates: true });
+  for (const c of d.counters.upsert)
+    await tx.drCounter.upsert({ where: { eventId_kind: { eventId, kind: c.kind } }, create: c, update: { n: c.n } });
+
+  const gone = { eventId };
+  if (d.staff.remove.length) await tx.drStaff.deleteMany({ where: { ...gone, id: { in: d.staff.remove } } });
+  if (d.apps.remove.length) await tx.drApplication.deleteMany({ where: { ...gone, id: { in: d.apps.remove } } });
+  if (d.matches.remove.length) await tx.drMatch.deleteMany({ where: { ...gone, id: { in: d.matches.remove } } });
+  if (d.meetings.remove.length) await tx.drMeeting.deleteMany({ where: { ...gone, id: { in: d.meetings.remove } } });
+  if (d.sessions.remove.length) await tx.drSession.deleteMany({ where: { ...gone, id: { in: d.sessions.remove } } });
+  if (d.opportunities.remove.length) await tx.drOpportunity.deleteMany({ where: { ...gone, id: { in: d.opportunities.remove } } });
+
+  // busy slots: removed first, so a meeting moved to a new slot never clashes with its own old one
+  if (d.busy.remove.length) await tx.$executeRaw`DELETE FROM dr_busy WHERE event_id = ${eventId} AND id = ANY(${d.busy.remove})`;
+  if (d.busy.upsert.length) {
+    // lapse release: a proposal nobody confirmed in time stops holding its slot, though nothing has rewritten its
+    // rows since; the rules already treat it as free, so the exclusion constraint must too
+    await tx.$executeRaw`UPDATE dr_busy SET active = false WHERE event_id = ${eventId} AND active AND confirm_by IS NOT NULL AND confirm_by < ${ch.at}`;
+  }
+  for (const b of d.busy.upsert) {
+    try {
+      await tx.$executeRaw`INSERT INTO dr_busy (id, event_id, source, source_id, key, slot, active, confirm_by)
+        VALUES (${b.id}, ${b.eventId}, ${b.source}::"BusySource", ${b.sourceId}, ${b.key}, tstzrange(${b.from}, ${b.to}), ${b.active}, ${b.confirmBy})
+        ON CONFLICT (id) DO UPDATE SET slot = EXCLUDED.slot, active = EXCLUDED.active, confirm_by = EXCLUDED.confirm_by`;
+    } catch (e) {
+      // the database's last word on double-booking (dr_busy_no_overlap): the rules check first, under the event's
+      // lock, so this means the rows and the rules disagree; the whole change is refused
+      if (doubleBooked(e)) throw new HttpError("conflict", "That slot was just taken. Choose another.");
+      throw e;
+    }
+  }
+
+  // the Deal Room's tier first: an event's first badge makes it (drTierOf)
+  await each(ch.core.tiers.upsert, (r) => tx.tier.upsert({ where: { id: r.id }, create: r, update: r }));
+  await each(ch.core.delegates.upsert, (r) => tx.delegate.upsert({ where: { id: r.id }, create: r, update: r }));
+  // badges: a reissued badge's old code goes first, so the delegate's new one can take its place; a revoked one is
+  // stamped once, and a revived one cleared. A new code that is already another delegate's is never taken over:
+  // nothing is written, and the command fails rather than move someone else's badge
+  if (ch.core.badges.remove.length) await tx.$executeRaw`DELETE FROM badge WHERE event_id = ${eventId} AND code = ANY(${ch.core.badges.remove})`;
+  for (const b of ch.core.badges.upsert) {
+    const n = await tx.$executeRaw`INSERT INTO badge (code, delegate_id, event_id, revoked_at)
+      VALUES (${b.code}, ${b.delegateId}, ${b.eventId}, CASE WHEN ${b.revoked} THEN now() END)
+      ON CONFLICT (code) DO UPDATE SET revoked_at = CASE WHEN ${b.revoked} THEN COALESCE(badge.revoked_at, now()) END
+      WHERE badge.delegate_id = EXCLUDED.delegate_id`;
+    if (n !== 1) throw new Error(`Badge code ${b.code} is already another delegate's`);
+  }
+}
+
+export function createDealRoomRepo(db: Db) {
+  return {
+    load: (eventId: string) => loadWith(db, eventId),
+
+    /**
+     * Runs `work` in one transaction holding the event's lock. `work` gets the aggregate's rows as they are now,
+     * and a way to save what changed and to audit it; it all commits together, or not at all. With `scope.appId`,
+     * the lock is shared and the rows are that one application's (see the top of this file).
+     */
+    inEventLock<T>(
+      eventId: string,
+      work: (unit: {
+        stored: EventStored | null;
+        save: (ch: Changes) => Promise<void>;
+        audit: (rows: AuditRow[]) => Promise<void>;
+        linkStaff: (links: StaffLink[]) => Promise<string[]>;
+        queue: (notes: { to: string; subject: string; link: string; eventId: string }[]) => Promise<void>;
+        revokeStaff: (staffIds: string[]) => Promise<void>;
+        confirmPayment: (p: { id: string; receipt: string; raw: object }) => Promise<boolean>;
+        moveRetention: (until: Date) => Promise<number>;
+      }) => Promise<T>,
+      scope?: { appId: string },
+    ): Promise<T> {
+      const key = `dr:${eventId}`;
+      return db.$transaction(
+        async (tx) => {
+          let stored: EventStored | null;
+          if (scope) {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${key}, 0))`;
+            await tx.$executeRaw`SELECT 1 FROM dr_application WHERE id = ${scope.appId} AND event_id = ${eventId} FOR UPDATE`;
+            stored = await loadOneWith(tx, eventId, scope.appId);
+          } else {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+            stored = await loadWith(tx, eventId);
+          }
+          return work({
+            stored,
+            save: (ch) => saveWith(tx, eventId, ch),
+            audit: async (rows) => {
+              if (rows.length) await tx.auditEntry.createMany({ data: rows });
+            },
+            linkStaff: (links) => linkStaffWith(tx, links),
+            // a removed staff member's sign-in loses this Deal Room at once (their other memberships stay)
+            revokeStaff: async (staffIds) => {
+              if (staffIds.length) await tx.membership.updateMany({ where: { id: { in: staffIds.map((x) => `mem_${x}`) }, revokedAt: null }, data: { revokedAt: new Date() } });
+            },
+            // a payment is confirmed once: the row moves from pending in the same transaction as the fee it settles
+            confirmPayment: async (p) =>
+              (await tx.payment.updateMany({ where: { id: p.id, status: "pending" }, data: { status: "confirmed", receipt: p.receipt, rawPayload: p.raw as never, confirmedAt: new Date() } })).count === 1,
+            // every document of the Deal Room still kept moves to its new deletion date; deleted ones stay deleted
+            moveRetention: async (until) =>
+              (await tx.file.updateMany({ where: { eventId, ownerKind: "dr_application", deletedAt: null }, data: { retentionUntil: until } })).count,
+            queue: async (notes) => {
+              if (notes.length)
+                await tx.outboxMessage.createMany({
+                  data: notes.map((n) => ({ id: `msg_${randomUUID().replace(/-/g, "").slice(0, 16)}`, eventId: n.eventId, recipient: n.to, channel: "email" as const, subject: n.subject, link: n.link, status: "queued" as const })),
+                });
+            },
+          });
+        },
+        { timeout: 15_000, maxWait: 5_000 },
+      );
+    },
+
+    /** The Deal Room staff record behind a signed-in user, for one event; null if they aren't on its team. */
+    staffForUser: (userId: string, eventId: string) =>
+      db.drStaff.findFirst({ where: { userId, eventId, active: true }, select: { id: true, role: true, record: true } }),
+
+    /** The review queue: summary columns plus the few record fields a list shows. */
+    listApplications: (eventId: string, filter: { status?: string; assigneeId?: string | null; ids?: string[] }) =>
+      db.drApplication.findMany({
+        where: {
+          eventId,
+          ...(filter.ids ? { id: { in: filter.ids } } : filter.status ? { status: filter.status } : { status: { notIn: ["Lead", "Invited", "Draft"] } }),
+          ...(filter.assigneeId !== undefined ? { assigneeId: filter.assigneeId } : {}),
+        },
+        orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+        take: 500,
+        select: { id: true, ref: true, type: true, status: true, assigneeId: true, mission: true, decision: true, readiness: true, version: true, updatedAt: true, record: true },
+      }),
+
+    /** The event's latest messages, with who each went to, for the messages screen. */
+    async messages(eventId: string, take = 200) {
+      const rows = await db.outboxMessage.findMany({ where: { eventId }, orderBy: { createdAt: "desc" }, take });
+      const ids = (prefix: string) => [...new Set(rows.map((r) => r.recipient).filter((x) => x.startsWith(prefix)))];
+      const [apps, staff, users] = await Promise.all([
+        db.drApplication.findMany({ where: { id: { in: ids("dr_") } }, select: { id: true, ref: true, record: true } }),
+        db.drStaff.findMany({ where: { id: { in: ids("st_") } }, select: { id: true, record: true } }),
+        db.user.findMany({ where: { id: { in: ids("user:").map((x) => x.slice(5)) } }, select: { id: true, name: true } }),
+      ]);
+      const names = new Map<string, string>([
+        ...apps.map((a): [string, string] => [a.id, `${(a.record as { org?: { name?: string } }).org?.name || "An applicant"}${a.ref ? ` (${a.ref})` : ""}`]),
+        ...staff.map((x): [string, string] => [x.id, (x.record as { name?: string }).name ?? x.id]),
+        ...users.map((u): [string, string] => [`user:${u.id}`, u.name]),
+      ]);
+      return rows.map((r) => ({ ...r, toName: names.get(r.recipient) ?? r.recipient }));
+    },
+
+    /** The Deal Room's settings and its event, for the lead's settings screen. */
+    settings: (eventId: string) =>
+      db.drConfig.findUnique({ where: { eventId }, select: { record: true, event: { select: { id: true, name: true, slug: true, startDate: true, state: true } } } }),
+
+    eventName: async (eventId: string) => (await db.event.findUnique({ where: { id: eventId }, select: { name: true } }))?.name ?? eventId,
+
+    listStaff: (eventId: string) =>
+      db.drStaff.findMany({ where: { eventId, active: true }, orderBy: { id: "asc" }, select: { id: true, role: true, record: true } }),
+
+    /** One application's record and its event's config, for the reviewer's screen. */
+    async forReview(eventId: string, appId: string) {
+      const [app, cfg] = await Promise.all([
+        db.drApplication.findFirst({ where: { id: appId, eventId }, select: { record: true } }),
+        db.drConfig.findUnique({ where: { eventId }, select: { record: true } }),
+      ]);
+      return app && cfg ? { record: app.record, config: cfg.record } : null;
+    },
+
+    /** The delegate behind an application's badge, in this event. */
+    delegateOf: (eventId: string, delegateId: string) => db.delegate.findFirst({ where: { id: delegateId, eventId }, select: { record: true } }),
+
+    /** The stored file behind an application's document, if it has one (the demo seed's documents don't). */
+    fileOf: (id: string, appId: string) => db.file.findFirst({ where: { id, ownerKind: "dr_application", ownerId: appId } }),
+
+    /** Opening a document is recorded, like every change. */
+    audit: (row: AuditRow) => db.auditEntry.create({ data: row }),
+
+    auditFor: (entity: string, entityId: string) => db.auditEntry.findMany({ where: { entity, entityId }, orderBy: { at: "asc" } }),
+  };
+}
+export type DealRoomRepo = ReturnType<typeof createDealRoomRepo>;

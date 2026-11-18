@@ -1,0 +1,455 @@
+{
+  "organiser": {
+    "id": "org_bouer",
+    "name": "Bouer",
+    "kycStatus": "Verified",
+    "kraPin": "",
+    "registrationNo": "",
+    "payoutAccount": "",
+    "licenceFee": 120000,
+    "commissionPct": 5
+  },
+  "event": {
+    "id": "ev_ca3",
+    "slug": "connected-africa-3",
+    "organiserId": "org_bouer",
+    "name": "Connected Africa 3.0",
+    "tagline": "Four days on capital, trade and infrastructure across three investment missions.",
+    "venue": "Summit venue to be confirmed",
+    "city": "Nairobi",
+    "startDate": "2027-02-15",
+    "endDate": "2027-02-18",
+    "days": 4,
+    "state": "Live",
+    "commissionPct": 5,
+    "oneOffFee": 0,
+    "licenceFee": 120000,
+    "gatewayFeesBorneBy": "Algotech",
+    "staffCount": 6,
+    "stations": 4,
+    "expectedAttendance": 1200,
+    "brand": {
+      "primary": "#1F5F4A",
+      "logoText": "CA3"
+    },
+    "dealRoom": {
+      "enabled": true,
+      "addOnPrice": 450000,
+      "deskStaff": 3
+    },
+    "registrationsByDay": []
+  },
+  "dealRoom": {
+    "config": {
+      "eventId": "ev_ca3",
+      "missions": [
+        {
+          "id": "m1",
+          "code": "M1",
+          "name": "State capability and public service delivery",
+          "description": "Public institutions and service-delivery priorities matched with the capabilities, capital and partners that improve public outcomes."
+        },
+        {
+          "id": "m2",
+          "code": "M2",
+          "name": "Enterprise growth, fintech and capital",
+          "description": "Enterprises and innovators securing the capital, customers, technology partnerships and markets they need to grow."
+        },
+        {
+          "id": "m3",
+          "code": "M3",
+          "name": "Digital trade and market integration",
+          "description": "Commercial and infrastructure connections that let businesses and digital services operate across markets and borders."
+        }
+      ],
+      "tracks": [
+        {
+          "id": "t1",
+          "code": "T1",
+          "name": "Transformation that works for people",
+          "missionId": "m1",
+          "description": "Public-service transformation priorities turned into commercial, investment and implementation opportunities."
+        },
+        {
+          "id": "t2",
+          "code": "T2",
+          "name": "Digital public infrastructure and trusted government",
+          "missionId": "m1",
+          "description": "Digital identity, payments, data exchange, GovTech and cybersecurity for trusted public services."
+        },
+        {
+          "id": "t3",
+          "code": "T3",
+          "name": "AI, software and enterprise innovation",
+          "missionId": "m2",
+          "description": "Innovation into enterprise adoption, commercial relationships and investable opportunities."
+        },
+        {
+          "id": "t4",
+          "code": "T4",
+          "name": "Talent, jobs and enterprise growth",
+          "missionId": "m2",
+          "description": "Enterprise demand, skills development and workforce opportunity connected."
+        },
+        {
+          "id": "t5",
+          "code": "T5",
+          "name": "Interoperable infrastructure",
+          "missionId": "m3",
+          "description": "Infrastructure and partnerships that let digital systems, markets and services work together."
+        },
+        {
+          "id": "t6",
+          "code": "T6",
+          "name": "Digital trade and market access",
+          "missionId": "m3",
+          "description": "Regional market access through commercial partners and digital trade infrastructure."
+        }
+      ],
+      "sources": [
+        "Referral",
+        "Partner",
+        "Outreach campaign",
+        "Inbound",
+        "Mission team"
+      ],
+      "providerKinds": [
+        "Angel investor",
+        "Venture capital",
+        "Private equity",
+        "Fund",
+        "DFI",
+        "Bank",
+        "Corporate buyer",
+        "Distributor or channel partner",
+        "Public institution",
+        "Ecosystem partner"
+      ],
+      "sectors": [
+        "Data Centres & Cloud Infrastructure",
+        "Telecommunications & Connectivity",
+        "Artificial Intelligence & Deep Technology",
+        "Cybersecurity & Digital Trust",
+        "Fintech & Digital Banking",
+        "E-commerce & Digital Trade",
+        "Logistics & Mobility Technology",
+        "Enterprise Technology & SaaS",
+        "Agritech & Food Technology",
+        "Health tech & Biotechnology",
+        "Energy Technology & Climate Innovation",
+        "Smart Cities & Urban Technology",
+        "Edtech & Future of Work",
+        "Aerospace, Satellite & Space Technology",
+        "Advanced Manufacturing & Industry 4.0",
+        "Creative Economy & Digital Media",
+        "Digital Public Infrastructure & Gov Tech",
+        "Mining, Natural Resources & Industrial Technology",
+        "Tourism Tech & Hospitality Innovation"
+      ],
+      "countries": [
+        "Kenya",
+        "Uganda",
+        "Tanzania",
+        "Rwanda",
+        "Ethiopia",
+        "Nigeria",
+        "Ghana",
+        "Côte d'Ivoire",
+        "Senegal",
+        "Zambia",
+        "South Africa"
+      ],
+      "rubric": {
+        "eligibility": [
+          {
+            "id": "e1",
+            "text": "Sector in scope for the mission"
+          },
+          {
+            "id": "e2",
+            "text": "Active in the mission geography"
+          },
+          {
+            "id": "e3",
+            "text": "Legally registered"
+          },
+          {
+            "id": "e4",
+            "text": "Post-revenue, or a bankable project"
+          },
+          {
+            "id": "e5",
+            "text": "Asking for a named transaction pathway"
+          }
+        ],
+        "assessment": [
+          {
+            "id": "a1",
+            "text": "Relevance: fit with the missions and a transaction pathway",
+            "weight": 30
+          },
+          {
+            "id": "a2",
+            "text": "Credibility: identity, track record, references or sponsor",
+            "weight": 30
+          },
+          {
+            "id": "a3",
+            "text": "Readiness: a complete profile, a clear ask and its stage",
+            "weight": 20
+          },
+          {
+            "id": "a4",
+            "text": "Counterparty fit: a plausible investor, buyer or partner for the ask",
+            "weight": 15
+          },
+          {
+            "id": "a5",
+            "text": "Consent and confidentiality: permission to circulate, document access",
+            "weight": 5
+          }
+        ],
+        "readiness": [
+          {
+            "id": "r1",
+            "text": "Bankability"
+          },
+          {
+            "id": "r2",
+            "text": "Technical readiness"
+          },
+          {
+            "id": "r3",
+            "text": "Environmental and social"
+          },
+          {
+            "id": "r4",
+            "text": "Decision-maker named and available"
+          },
+          {
+            "id": "r5",
+            "text": "Documents complete"
+          }
+        ]
+      },
+      "matching": [
+        {
+          "field": "sector",
+          "mandatory": true
+        },
+        {
+          "field": "country",
+          "mandatory": true
+        },
+        {
+          "field": "stage",
+          "mandatory": false
+        },
+        {
+          "field": "ticket",
+          "mandatory": true
+        },
+        {
+          "field": "instrument",
+          "mandatory": true
+        },
+        {
+          "field": "exclusions",
+          "mandatory": true
+        }
+      ],
+      "fields": {
+        "org.name": "required",
+        "org.regNo": "required",
+        "org.country": "required",
+        "org.sector": "required",
+        "org.website": "advisory",
+        "ask.amount": "required",
+        "ask.instrument": "required",
+        "ask.useOfFunds": "required",
+        "ask.stage": "required",
+        "traction.revenueBand": "required",
+        "traction.customers": "advisory",
+        "decisionMaker": "required",
+        "mission": "required",
+        "source": "required",
+        "doc.deck": "required",
+        "doc.financials": "required",
+        "doc.registration": "required",
+        "doc.feasibility": "advisory",
+        "doc.es": "advisory",
+        "providerKind": "required",
+        "mandate.sectors": "required",
+        "mandate.countries": "required",
+        "mandate.stages": "required",
+        "mandate.ticket": "required",
+        "mandate.instruments": "required",
+        "mandate.exclusions": "advisory",
+        "mandate.timeline": "advisory"
+      },
+      "ordering": "criteria",
+      "rules": {
+        "appOpen": "2026-12-15",
+        "appClose": "2027-02-18",
+        "profileDays": 5,
+        "rfiDays": 7,
+        "introDays": 5,
+        "meetingMin": 20,
+        "bufferMin": 5,
+        "flaggedMin": 30,
+        "seekerCap": 5,
+        "providerCapDay": 6,
+        "confirmHours": 48,
+        "lateMin": 10,
+        "conversionEnd": "2027-08-21",
+        "retentionMonths": 12,
+        "dayStart": "09:00",
+        "dayEnd": "17:30"
+      },
+      "freezeDate": "2027-01-22",
+      "secondReview": {
+        "decline": true,
+        "askAbove": 10000000
+      },
+      "seekerFee": {
+        "amount": 250,
+        "currency": "USD",
+        "reminderDays": 3
+      },
+      "multiplePerOrg": true,
+      "rooms": {
+        "r_dr1": {
+          "tables": 1,
+          "from": "09:00",
+          "to": "17:30"
+        },
+        "r_dr2": {
+          "tables": 1,
+          "from": "09:00",
+          "to": "17:30"
+        },
+        "r_dr3": {
+          "tables": 1,
+          "from": "09:00",
+          "to": "17:30"
+        },
+        "r_dr4": {
+          "tables": 1,
+          "from": "09:00",
+          "to": "17:30"
+        },
+        "r_dr5": {
+          "tables": 4,
+          "from": "09:00",
+          "to": "17:30"
+        },
+        "r_dr6": {
+          "tables": 4,
+          "from": "09:00",
+          "to": "17:30"
+        },
+        "r_dr7": {
+          "tables": 3,
+          "from": "09:00",
+          "to": "16:00"
+        }
+      },
+      "sessionRooms": [
+        "r_dr8",
+        "r_dr9"
+      ]
+    },
+    "staff": [
+      {
+        "id": "st_lead",
+        "name": "Wairimu Gathoni",
+        "email": "staff1@bouer.example",
+        "org": "Bouer",
+        "role": "Lead",
+        "canDecide": true,
+        "mfa": true
+      },
+      {
+        "id": "st_rev1",
+        "name": "Daniel Ochieng",
+        "email": "staff2@bouer.example",
+        "org": "Bouer",
+        "role": "Reviewer",
+        "canDecide": true,
+        "mfa": true
+      },
+      {
+        "id": "st_rev2",
+        "name": "Aisha Mohamed",
+        "email": "staff3@bouer.example",
+        "org": "Bouer",
+        "role": "Reviewer",
+        "canDecide": false,
+        "mfa": true
+      },
+      {
+        "id": "st_rev3",
+        "name": "Tom Kiplagat",
+        "email": "staff4@bouer.example",
+        "org": "Bouer",
+        "role": "Reviewer",
+        "canDecide": true,
+        "mfa": true
+      },
+      {
+        "id": "st_rev4",
+        "name": "Grace Akinyi",
+        "email": "staff5@bouer.example",
+        "org": "Bouer",
+        "role": "Reviewer",
+        "canDecide": false,
+        "mfa": true
+      },
+      {
+        "id": "st_ops1",
+        "name": "Joy Achola",
+        "email": "staff6@excursiaconnect.example",
+        "org": "Excursia Connect",
+        "role": "Operations",
+        "canDecide": false,
+        "mfa": false
+      },
+      {
+        "id": "st_ops2",
+        "name": "Ben Mutiso",
+        "email": "staff7@excursiaconnect.example",
+        "org": "Excursia Connect",
+        "role": "Operations",
+        "canDecide": false,
+        "mfa": false
+      },
+      {
+        "id": "st_ops3",
+        "name": "Linet Chepkoech",
+        "email": "staff8@excursiaconnect.example",
+        "org": "Excursia Connect",
+        "role": "Operations",
+        "canDecide": false,
+        "mfa": false
+      },
+      {
+        "id": "st_coord1",
+        "name": "Achieng Otieno",
+        "email": "staff9@excursiaconnect.example",
+        "org": "Excursia Connect",
+        "role": "Coordinator",
+        "canDecide": false,
+        "mfa": true
+      },
+      {
+        "id": "st_mom1",
+        "name": "David Kariuki",
+        "email": "staff10@momentum.example",
+        "org": "Momentum",
+        "role": "Oversight",
+        "canDecide": false,
+        "mfa": true
+      }
+    ]
+  }
+}

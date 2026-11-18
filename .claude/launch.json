@@ -7,6 +7,8 @@
       "runtimeArgs": [
         "run",
         "dev",
+        "-w",
+        "@excursia/web",
         "--",
         "-p",
         "3010"
@@ -14,17 +16,90 @@
       "port": 3010
     },
     {
+      "name": "excursiaconnect-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@excursia/api"
+      ],
+      "port": 4000
+    },
+    {
+      "name": "excursiaconnect-api-fresh",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "LOCAL_DATABASE=excursia_fresh",
+        "WEB_ORIGINS=http://localhost:3010,http://localhost:3011",
+        "npm",
+        "run",
+        "dev",
+        "-w",
+        "@excursia/api"
+      ],
+      "port": 4000
+    },
+    {
       "name": "excursiaconnect-prod",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
+        "run",
         "start",
+        "-w",
+        "@excursia/web",
         "--",
         "-H",
         "127.0.0.1",
         "-p",
-        "3011"
+        "3012"
       ],
-      "port": 3011
+      "port": 3012
+    },
+    {
+      "name": "excursiaconnect-api-4001",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "API_PORT=4001",
+        "WEB_ORIGINS=http://localhost:3013",
+        "npm",
+        "run",
+        "dev",
+        "-w",
+        "@excursia/api"
+      ],
+      "port": 4001
+    },
+    {
+      "name": "excursiaconnect-dev-3013",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "NEXT_PUBLIC_API_URL=http://localhost:4001",
+        "npm",
+        "run",
+        "dev",
+        "-w",
+        "@excursia/web",
+        "--",
+        "-p",
+        "3013"
+      ],
+      "port": 3013
+    },
+    {
+      "name": "excursiaconnect-api-4001-summit",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "API_PORT=4001",
+        "WEB_ORIGINS=http://localhost:3013",
+        "RULES_CLOCK=2027-02-16 10:40",
+        "npm",
+        "run",
+        "dev",
+        "-w",
+        "@excursia/api"
+      ],
+      "port": 4001
     }
   ]
 }

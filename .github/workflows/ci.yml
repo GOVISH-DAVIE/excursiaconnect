@@ -1,0 +1,68 @@
+# CI (backend-plan.md, M0.6): on every push and pull request, against a fresh PostgreSQL 15 provisioned the way a
+# developer's is (scripts/db/setup-local.sh: the four roles, their rights, the extensions), the whole repository is
+# type-checked, linted, tested (the database suites included) and both apps are built.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# a newer push to the same branch replaces a run still going
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # the superuser setup-local.sh provisions with; the app itself then connects as its own roles
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Roles, databases and connection strings
+        run: scripts/db/setup-local.sh
+
+      - name: Migrate the dev and test databases
+        run: |
+          npm run db:deploy
+          LOCAL_DATABASE=excursia_test npm run db:deploy
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build the web app and the API
+        run: npm run build

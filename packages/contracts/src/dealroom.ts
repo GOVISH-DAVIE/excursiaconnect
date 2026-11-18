@@ -1,0 +1,82 @@
+/**
+ * The Deal Room's wire shapes, shared by the web app and the API (docs/architecture.md, the worked example). The
+ * first ones: the review queue, the team, and assigning a reviewer (backend-plan.md, M0.5).
+ */
+import { z } from "zod";
+
+export const EventParams = z.object({ eventId: z.string().regex(/^ev_[a-z0-9_]+$/, "an event id") });
+
+export const AppStatus = z.enum(["Lead", "Invited", "Draft", "Submitted", "In review", "Information requested", "Decided"]);
+
+export const ApplicationsQuery = z.object({
+  status: AppStatus.optional(),
+  /** "me", "none", or a staff id */
+  assignee: z.string().max(60).optional(),
+});
+
+export const ApplicationSummary = z.object({
+  id: z.string(),
+  ref: z.string().nullable(),
+  type: z.enum(["seeker", "provider"]),
+  /** the registration pathway: the provider side is a capital provider, a partner or a challenge */
+  pathway: z.enum(["seeker", "capital", "partner", "challenge"]),
+  org: z.string(),
+  country: z.string().nullable(),
+  status: AppStatus,
+  assigneeId: z.string().nullable(),
+  mission: z.string().nullable(),
+  decision: z.string().nullable(),
+  readiness: z.string().nullable(),
+  /** bumped on every save */
+  version: z.number().int(),
+  updatedAt: z.string(),
+});
+export type ApplicationSummary = z.infer<typeof ApplicationSummary>;
+
+export const StaffMember = z.object({
+  id: z.string(),
+  name: z.string(),
+  role: z.enum(["Lead", "Reviewer", "Operations", "Coordinator", "Oversight"]),
+  canDecide: z.boolean(),
+  /** whether applications may be assigned to them */
+  canReview: z.boolean(),
+});
+export type StaffMember = z.infer<typeof StaffMember>;
+
+/** The signed-in person on this event's team, and what their role lets the screens offer. */
+export const TeamView = z.object({ event: z.object({ id: z.string(), name: z.string() }), me: StaffMember, canAssign: z.boolean(), staff: z.array(StaffMember) });
+export type TeamView = z.infer<typeof TeamView>;
+
+export const AssignReviewerInput = z.object({
+  appIds: z.array(z.string().min(1).max(60)).min(1, "choose at least one application").max(200),
+  staffId: z.string().min(1).max(60),
+});
+export type AssignReviewerInput = z.infer<typeof AssignReviewerInput>;
+
+/** The Deal Room's messages, as the outbox has them (M1.4): who, what, and whether it went. */
+export const MessageRow = z.object({
+  id: z.string(),
+  to: z.string(),
+  kind: z.enum(["applicant", "staff", "organiser"]),
+  subject: z.string(),
+  status: z.enum(["queued", "sending", "sent", "delivered", "failed"]),
+  attempts: z.number(),
+  at: z.string(),
+  sentAt: z.string().nullable(),
+});
+export type MessageRow = z.infer<typeof MessageRow>;
+
+/**
+ * The Deal Room at a glance (M3.6): numbers only, for every role on the team, and Oversight's home until its
+ * reports come (M4.3). No names, no records, no documents and no money: conversion values stay with the lead.
+ */
+export const DealRoomOverview = z.object({
+  event: z.object({ id: z.string(), name: z.string(), now: z.string() }),
+  applications: z.object({ started: z.number(), submitted: z.number(), inReview: z.number(), infoRequested: z.number(), decided: z.number() }),
+  participants: z.object({ seekers: z.number(), approved: z.number(), ready: z.number(), providers: z.number(), verified: z.number(), verifiedCapital: z.number(), verifiedPartners: z.number(), challenges: z.number() }),
+  matching: z.object({ approved: z.number(), introduced: z.number(), accepted: z.number() }),
+  meetings: z.object({ proposed: z.number(), confirmed: z.number(), held: z.number(), noShow: z.number() }),
+  sessions: z.object({ planned: z.number(), held: z.number(), attended: z.number() }),
+  followUps: z.object({ open: z.number(), overdue: z.number() }),
+});
+export type DealRoomOverview = z.infer<typeof DealRoomOverview>;

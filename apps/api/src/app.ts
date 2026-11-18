@@ -1,0 +1,136 @@
+/**
+ * The Express app, built from its dependencies so tests can make one against the test database without starting
+ * a server. server.ts makes the real one. Each module under src/modules is layered (docs/architecture.md):
+ *   <module>.routes.ts      paths and middleware, pointing at controller handlers
+ *   <module>.controller.ts  HTTP in and out: parse with @excursia/contracts, call the service, respond
+ *   <module>.service.ts     the use cases: run the rules from @excursia/domain inside a transaction
+ *   <module>.repo.ts        the only code that touches @excursia/db
+ * and its index.ts assembles them; this file only mounts what each module returns.
+ */
+import cors from "cors";
+import express, { type Express } from "express";
+import helmet from "helmet";
+import type { Db } from "@excursia/db";
+import { rulesClock } from "./clock";
+import type { Config } from "./config";
+import { errorHandler, notFound } from "./http/errors";
+import { originCheck } from "./http/origin";
+import { loadSession } from "./http/session";
+import { mailerFor, type Mailer } from "./mail/mailer";
+import { applyModule } from "./modules/apply";
+import { badgesModule } from "./modules/badges";
+import { scanningModule } from "./modules/scanning";
+import { matchingModule } from "./modules/matching";
+import { meetingsModule } from "./modules/meetings";
+import { sessionsModule } from "./modules/sessions";
+import { liveModule } from "./modules/live";
+import { authModule } from "./modules/auth";
+import { organisersModule } from "./modules/organisers";
+import { platformModule } from "./modules/platform";
+import { publicModule } from "./modules/public";
+import { dealRoomModule } from "./modules/dealroom";
+import { healthModule } from "./modules/health";
+import { uploadsModule } from "./modules/uploads";
+import { paymentsModule } from "./modules/payments";
+import { mpesaFor, type Mpesa } from "./payments/mpesa";
+import { deriveKeys } from "./security/secrets";
+import { createLocalStorage, uploadsDir, type LocalStorage } from "./storage/local";
+
+export type AppDeps = {
+  config: Config;
+  db: Db;
+  /** How one-time codes are emailed; config.MAIL_TRANSPORT by default. */
+  mailer?: Mailer;
+  /** Where uploads are kept; a local folder (STORAGE_DIR, else data/uploads in the repository) by default. */
+  storage?: LocalStorage;
+  /** The clock; tests move it to expire sessions and codes. */
+  now?: () => Date;
+  /** M-Pesa; by default as the settings say (Daraja, the test one, or none). Tests pass their own. */
+  mpesa?: Mpesa | null;
+  /** The address payment providers call back; PUBLIC_API_URL, else this API on loopback. */
+  callbackBase?: () => string;
+  /** Where unexpected errors are reported; console by default. */
+  logError?: (err: unknown, req: { method: string; path: string }) => void;
+};
+
+const defaultLogError: NonNullable<AppDeps["logError"]> = (err, req) => {
+  // the method and path only: a query string or body can carry personal data
+  console.error(`[api] ${req.method} ${req.path} failed:`, err);
+};
+
+export function createApp({ config, db, mailer, now, storage, mpesa, callbackBase, logError = defaultLogError }: AppDeps): Express {
+  const app = express();
+
+  app.disable("x-powered-by");
+  // nginx on the same machine is the only proxy: trust its X-Forwarded-For and -Proto, and nobody else's
+  app.set("trust proxy", "loopback");
+
+  // JSON only, never HTML: no sniffing, no framing, and a policy that lets a response load nothing at all
+  // (helmet's default policy is written for HTML sites)
+  app.use(
+    helmet({
+      contentSecurityPolicy: { useDefaults: false, directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
+      crossOriginResourcePolicy: { policy: "same-site" },
+    }),
+  );
+  app.use(
+    cors({
+      // only the web app's own pages may call with the session cookie; any other origin gets no CORS headers
+      origin: config.WEB_ORIGINS,
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      // the scanner's badge list answers 304 against its ETag (M2.2), so the page must be able to read it
+      exposedHeaders: ["ETag"],
+      maxAge: 600,
+    }),
+  );
+  app.use(express.json({ limit: "100kb" }));
+
+  app.use("/health", healthModule({ db }));
+
+  // the rules' clock: the test's clock, else RULES_CLOCK on local and staging, else the real one
+  const rulesNow = now ?? rulesClock(config);
+  // payment providers' callbacks carry no cookie and no Origin: before the Origin check, verified in the service
+  const payments = paymentsModule({
+    db,
+    now: rulesNow,
+    mpesa: mpesa === undefined ? mpesaFor(config) : mpesa,
+    callbackBase: callbackBase ?? (() => config.PUBLIC_API_URL ?? `http://127.0.0.1:${config.API_PORT}`),
+  });
+  app.use("/v1/hooks", payments.hooks);
+
+  // everything else under /v1: writes must come from the web app (CSRF), and the session cookie is read once
+  const auth = authModule({ db, config, mailer: mailer ?? mailerFor(config), now });
+  app.use("/v1", originCheck(config), loadSession(config, auth.service));
+  app.use("/v1", auth.routes);
+  const uploadMaxBytes = config.UPLOAD_MAX_MB * 1_048_576;
+  const files =
+    storage ??
+    createLocalStorage({ dir: uploadsDir(config), key: deriveKeys(config.AUTH_SECRET).upload });
+  // the worker's scan clears files within seconds; away from production one not yet scanned may still be opened
+  const allowUnscanned = config.APP_ENV ? config.APP_ENV !== "production" : config.NODE_ENV !== "production";
+  app.use("/v1/dealroom", dealRoomModule({ db, now: rulesNow, storage: files, allowUnscanned }));
+  app.use("/v1/apply", applyModule({ db, now: rulesNow, storage: files, uploadMaxBytes, payMethods: payments.service.methods }));
+  app.use("/v1/badges", badgesModule({ db, now: rulesNow }));
+  app.use("/v1/scan", scanningModule({ db, config, auth: auth.service, now: rulesNow }));
+  const matching = matchingModule({ db, now: rulesNow, storage: files, shareKey: deriveKeys(config.AUTH_SECRET).share, allowUnscanned });
+  app.use("/v1/matching", matching.team);
+  app.use("/v1/introductions", matching.participant);
+  const meetings = meetingsModule({ db, now: rulesNow });
+  app.use("/v1/meetings", meetings.team);
+  app.use("/v1/my-meetings", meetings.participant);
+  app.use("/v1/sessions", sessionsModule({ db, now: rulesNow }));
+  app.use("/v1/live", liveModule({ db, now: rulesNow }));
+  app.use("/v1/pay", payments.pay);
+  const organisers = organisersModule({ db, config, auth: auth.service, storage: files, now: rulesNow, uploadMaxBytes, allowUnscanned });
+  app.use("/v1", organisers.routes);
+  app.use("/v1/admin", platformModule({ db, repo: organisers.repo, organisers: organisers.service, now: rulesNow }));
+  app.use("/v1/public", publicModule({ db, now: rulesNow }));
+  const transfers = uploadsModule({ storage: files, maxBytes: uploadMaxBytes });
+  app.use("/v1/uploads", transfers.uploads);
+  app.use("/v1/files", transfers.files);
+
+  app.use(notFound);
+  app.use(errorHandler(logError));
+  return app;
+}

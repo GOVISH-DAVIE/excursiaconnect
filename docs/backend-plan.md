@@ -1,0 +1,1172 @@
+# Backend and integration plan
+
+How ExcursiaConnect goes from a browser-only prototype to a real backend, in phases with milestones. Written on 11 November 2026 on branch `backend`, cut from `deal-room-vis-a-vis` (PR #2), and revised the same day after four independent reviews (see [Reviews](#what-the-reviews-found)).
+
+**The stack, decided:**
+- Node.js and TypeScript.
+- **Prisma** on **PostgreSQL**.
+- **An Express API, separate from Next.js** (revised 11 Nov 2026, D13). It runs as its own Node process on its own subdomain (`api.example.co.ke`), and is the only process that talks to the database, apart from the job worker. It takes every write and every read, the payment webhooks, and later the apps.
+- **Next.js serves the UI only** (`events.example.co.ke`). It has no database connection and no server actions that write.
+- **One repository, npm workspaces:**
+  - `apps/web` (Next.js)
+  - `apps/api` (Express)
+  - `packages/domain` (the rules)
+  - `packages/contracts` (Zod schemas shared by both apps)
+  - `packages/db` (Prisma)
+- Both processes run on loopback **behind nginx**.
+- **On the client: TanStack Query for server data, the Context API for app-wide facts, custom hooks as the only way screens get or change data.** No Redux and no Redux-style global store; API calls are kept apart from the UI.
+
+How the code is layered, with the clean-code rules and one feature worked end to end, is in [architecture.md](architecture.md). How it runs on the server (processes, nginx, deploys, backups) is in [deploy.md](deploy.md).
+
+## Where we start
+
+The prototype keeps the whole app in one reducer in the browser (`src/lib/store.tsx`, now `apps/web/src/lib/store.tsx`), saved to localStorage under a seed version. Nothing is on a server:
+- no database
+- no sign-in
+- no payments, email or SMS
+- no tests
+
+The one exception is the visitor log on the unmerged `visitor-log` branch, which writes to SQLite.
+
+Paths in the table are where things were on 11 November, before the monorepo: `src/lib` is now `packages/domain/src`, and `src/app` is now `apps/web/src/app`.
+
+| Area | Where the rules lived | Size |
+| --- | --- | --- |
+| Core platform (organisers, events, tiers, registration, delegates, zones, rooms, sessions, scanning, team, payouts) | `src/lib/store.tsx`, `src/lib/types.ts`, `src/lib/roles.ts` | 58 actions, 17 record types |
+| Exhibition (halls, booths, exhibitors, contracts, invoices, payments, on-site logistics) | `src/lib/expo/*` | 37 actions, 23 record types |
+| Deal Room (applications, review, fee, challenges, matching, consent, meetings, sessions, pipeline, conversion) | `src/lib/dealroom/*` | 77 actions, 33 record types |
+| Screens | `src/app/*` | 53 routes, no route handlers |
+
+**What helps:** the rules are already separate from the screens. Reducers are `(state, action) => state`, the selectors (`slotProblems`, `matchable`, `pipelineOf`, `drCan`) are pure, and `seed.ts` gives realistic fixtures. Of the ~172 actions, about 12 are prototype-only and drop out. Of the rest:
+- about 95 are simple: one record and a history note
+- about 45 are medium: several records in one module
+- about 20 are hard: payments, sequences, bookings, scanning, offline sync, payouts, and the work the demo clock triggers
+
+## What the reviews found
+
+Four reviewers each read the plan and the code from one angle: build feasibility, code quality, performance, and running behind nginx with security. I checked each finding against the code before taking it on. **Verdict: proceed, with the changes below**, all now reflected in this plan.
+
+**The rules are not yet safe to run on a server.**
+1. The core reducer and the scanner rules sit in a `"use client"` file (`store.tsx:1`). A server action importing them gets a client reference, not the function.
+2. "Now" is read from the machine clock or the demo clock, ids come from `Math.random`, and `nowTime()` uses the server's local time zone. On a UTC server every rule would be three hours off Nairobi.
+3. The acting user comes from the state (`actingStaffId`, `actingMemberId`) or from the action itself. Exhibition's `as: "exhibitor"` skips every permission check (`expo/onsite-reducer.ts:60-63`).
+4. Refusals carry no reason: there are 55 silent `return state` in the Deal Room reducer alone.
+
+**The reducers trust what the browser sends.**
+- Registration accepts any delegate and order it receives.
+- A scan stores the browser's own verdict.
+- A draft save spreads the whole record sent (`dealroom/reducer.ts:201`), so a crafted request could set its own fee or decisions.
+- The fee is marked paid from the browser with a reference the browser supplies (`dr/[appId]/portal.tsx:307`).
+- Staff accounts are created and changed with no permission check (`dr/staffAdd`, `staffSet`, `staffRevoke`).
+
+**Hand-writing ~170 commands won't make 15 December.**
+- A Deal Room is small (about 0.8 MB, hundreds of applications), and its reducers already work on the whole aggregate.
+- **Running the existing reducer on the server, under a per-event lock**, ships far sooner and keeps the rules identical.
+
+**A database constraint can't enforce double-booking on its own.**
+- Whether a proposed meeting still holds its slot depends on the clock (`logic.ts:652-653`), and a constraint can't read the clock.
+- The fix is a table of the bookings that currently hold a slot, kept by the commands, with the constraint on that table.
+
+**Other findings:**
+- **Performance:** auto-propose tries about 1,440 slots per pair (480 ms in memory for 55 proposals), and the prototype ships 1.2 MB to every browser.
+- **Badge codes:** they come from a character sum of the id, so `dr_cs50` and `dr_cs05` collide.
+- **Security:** nginx must overwrite `X-Forwarded-For` and set `X-Forwarded-Host`, or server actions fail their origin check. (With the Express API, no server action writes; the overwrite still matters, because the API reads the client's address from it.)
+- **CSP:** a nonce-based CSP is incompatible with the partial prerendering this app uses.
+
+## Architecture
+
+### First: make the rules server-safe (milestone M0.0)
+
+Before any database work:
+1. **Split `store.tsx`.** The reducer and every rule move to `src/lib/core/*.ts` with no React import. `store.tsx` keeps only the provider, `useStore` and localStorage, and re-exports the rules so screens don't change.
+2. **One context passed into every reducer and time-dependent rule:**
+   ```ts
+   type Ctx = { now: string; newId: (prefix: string) => string; actor: Actor | null };
+   ```
+   - In the prototype, `now` comes from the demo clock, as today.
+   - On the server, `now` is the server clock in **Africa/Nairobi** (with a staging-only override), `newId` is a database-safe id, and `actor` comes from the session.
+   - `stamp`, `nowTime`, `Date.now`, `Math.random` and `uid` leave `src/lib`.
+3. **Who is acting comes only from `ctx.actor`.** `actingStaffId`, `actingMemberId`, `scanSession` and `as: "exhibitor"` become prototype-only plumbing that builds `ctx.actor`.
+4. **Refusals return a reason:** reducers return `{ state, refusal?: string }`, so the server and the screens give the same reason text.
+5. **Vitest in the repo**, with seed-based tests, starting with the actions Phase 1 uses.
+
+### How a write runs on the server
+
+A screen calls a custom hook (`useAssignReviewer`). The hook calls the module's API client, and the API client calls **the Express route for that one use case** (`POST /v1/dealroom/:eventId/applications/assign`) with the session cookie. The route checks the session, validates its body with the Zod contract from `@excursia/contracts`, and calls the module's service. Screens never send action objects. The layers are set out in [architecture.md](architecture.md).
+
+Inside the service, every write goes through one helper, `runCommand`, which builds the rule's action from the validated input and runs these steps:
+
+```
+session → actor
+  → deny by default: is this use case allowed for this actor at all?
+  → ownership: does the actor own, or may they act on, every record named?
+  → per-event advisory lock (pg_advisory_xact_lock)
+  → load the module's aggregate for that event
+  → run the existing reducer with ctx (server now, server ids, actor)
+  → refused? return the reason, write nothing
+  → save only the records whose object identity changed (immutable updates make this cheap)
+  → write side tables in the same transaction: audit, outbox, busy slots, counters
+  → commit → return the DTO, or refuse with HTTP 409 and the rule's own reason as the message
+```
+
+The hook then invalidates or updates its TanStack Query keys.
+
+**Two storage styles, chosen by volume:**
+- **Aggregate style:** the Deal Room's business records (applications, matches, meetings, sessions, opportunities, configuration) and the Exhibition's.
+  - Stored as **JSONB rows** with indexed **summary columns** kept by the save step: event, type, status, reference, assignee, fee state, pipeline status.
+  - Lists and dashboards read the summary columns with SQL. The full record loads only on detail pages and inside commands.
+  - Writes are serialised per event, which costs little at these sizes and removes a class of race conditions.
+- **Normalised tables with targeted commands:** high-volume and money records.
+  - delegates, tiers and badges
+  - scans and presence
+  - payments and refunds
+  - the outbox
+  - busy slots
+  - counters
+  - audit
+  
+  These never go through an aggregate load.
+
+**When to break a hot path out of the aggregate:** when the load test shows a Deal Room write over its budget (below). Meeting arrivals and outcomes on summit day are the likeliest, and the busy-slot table already makes bookings safe outside the aggregate.
+
+**Done for the applicant's autosave and upload (14 Nov 2026):** a command with `only: appId` takes the event's lock **shared** (`pg_advisory_xact_lock_shared`) and that application's row lock (`FOR UPDATE`), loads only that row and the config, and runs the same rule through the same save and audit.
+- Autosaves to different applications run side by side; two to the same application wait for each other on its row, so a save never overwrites another one's fields.
+- Every other write still takes the event's lock exclusively, so it never interleaves with one. PostgreSQL queues a new shared request behind a waiting exclusive one, so a burst of autosaves can't starve the team's writes.
+- Only `dr/saveDraft` and `dr/addDoc` may run so (they read and write one application). Anything else there is refused before it runs, and a result that changed anything but that application is never written.
+- No version check from the browser: an autosave sends only the fields that changed and is merged into the stored draft, so two devices' edits still merge (M1.1).
+
+**Prototype-only actions get no server command:** `reset`, `hydrate`, `setCurrentDelegate`, `dr/clock`, `dr/actAs`, `expo/clock`, `expo/actAs`, `dr/offline` and `dr/sync`. Scanner sign-in becomes real sign-in. `dr/payFee` is never sent from a browser: only the payment webhook path calls it.
+
+### How a read runs
+
+- **Services return only what the viewer may see.** Today the whole state goes to every browser (1.2 MB on the seed). Under the services, staff screens get a projection, an applicant gets their own record, and the badge page gets the badge, each as a DTO, never a Prisma model.
+- **TanStack Query holds the data in the browser.** Each module has query contracts (`queries.ts`): the key and the options in one place, imported by both the server prefetch and the client hook.
+- **The first paint has data:**
+  - A page's server component prefetches inside `<Suspense>`. It calls the API over loopback with the visitor's cookie, the same call the browser would make.
+  - It passes the result down with `<HydrationBoundary>`.
+  - The client hook reads the same key with `useSuspenseQuery`. Later reads go from the browser to the API directly.
+- **Caching:**
+  - Per-viewer data is dynamic and uses the standard `dehydrate`.
+  - Public data (an event page) is fetched without a cookie and cached in Next with `'use cache'` and a `cacheLife` of a minute, using the Next guide's prerenderable hydration helper, because `dehydrate()` reads the clock during a prerender.
+  - Edits show within that minute. That keeps the web app free of any invalidation secret.
+- **Sessions are read inside `<Suspense>`:** `cacheComponents` is on, so a cookie can't be read at the top of the root layout. `connection()` goes where a server component needs "now" with no request API (for example, whether applications are open).
+- **Writes to one record queue one at a time:** mutations on the same record share a TanStack Query `scope`, so they run in order. Autosaves merge, "save and submit" is one mutation, and screens wait for the result before navigating. Phase 1 shows a pending state. Optimistic updates (`onMutate`) come where a screen needs them, such as the live board.
+- **Context holds no records:** only the session, the current event and toasts (architecture.md, "Where state lives").
+
+### Concurrency and correctness
+
+- **No double-booking:**
+  - A `DrBusy` table holds every slot a meeting or session currently holds, per room and table, and per participant: `tsrange [start, end + buffer)`, plus an `active` flag.
+  - **Exclusion constraints** (btree_gist) apply `WHERE active`.
+  - Lapsed proposals are released by a job and, before every booking, inside the same transaction.
+  - Caps are counted under `pg_advisory_xact_lock` on both participants, taken in sorted order.
+  - Constraint error 23P01 is mapped back to the reducer's reason by re-running `slotProblems` on a fresh read.
+  - Meetings gain `seekerId` and `providerId` columns.
+- **Sequences:** references come from `UPDATE counter SET n = n + 1 RETURNING n` inside the submit transaction, with a unique index on (event, reference). Badge codes are random with a retry on the unique index.
+- **Payments:**
+  - The fee is settled by `UPDATE … WHERE paid_at IS NULL AND waived_at IS NULL`, checking the row count.
+  - Each webhook first does `INSERT INTO payment(provider, txn_id) … ON CONFLICT DO NOTHING`. In the same transaction it settles the fee, issues the badge and writes the outbox.
+  - Calls out to providers happen outside transactions.
+- **Isolation:** READ COMMITTED with the locks and constraints above. Serializable isolation isn't needed.
+- **Counters:** `tier.sold` becomes a count, or sits behind one function. Zone occupancy is one conditional `UPDATE … WHERE occupancy < capacity RETURNING`.
+
+### Time and jobs
+
+- **The server's "now" is Africa/Nairobi.** Times are stored as `timestamptz`, and the loader converts back to the `YYYY-MM-DD HH:MM` strings the rules expect.
+- **Everything the demo clock did becomes a pg-boss job**, pulled out of `dr/clock` and `expo/clock` as `job(state, from, to, ctx)`:
+  - RFI expiry, the fee reminder after three days, intro expiry
+  - meeting reminders 24 hours and 30 minutes before
+  - lapsing proposals and holds
+  - the 19:00 daily report
+  - weekly digests and the monthly review
+  - the archive at the conversion end date, and document deletion
+- The staging clock override drives the jobs too, and **refuses to start when `APP_ENV=production`**.
+- **Demo-only state stays out of the schema:** `dr.script`, `queue`/`offline`, `actingStaffId` and `clock`.
+
+### Data model, in outline
+
+One Prisma schema, keyed by `eventId` everywhere, even where the code is single-event for February. Ids stay strings, so seed ids import as they are.
+
+| Group | Style | Models (first cut) |
+| --- | --- | --- |
+| Identity and access | Tables | `User`, `Session`, `OtpCode`, `TotpSecret`, `Membership` (role per organiser or event), `ScannerDevice`, `AuditEntry` (insert-only), `RateLimit` |
+| Events | Tables | `Organiser`, `Event`, `Tier`, `FormField`, `Zone`, `Room`, `ProgrammeSession`, `Shift`, `Sponsor`, `SpeakerProfile`, `Media` |
+| Delegates and money | Tables | `Delegate`, `Badge`, `Order`, `Payment` (unique provider and transaction id, raw payload), `Refund`, `Payout`, `Campaign`, `Scan`, `Presence`, `RoomScan` |
+| Deal Room | Aggregate | `DrConfig`, `DrStaff`, `DrApplication`, `DrMatch`, `DrMeeting`, `DrSession`, `DrOpportunity`, `DrException`, `DrIncident`: each a JSONB record plus summary columns |
+| Deal Room | Tables | `DrBusy`, `DrCounter`, `DrConsent` and `DrAccess` (the consent and access logs); the fee is a row in the shared `Payment` table |
+| Exhibition | Aggregate | `ExpoConfig`, `Hall`, `Booth`, `Exhibitor`, `Booking`, `Invoice`, `StandOrder`, `Issue` (JSONB plus summary columns) |
+| Platform | Tables | `Outbox` (email, SMS, push; no 400-message cap), `File` (object storage key, quarantine state, retention date), `VisitSession`, `PageView`, `Click` |
+
+**Indexes worth having from the start:**
+- `DrApplication`: (event, type, status), (event, mission), unique (event, reference), and (delegate).
+- `DrMeeting`: (event, start), (match), (seeker) and (provider).
+- `DrConsent`: (seeker, provider, document, at descending).
+- `Badge`: unique on `lower(code)`.
+- `Scan`: (delegate, zone, at descending).
+- `RoomScan`: partial unique (delegate, session) where the verdict isn't a deny.
+- `Outbox`: partial index on (status, next attempt).
+- `AuditEntry`: (entity, entity id, at).
+- Offline sync: unique (device, client id).
+
+### Security model
+
+- **Authorisation:**
+  - Deny by default.
+  - The actor comes from the session only.
+  - A Zod schema validates every action.
+  - Ownership and tenancy are checked for every record an action names, not just the role, which closes IDOR.
+  - MFA is a property of the role, enforced by the server; it is not an editable flag. Staff get 7 days' grace from their first sign-in to set it up (D14).
+  - Staff accounts are managed by Algotech admins only.
+- **Sessions:**
+  - The cookie is `__Secure-sid`, set by the API with `Domain=.example.co.ke` so the web app's server components see it too. It is Secure, HttpOnly, and SameSite Lax (Strict for staff), and holds a 256-bit random id stored hashed. (`__Host-` can't carry a domain, so it can't be shared across the two subdomains.)
+  - The id rotates on sign-in and on step-up.
+  - Sessions are revoked when a role changes.
+  - Staff time out after 30 minutes idle and 12 hours absolute.
+  - TOTP secrets are encrypted, with reuse blocked and recovery codes.
+- **One-time codes:** hashed, 10-minute expiry, single use, 5 attempts. SMS sends are capped per number and per day. Responses never reveal whether an account exists.
+- **Scanner PINs:** hashed, with per-staff and per-device lockout and device binding. The demo seed's plaintext PINs never reach production; production staff get fresh PINs.
+- **CSRF and CORS** (architecture.md, "Sessions and cookies across the two subdomains"):
+  - CORS on the API allows only the web app's origins (`WEB_ORIGINS`), with credentials.
+  - Every cookie-authenticated write must carry an `Origin` from that list and a JSON body, which forces a preflight.
+  - SameSite cookies are the third layer. They don't separate sibling subdomains, so no other subdomain of the parent domain may serve user content.
+  - Webhooks are exempt and verified as below.
+- **Webhooks:**
+  - **Daraja:** a random per-transaction token in the callback path; Safaricom IPs allow-listed in nginx as a second layer; never settled on the callback alone. The worker confirms with STK Push Query and matches amount, phone and reference. The KES amount is locked when the push starts. A sweeper handles pushes that never get a callback, and statements are reconciled daily.
+  - **Paystack:** the HMAC-SHA512 signature over the raw body, then Verify Transaction.
+  - **Pesapal:** always calls GetTransactionStatus.
+  - **SMS and email callbacks:** used as status hints only, with a path token and an allow-list (Africa's Talking) or the provider's signature (SES, Resend).
+- **Documents:**
+  - Uploaded straight to a private bucket by presigned POST (size and type limits, random keys).
+  - Held in quarantine until a virus scan clears them.
+  - Read by a signed GET of two minutes or less, issued only after the consent check, with the access row written in the same transaction.
+  - Served as an attachment, with the watermarked copy where downloads are off.
+- **Data protection** (Kenya Data Protection Act 2019):
+  - Register with the ODPC as controller and processor, and run a DPIA for the Deal Room.
+  - Document the safeguards for any storage outside Kenya.
+  - Keep a 72-hour breach runbook and handle subject access and deletion requests.
+  - Retention covers outbox bodies, the visitor log, nginx logs and backups.
+  - Logs never hold query strings, phone numbers or document contents.
+- **Audit integrity:** separate database roles (`migrator`, `app`, `worker`, and a read-only role for oversight). The app may only INSERT into `AuditEntry`.
+
+### Performance budgets
+
+These are measured in the load test before each gate:
+
+| Path | Budget |
+| --- | --- |
+| Scan verdict | p95 300 ms end to end; 50 ms server time; 100 ms offline |
+| Booking a meeting | p95 250 ms; the 50-request burst books no clash, every response within 2 s |
+| A Deal Room write (aggregate) | p95 250 ms under summit-day load |
+| Live board poll | 30 ms when unchanged; 150 ms and 15 KB when changed; two phones agree within 5 s |
+| Staff screens (dashboard, applications, meetings) | p95 400 ms server time; first payload 150 KB or less |
+| Applicant portal | first payload 60 KB or less |
+| Auto-propose for 150 pairs | 10 s or less, as a background job with progress |
+| Payment webhook | acknowledged within 1 s |
+| Database connections | 20 or fewer in total in steady state: API 10, worker 3 for Prisma plus 3 for pg-boss; the web app none |
+
+**Also:**
+- The **live board polls every 3 seconds** with a version number that every relevant write bumps. It gets 204 when nothing changed, which survives offline and reconnects better than server-sent events behind nginx.
+- **Scanners** post each verdict and keep a badge list with an ETag for offline use.
+- **Auto-propose and refill** load the event's busy set into memory, plan there, and insert in one transaction as a job.
+- **Caching:**
+  - Public event pages cache in Next with `'use cache'` for a minute.
+  - Nothing per-viewer is ever cached. The API sends `Cache-Control: private, no-store` on every per-viewer response.
+
+## Phases and milestones
+
+The dates work back from the paper's two gates:
+- **Deal Room applications open Tue 15 December 2026**
+- **the summit runs 15 to 18 February 2027**
+
+What applicants and reviewers need on day one comes first. Anything that can follow does.
+
+**Assumption:** at least two developers from Phase 1. With one, Phase 2 narrows to what the Deal Room needs before the summit (badges, scanning, accreditation), and the rest of ticketing moves after it.
+
+| Phase | Window | Gate |
+| --- | --- | --- |
+| 0. Server-safe rules and foundations | Thu 12 Nov to Fri 27 Nov 2026 | The rules run on the server; sign-in and the layers, end to end, run on staging |
+| 1. Deal Room onboarding | Mon 23 Nov 2026 to Fri 8 Jan 2027 | **Applications open Tue 15 Dec**; decisions from Tue 22 Dec; fees from Fri 8 Jan |
+| 2. Core platform and scanning | Mon 4 Jan to Fri 29 Jan 2027 | Badges, accreditation and scanners for the summit; ticketing for other events |
+| 3. Deal Room summit operations | Mon 4 Jan to Wed 10 Feb 2027 | Design freeze Fri 22 Jan; rehearsal Wed 10 Feb; **summit 15 to 18 Feb** |
+| 4. After the summit | Mon 22 Feb to Fri 19 Mar 2027 | Digests, monthly review, reports, archive |
+| 5. Exhibition | From Mon 22 Mar 2027 (D9: the November summit is demo data only) | The first real exhibition on the platform |
+| 6. The apps' API | From Mon 4 Jan 2027, if D10 says so | Android and iOS on the same API |
+
+### Phase 0: Server-safe rules and foundations (12 to 27 November 2026)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M0.0 | **Server-safe rules**: split `store.tsx` into `src/lib/core/*` and the client provider; `Ctx { now, newId, actor }` through every reducer and time-dependent rule; refusals with reasons; Vitest with seed-based tests | The prototype runs unchanged; `src/lib` has no `Date.now`, `Math.random` or React import; the Phase 1 actions have tests that pass. **Done 11 Nov 2026** on `backend`. Notes below |
+| M0.1 | **Decisions and applications to third parties**: D3 to D11 answered; the Daraja production application and the SMS sender ID filed (each takes one to two weeks); the ODPC registration started | Each decision has an answer in this file; both applications have reference numbers |
+| M0.2 | **Database and Prisma**: PostgreSQL with database roles, the first schema (identity, minimal event, tier and delegate, the Deal Room aggregate and its tables), migrations, connection limits and timeouts | `prisma migrate deploy` runs clean on an empty database, as the `migrator` role **Done 11 Nov 2026.** Notes below |
+| M0.2a | **The API as its own process**: npm workspaces; Express with checked settings, security headers, CORS for the web app's origins, the error contract, health checks and a clean shutdown; the lint rules for the workspace boundaries | The prototype runs unchanged from `apps/web`; the API answers `/health/ready` against PostgreSQL; lint fails the web app importing the database. **Done 11 Nov 2026.** Notes below |
+| M0.3 | **Reference data and demo seed, kept apart**: a production import for the real event, configuration and staff; the demo seed loads only on staging and local | Staging shows the prototype's data; production holds no demo record **Done 11 Nov 2026** for local and the commands staging and production use; staging itself comes with M0.6. Notes below |
+| M0.4 | **Sign-in and sessions**: staff password and TOTP; one-time codes by email for applicants | Both sign in on staging; sessions expire, rotate and revoke as specified; failed attempts are throttled in PostgreSQL **Done 11 Nov 2026** in the API; the sign-in screens come with M0.5's client foundations and staging with M0.6. Notes below |
+| M0.5 | **The layers, end to end**: `runCommand` (deny by default, ownership, per-event lock, aggregate load and save, audit); the module pattern in the API (`routes`, `controller`, `service`, `repo`, as `health` already does); the first POST and GET routes with their contracts; the Origin check on writes; the client foundations (`QueryProvider`, `SessionProvider`, `EventProvider`, the `http` client, `ApiError`); the feature-folder pattern in the web app | Assigning a reviewer runs from a screen through a hook, the API client, the Express route, the service and the repository, exactly as in architecture.md; a test proves another organiser's and another applicant's records are refused; a write from another origin is refused **Done 11 Nov 2026**, apart from moving the prototype's own screens, which goes module by module from M1.1. Notes below |
+| M0.6 | **CI and staging**: type-check, lint, tests and both builds on every push; staging deployed behind nginx as in `deploy.md`, with the web app and the API on their two names | CI is green; both names are reachable over HTTPS with the security headers; the deploy switches the API and then the web app with no failed request **CI built 14 Nov 2026** (`.github/workflows/ci.yml`), rehearsed green in a clean clone; staging waits for a server and its two names. Notes below |
+
+**Notes on M0.0, done 11 Nov 2026:**
+- **The rules are importable on the server:** `src/lib/core/{reducer,scan,orders}.ts` plus `src/lib/ctx.ts`. The client store is a thin provider.
+- **The only clock and random reads left in `src/lib`** are in `proto-ctx.ts` (the prototype's Ctx), `use-today.ts` (a React hook) and the seeds.
+- **The actor decides:** `staffOf`, `memberOf`/`memberCan`, `actionExhibitor` and `scanOperatorOf`. Algotech-only actions and fee settlement (system only) are enforced in the rules.
+- **Refusals:** `apply()` returns `{ state, refusal }`. Every refusal in the Deal Room's onboarding and review reducer has its reason. Meetings, sessions, conversion, Exhibition and core refusals still return a generic reason; theirs come with their milestones (M3.x, M5.0, Phase 2).
+- **Tests:** 174 Vitest tests in `tests/` (`npm test`), now `packages/domain/tests`: the seven earlier rule suites, the actor checks and the refusal reasons.
+- **Still trusted from the client, to fix in the module's milestone:** registration's price and status, a scan's verdict and time (M2.2, M2.4), and the applicant's ownership of an application (`runCommand`, M0.5).
+
+**Notes on M0.2, done 11 Nov 2026:**
+- **Prisma 7.10.1** with the `pg` driver adapter, now in `packages/db`.
+  - `prisma.config.ts` points migrations at the migrator role.
+  - `src/client.ts` exports `createDb()`, which the API calls once at startup (pool of 10, no query logging).
+  - The generated client is in `packages/db/src/generated/prisma` and is not committed.
+- **Roles and databases:** `scripts/db/setup-local.sh` (`npm run db:setup`) creates the four roles (`excursia_migrator`, `excursia_app`, `excursia_worker`, `excursia_reporting`), the dev, test and shadow databases, the timeouts and the default grants. It writes the connection strings to `.env.local`. Servers are provisioned the same way.
+- **The first migration** (`prisma/migrations/…_init`) holds the schema in `prisma/schema.prisma` plus SQL Prisma can't express: the exclusion constraint against double-booking, case-insensitive unique badge codes, partial indexes, time-order checks, and the audit log made append-only for the app and worker. Prisma sees no drift from it.
+- **Proved on the test database, as the app role** (`packages/db/tests`, 9 tests):
+  - 50 simultaneous bookings of one slot: exactly one wins
+  - overlap is refused per room and table and per person; a lapsed proposal frees its slot
+  - badge codes are unique whatever their case
+  - the audit log can't be changed or deleted
+  - the schema can't be changed
+  - a counter hands out each number once under concurrency
+- **Locally this runs on PostgreSQL 15,** the server already on this machine; production's version is chosen with the rest of D2. One `Payment` table carries both Deal Room fees and ticket orders, instead of a separate fee table.
+
+**Notes on M0.2a, done 11 Nov 2026:**
+- **The layout** is in architecture.md, "The repository".
+  - `src/lib`'s rules moved to `packages/domain`.
+  - The browser-only helpers stayed in the web app: the store, `use-today`, `media`, `brand` and the CSV download, now split from the CSV text helpers.
+  - Prisma moved to `packages/db`. The new `packages/contracts` holds the error envelope and the health shape.
+- **The API** (`apps/api`):
+  - Express 5 with settings checked by Zod at startup. Production refuses http origins or a missing cookie domain.
+  - helmet with a deny-everything CSP, since the API only returns JSON.
+  - CORS for `WEB_ORIGINS` only, with credentials.
+  - A 100 kB JSON limit, `trust proxy` for loopback only, and one `ErrorBody` shape for every failure.
+  - `/health/live` and `/health/ready`. Ready reports 503 within 2 s when PostgreSQL doesn't answer.
+  - Health is the first module, split into routes, controller, service and repo. Lint keeps each layer to the one below it.
+  - SIGTERM drains open requests, then closes the pool.
+  - `npm run build` bundles it with the workspace packages into `dist/server.js`.
+- **Tests:** one Vitest run at the root covers all three suites, 203 tests: the rules, the database's guarantees, and 20 on the API (health, CORS, headers, error shapes, settings, and each health layer with a stand-in below it).
+- **Lint** fails if the web app imports the database, Prisma or Express, if the rules import React, Next.js, Express or the database, or if the contracts import anything of ours.
+- **Running it:** `npm run dev` (web, port 3010) and `npm run dev:api` (API, port 4000). The README has the rest.
+
+**Notes on M0.3, done 11 Nov 2026:**
+- **What the database holds from the seed:**
+  - organisers, events, tiers, delegates and badges
+  - the whole Deal Room: config, staff, applications, matches, meetings, sessions, opportunities, exceptions, incidents, consents, the access log, the outbox and the counters
+  - the staff's users and memberships
+  - a busy-slot row for each room table and person that every live meeting holds
+
+  The rest of the core (zones, rooms, programme, orders, team, shifts and the like) stays on the prototype store until Phase 2 normalises it, and the Exhibition until Phase 5.
+- **The mappers** (`apps/api/src/modules/{events,dealroom}/*.mapper.ts`) go from the rules' state to rows and back.
+  - The summary columns come from the rules' own selectors (`decisionOf`, `pipelineOf`, `occupies`, `confirmBy`).
+  - Times convert at UTC+03:00 exactly.
+  - The round trip is tested, in memory and through PostgreSQL, against the whole seed. Only the order of arrays and the prototype-only fields differ.
+  - The repos' `load()` is what `runCommand` will use (M0.5).
+- **Kept apart by a `demo` flag** on organisers, events and users (migration `…_demo_flags`):
+  - `npm run db:seed:demo` loads the seed in about 0.6 s and replaces any earlier copy.
+    - It refuses when `APP_ENV` is `production`.
+    - It also refuses when the database holds any event it didn't make, whatever `APP_ENV` says.
+    - All 228 slot rows pass the exclusion constraints, so the seed has no clash.
+  - `npm run db:check-demo` exits 1 if any demo record exists. The production deploy runs it.
+  - `npm run db:import -- <file>` imports a real event's organiser, event, Deal Room config and staff from a JSON file checked by Zod (`reference.schema.ts`).
+    - Problems are listed by path, never with values.
+    - It upserts, so a file can be imported again; staff missing from the file are reported, not revoked.
+    - It refuses any id or email that belongs to demo data.
+    - `apps/api/reference/connected-africa-3.example.json` shows the shape. The real file lives on the server, since it holds staff names and emails.
+- **`APP_ENV`** (`local`, `staging` or `production`) is required by every database command and never defaulted. `setup-local.sh` writes `APP_ENV=local`.
+- **Not yet:** busy-slot rows for programmed sessions (M3.3, once the session-room rule is settled); staff passwords (M0.4).
+- **Tests:** 17 new ones; 220 in all.
+
+**Notes on M0.4, done 11 Nov 2026:**
+- **Applicants** sign in with a 6-digit code sent by email: `POST /v1/auth/code`, then `POST /v1/auth/code/verify`.
+  - A code lasts ten minutes, works once, and dies after five wrong guesses. Asking again kills the previous one.
+  - The first sign-in makes the account.
+  - Asking for a code answers the same whether or not the address has an account.
+- **Staff** sign in in two steps:
+  1. A password (argon2id, 12 to 128 characters): `POST /v1/auth/staff/signin`. A right password gives a *pending* session, which reaches only the authenticator routes and lapses after ten minutes.
+  2. A code from an authenticator app (RFC 6238): `/v1/auth/totp/verify`. The first time, `/v1/auth/totp/setup` and `/v1/auth/totp/confirm` set it up and issue ten recovery codes, shown once.
+
+  Details:
+  - Each authenticator step works once. Each recovery code works once.
+  - A password is set or reset with a code sent to the staff email (`/v1/auth/staff/password/code`, then `/v1/auth/staff/password`), so no admin screen is needed for onboarding. A new password ends every session.
+  - A wrong email and a wrong password get one refusal, taking the same time.
+  - Staff can't sign in with an emailed code.
+- **Sessions:**
+  - The token is 256 random bits, in an HttpOnly cookie (`__Secure-sid`, scoped to `COOKIE_DOMAIN`; SameSite Strict for staff, Lax for applicants). The database keeps only its SHA-256.
+  - A new token at every step-up, and the old one dies with it.
+  - Staff: 30 minutes idle, 12 hours absolute. Applicants: 7 days idle, 30 days absolute.
+  - `GET /v1/session` says who is signed in, the MFA state and the memberships.
+  - `POST /v1/auth/signout` ends the session.
+- **Secrets:** `AUTH_SECRET` (32 bytes, in the API's environment) derives two keys.
+  - One HMACs the one-time codes, so a copy of the database can't be searched for them.
+  - The other encrypts TOTP secrets with AES-256-GCM.
+- **Attempts are counted in PostgreSQL** (`rate_limit`, keyed by a hash of the address or account):
+  - code requests: 3 per address and 20 per network address in 15 minutes
+  - code checks: 10 per address in 15 minutes
+  - passwords: 5 per address and 30 per network address in 15 minutes
+  - authenticator codes: 5 per person in 5 minutes
+- **CSRF:** every write under `/v1` must carry an `Origin` from `WEB_ORIGINS`. One that carries the session cookie with no `Origin` is refused.
+- **Email:** only one-time codes are sent straight from the API; everything else will go through the outbox (M1.4). The only transport so far is `log`, which prints to the API's console locally and **refuses in production** until the provider is chosen (D7).
+- **Tests:** 20 new ones against the test database, with a clock the tests move:
+  - every flow above
+  - code reuse, expiry and the five-guess limit
+  - the rate limits
+  - TOTP replay and single-use recovery codes
+  - idle and absolute expiry, and rotation at the step-up
+  - a new password ending sessions
+  - the same refusal for an unknown email and a wrong password
+  - cross-site writes
+- **The 7 days' grace (D14):**
+  - The first password sign-in without an authenticator starts the 7 days, recorded once in `app_user.mfa_grace_until`.
+  - Within them, `POST /v1/auth/totp/skip` finishes the sign-in. The session is marked `mfa_skipped`, and `GET /v1/session` reports `mfa: "skipped"` with the due date.
+  - After them, skipping is refused, and so is skipping for anyone who already has an authenticator.
+  - Five tests cover it.
+- **The sign-in page** (`apps/web/src/app/signin`) is the first screen on the API, and the start of M0.5's client foundations:
+  - `features/http.ts`, the only `fetch`
+  - `features/auth/` with its API client, query contract and hooks
+  - `QueryClientProvider` in `app/providers.tsx`
+
+  It does both flows, the authenticator setup with a QR code and recovery codes, "set up later", and password set and reset. A finished sign-in goes straight to the person's workspace. Tested in Chrome: an applicant with an emailed code; a lead setting a password, then an authenticator; a reviewer putting it off. Two bugs were found and fixed on the way:
+  - Setup called twice, the second replacing the secret on screen. Setup now returns the secret already waiting.
+  - The key breaking across lines.
+- **Not yet:**
+  - ending a person's sessions when their role changes (with staff management, when memberships first change through the API)
+  - deleting old `rate_limit` windows (a worker job, M1.4)
+  - scanner PIN sign-in (M2.2)
+
+**Notes on M0.5, done 11 Nov 2026:**
+- **`runCommand`** (`apps/api/src/modules/dealroom/dealroom.service.ts`) is the one way the Deal Room changes data. In order:
+  1. **Deny by default:** the signed-in person must be on the event's Deal Room team (`dr_staff.user_id`). That gives the actor.
+  2. **Lock:** one transaction holding `pg_advisory_xact_lock` for the event.
+  3. **Load** the event's aggregate.
+  4. **Ownership:** every record named must be in this event. Another organiser's record simply isn't loaded, so it is refused.
+  5. **Apply:** `apply(state, action, ctx)`, the prototype's own rule. A refusal is a 409 carrying the rule's reason, and nothing is written.
+  6. **Save:** only the rows whose mapped form changed, with an application's `version` bumped.
+  7. **Audit:** one `audit_entry` per changed record (actor, action, a capped copy of the input, the client's address).
+  8. **Commit.**
+- **The first routes** (`/v1/dealroom/:eventId/…`, contracts in `@excursia/contracts/dealroom`):
+  - `GET team`: the signed-in person, whether they may assign, and the team.
+  - `GET applications`: the queue from summary columns, by status and assignee.
+  - `POST applications/assign`
+- **Proved** (`apps/api/tests/dealroom.test.ts`, 10 tests):
+  - the assignment is saved, versioned and audited, and untouched records aren't rewritten
+  - a reviewer is refused with the rule's own reason, and nothing changes
+  - Operations staff can't be given reviews
+  - another organiser's application is refused through either event
+  - an applicant, a half-finished staff sign-in and nobody are refused
+  - a cross-site write is refused
+  - 10 assignments at once are applied one after another, with none lost
+
+  Database test files now run one at a time, since they share the demo seed.
+- **The web app:**
+  - `features/dealroom` holds the API client, query contracts and hooks.
+  - `/team` is the staff workspace on the API, as the signed-in person. A visitor who isn't signed in goes to `/signin?next=…` and comes back.
+  - `/team/applications` is the review queue with "assign selected to…". The prototype's Deal Room menu links to it.
+  - Tested in Chrome: a reviewer sees the queue without assign controls; the lead assigns two applications to her; the database shows the rows, their versions and the audit entries.
+- **The session and the current event come from TanStack Query** (`useSession`, `useDealRoomEvent`), not from Context providers. They are server data, and the architecture keeps server data out of Context.
+- **Not yet:**
+  - the prototype's own `/dealroom` screens, which move with their milestones, the queue in M1.3
+  - Deal Room rules that read rooms or the programme (M3.2)
+  - the per-event aggregate is loaded whole for each write, about 0.8 MB on the seed; the load test (M1.5) decides whether hot paths need targeted commands
+
+### Phase 1: Deal Room onboarding (23 November 2026 to 8 January 2027)
+
+Each milestone from here on builds its feature the same way, as in [architecture.md](architecture.md): contracts; then the Express route, service and repository; then the web app's query contracts, API client and hooks. It also moves that feature's screens off the prototype store onto the hooks, so a screen is never half on each.
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M1.1 | **Apply** (by Fri 11 Dec): seeker, provider and challenge forms; drafts on the server with merged autosaves; resume links; one "save and submit" command; reference numbers from a counter; the portal's status page | An applicant applies from a phone on staging and gets a reference; a second device resumes the draft **Done 11 Nov 2026**, with the core of M1.2's uploads. Notes below |
+| M1.2 | **Documents** (by Fri 11 Dec): presigned upload, quarantine, asynchronous virus scan, signed downloads after consent, retention dates | A pitch deck uploads, clears quarantine and opens only for those allowed, through a link that expires **Done 12 Nov 2026:** uploads, quarantine and the checks on arrival with M1.1; the virus scan, two-minute downloads and retention dates now. The consent check per counterparty moves to M3.1, where counterparties first reach documents. Notes below |
+| M1.3 | **Review, first half** (by Fri 11 Dec): queue, assignment, rubric scoring with evidence, information requests with expiry | The review rules' tests pass on the server **Done 11 Nov 2026**. Notes below |
+| M1.4 | **Email** (by Fri 11 Dec): the outbox and worker, templates for every onboarding message, delivery status, the Notifications screen reading the outbox | Messages arrive in a real inbox with delivery status **Done 12 Nov 2026**, sending through Zoho; delivery reports and SMS remain. Notes below |
+| M1.5 | **Go-live** (Mon 14 Dec): production database with point-in-time recovery and a restore drill timed against the RTO, monitoring and alerts, privacy notice, load test of apply and upload | **Applications open Tue 15 Dec 2026.** The privacy notice, the queue check, the backup and drill scripts and the load test are built (12 Nov 2026); the production database, ClamAV, alerting and the drills on real backups remain. Notes below |
+| M1.6 | **Review, second half** (by Tue 22 Dec): recommendations, decisions, second decider, readiness, conditions; provider and challenge verification (KYC, NDA, sanctions, decision-maker) | The first decisions are recorded on production; no record is verified with a step missing **Built 14 Nov 2026** on the API and both screens; production waits for M1.5's infrastructure. Notes below |
+| M1.7 | **Fee and SMS** (by Fri 8 Jan): one payment method first (M-Pesa if Daraja is approved, otherwise card), then the second; webhooks as specified; the 3-day reminder job; the lead's waiver; badge on payment, with minimal tier and badge records; SMS through Africa's Talking once the sender ID is approved | A sandbox payment issues a badge; a repeated callback changes nothing; approvals made before 8 Jan get their payment link then **M-Pesa, the reminder and the waiver built 14 Nov 2026** against a stand-in Daraja and the test M-Pesa; Daraja's sandbox needs Algotech's keys; the card waits for D4, SMS for the sender ID. Notes below |
+
+**Notes on M1.1, done 11 Nov 2026** (with the core of M1.2):
+- **Who owns an application:** an applicant signs in with an emailed code, and an application belongs to the verified email that started it, which can't be changed. That is also the resume: signing in with the same email on another device opens the draft. An invitation link opens the invited application only for the email it was sent to.
+- **Autosave is field by field** (`@excursia/domain/dealroom/apply`, `patchDraft`):
+  - The form sends only the dotted paths that changed.
+  - The server merges them into the draft on record, under the event lock, and runs the prototype's own `dr/saveDraft`.
+  - Paths an applicant may not write are refused by name: status, reference, fee, decisions, reviewer, documents, the owning email, and another kind's fields.
+  - Two devices editing different fields both keep their edits.
+- **Save and submit is one command:** the last changes, then `dr/submit`. The reference comes from the event's counter, and the confirmation message is queued; the outbox's real delivery is M1.4. A refusal names what is still needed and keeps nothing.
+- **The application window is now in the rules:** submitting before `appOpen` is refused with the date. `RULES_CLOCK` sets the rules' time on local and staging (`APP_ENV`), never in production, so the form can be tried before 15 Dec.
+- **Uploads** (storage interface, `apps/api/src/storage`):
+  - The browser asks for a target, PUTs the bytes, then says it's done, and `dr/addDoc` attaches the file.
+  - The target is a signed, 15-minute, single-use permission for one key, one size and one type.
+  - On arrival the first bytes must match the declared type (PDF, Office, PNG, JPEG), and the size must match.
+  - Limits: 15 MB a file, 30 uploads an hour per application, seekers' document kinds only, drafts only.
+  - Files sit in `file` with state `quarantine` until M1.2's scan.
+  - Storage is a local folder (`STORAGE_DIR`) until D6 picks a bucket; the bucket driver replaces it behind the same interface.
+- **The web app:**
+  - `/e/[slug]/deal-room/apply` runs on the API, with the organiser's branding, the real sign-in and the same fields as the prototype (`fields.tsx`, shared with the prototype portal).
+  - After submitting it shows the reference and the status.
+- **Tested:**
+  - 13 API tests and 7 domain tests: ownership, refused paths, merges, the window, uploads (type, contents, size, kind, reuse), atomic submit, invitations, and four simultaneous submissions getting consecutive references.
+  - Walked through on a phone (375 px) and then on a second device in Chrome: started on the phone, resumed in Chrome with the same email, uploaded three documents, submitted for CA3-CS-00078.
+- **Not yet:**
+  - removing an uploaded document from a draft
+  - providers' and challenges' KYC uploads (M1.6)
+  - the applicant's full portal: RFIs, fee, matching
+  - email delivery (M1.4)
+
+**Notes on M1.3, done 11 Nov 2026:**
+- **The reviewer's screen** is `/team/applications/[id]`, on the API, in four tabs: Assessment, Application, Requests and History. The queue (M0.5) links to it.
+- **Who may do what:**
+  - Reviewers and the lead see the whole application with the rubric. Operations staff and applicants don't.
+  - Starting the review takes the application if nobody had it.
+  - Scoring, requesting information and opening documents are the assigned reviewer's or the lead's.
+  - A request that expired unanswered is the lead's alone to settle: extend, refer, decline or withdraw, with a reason.
+- **A score rests on evidence:** it names a criterion of the event's rubric and either a document on the application or a written note. A new score supersedes the last, which stays in History.
+- **Information requests:**
+  - questions, the document kinds asked for, and a due date `rfiDays` ahead
+  - The applicant sees them on their status page, uploads what was asked and answers.
+  - Uploads made while a request is open are held for the answer, which attaches them and puts the review back in progress.
+  - After answering, the status page keeps the application on screen and says when it was answered.
+- **Documents open through a short link:** a signed `GET /v1/files/:token`, valid 2 minutes, for one file. It is served as an attachment with `Content-Security-Policy: default-src 'none'; sandbox` and `no-store`, and each opening is audited as `file/open`. Consent before circulating outside the team is still M1.2.
+- **Every change runs through `runCommand`**, under the event lock, with the rules' refusals as 409s and audit rows per changed record.
+- **Tested:**
+  - 7 API tests: who can see, taking the review, evidence on scores, the document link and its audit, a request answered with its document, the lead's call on an expired request, another event's application refused.
+  - Walked through in two browsers: the reviewer started CA3-CS-00078, scored Relevance 74 resting on the pitch deck and asked for the 2025 management accounts. The applicant, in Chrome, uploaded the statements and answered. The reviewer saw the answer and opened the PDF.
+- **Not yet:**
+  - the applicant is told about a request only on the status page; the email is M1.4
+  - telling the lead when a request expires: the rules already know once the due date has passed, but nothing prompts the lead yet (Phase 2's jobs)
+  - recommendations and decisions (M1.6)
+
+**Notes on organisers, Algotech and KYC, 12 Nov 2026** (the platform admin use cases PA-1 to PA-5 and DA-3, and OR-2, before the four application pathways):
+- **Two Algotech levels.** Admins check KYC, approve events and give Deal Rooms their staff. Super admins also run the Algotech team (invite by email, promote, remove) and set the organisers' rate cards. The first super admin comes from the command line; after that nobody changes or removes themselves, Algotech always keeps a super admin, and a removed admin is signed out everywhere at once. Every decision needs the authenticator, not "set up later".
+- **Organisers come in two ways.** They sign themselves up, or Algotech opens one for a client (PA-1): the organisation, and the owner, who is invited by email, sets a password and does KYC like anyone else.
+- **KYC is returned item by item (PA-2).** Each detail, document and the agreement can be returned with its own note. The organiser sees the note on that item and can't send again until each has changed (a new document, a changed value, the agreement signed again). On the next check Algotech sees what it returned last time.
+- **Rate cards (PA-4).** Each organiser has one, set by a super admin; until then the platform's starting card applies (the prototype's figures, until the price list is decided). Approval starts from it, for the kind of event.
+- **Two kinds of event.** A summit (tickets, with the Deal Room as an optional add-on) or a Deal Room on its own: it names its lead, is approved only with its Deal Room at the Deal Room's own price, has no tickets, and its web address opens on the Deal Room page. Every event has a time zone and a currency (OR-2); approval records on-site staff and stations (PA-3).
+- **Deal Room staff can be changed or removed (DA-3).** A role change goes through the rules and moves the person's sign-in with it; a removal ends their access to that Deal Room at once. The lead can't be demoted or removed until another is named; only the lead and marked reviewers decide.
+- **Algotech's overview** searches organisers, owners and events, and shows Deal Room-only events as such.
+- **Tested:** 5 tests for the team, more in onboarding's suite (opening an organiser for a client, per-item returns, rate cards, a Deal Room-only event, staff changes) and the rules' tests; then walked in two browsers on the walk-through database.
+- **Walked in Chrome, 12 Nov 2026** (Coastline Expos Ltd, opened by Algotech for a Tanzanian client): KYC filled and signed (a wrong name refused), two documents returned with notes, fixed and sent again ("Returned last time, changed since"), verified; a rate card set; a Deal Room-only event in USD sent, approved with staffing, its lead and a reviewer added, the reviewer made a coordinator (losing "may decide") and removed. Found and fixed:
+  - **Fees in the wrong currency.** Approving a USD event offered the KES rate card's figures labelled KES (a USD 100,000 licence). Fees now show in the event's currency; when it isn't the card's (KES), they start empty and must be typed before approval. The approval's history line names the currency too.
+  - **Stored times three hours early.** Prisma's pg adapter sends times without a zone, and a Postgres set to Africa/Nairobi read them as Nairobi time, so SQL's `now()` disagreed with every time the API wrote (the outbox's retry wait was skipped). Each connection now uses UTC. Rows written before the fix stay three hours early on local databases; a UTC server never had it.
+  - A document under 1 KB showed as "0 KB".
+- **The four registration pathways on the API, 12 Nov 2026** (the form from `deal-room-pathways-test.md`, which the prototype had): capital seeker, capital provider, commercial or strategic partner, institutional challenge.
+  - Each application stores the pathway it was started on (`pathway` in its record; no migration). Older records work it out from their kind, as before. Storage keeps its two sides; capital, partner and challenge are the provider side.
+  - Each pathway offers only its own organisation types, and the server refuses another (an investor type on the partner pathway, say). A link with `?type=provider`, from before, starts a capital provider; an unknown type, or none, asks which pathway first.
+  - The form is in steps, as the prototype's: Organisation; then Your ask, Your mandate, What you are looking for, or The challenge and Who could solve it; Decision-maker and mission; Documents for a seeker; Review and submit, which lists what is missing under each step. A draft reopens on its first unfinished step.
+  - The review queue says each application's pathway and filters by it.
+  - Not yet: the eligibility check's answers (sector, country, kind) aren't carried into a new application on the API, as the prototype did.
+- **M1.2's documents finished, 12 Nov 2026:** the virus scan, retention and what a failed file means.
+  - **Scan:** the worker scans each upload once it arrives, through ClamAV's daemon (`CLAMD_ADDRESS`, required in production; deploy.md says how to install it). Locally, without ClamAV, a test scanner catches only the EICAR test file. Clean files may be opened. An infected one is deleted at once, its row keeps the signature, an audit entry is written, and its owner (the applicant, or the organiser's owners) is emailed to upload a clean copy.
+  - **A failed file doesn't count:** the applicant and the organiser see "Failed the virus check" on it, the rules' gaps list the document again, and it is dropped from the draft on the next save or submission (from KYC when it is sent). The form looks again every few seconds while a file is being checked. Nobody can open it.
+  - **Retention:** a Deal Room document is kept until the Deal Room's retention months (12) after its conversion end, set when it is uploaded; the worker then deletes the bytes and keeps the row. KYC documents have no date yet (kept while the organiser works with Algotech). Files uploaded before today have no date.
+  - **Consent:** documents are opened today only by their owner's side, the Deal Room's reviewers and Algotech, through two-minute links in the audit log. The per-counterparty consent check and the access log belong with M3.1, when investors and partners first reach seekers' documents.
+  - **Not yet:** an applicant opening their own uploaded documents. (The lead's extension, which moves the dates already set, came on 14 Nov: see M1.7's notes.)
+- **M1.5's buildable part, 12 Nov 2026:**
+  - **Privacy notice** at `/privacy`, linked from sign-in, organiser sign-up and the apply form: what is collected, why, who sees it, how long it is kept (the periods the platform enforces), security, rights under the Act and the ODPC. Four facts only Algotech can confirm sit in `apps/web/src/lib/privacy.ts`: the registered name, the privacy mailbox (`privacy@algotech.co.ke` is a placeholder), the hosting country (D6), the ODPC registration. The text should be read by Algotech's counsel before 15 Dec.
+  - **`GET /health/queues`:** 503 with the reason when an email or a virus scan has waited over two minutes (the worker stopped), more than 20 emails failed in a day, or a file is past its retention date. Counts only. Poll it with `/health/ready`.
+  - **Backups:** `scripts/ops/backup.sh` (database dump and uploads, SHA-256s, optional GPG, 30 days) and `scripts/ops/restore-drill.sh` (restores into a new database, checks and times it, writes the report). Both refuse tools of another PostgreSQL major version than the server's, which broke the first local try (pg_dump 18 against PostgreSQL 15). Runbook and log: [restore-drill.md](restore-drill.md); rehearsed locally, PASS in 1 s.
+  - **Load test:** `npm run load:apply -w @excursia/api -- --slug … --users 200 --concurrency 50`: applicants sign in, start, autosave six times, upload three documents (seekers), submit; it reports each step's times and errors and checks the references, then cleans up. Never against a real event in production (it refuses APP_ENV=production).
+  - **Load results, 12 Nov 2026,** on the built API (`node dist/server.js`) against a copy of the walk-through database, PostgreSQL 15, a MacBook; each applicant starts, autosaves six or seven times, uploads three documents if a seeker, and submits:
+
+    | Applications already in the event | Applicants at once | Submitted | Errors | Autosave median / p95 | References |
+    | --- | --- | --- | --- | --- | --- |
+    | about 3 | 1 | 6 of 6 | 0 | 22 / 43 ms | distinct, no gaps |
+    | about 3 | 25 (all four pathways) | 100 of 100 | 0 | 372 / 893 ms | distinct, no gaps |
+    | about 3 | 150 at once | 150 of 150 | 0 | 2.1 / 2.9 s | distinct, no gaps |
+    | about 3 | 300 at once | 300 of 300 | 0 | 6.3 / 7.6 s | distinct, no gaps |
+    | 1,000 | 1 | 8 of 8 | 0 | 100 / 117 ms | distinct, no gaps |
+    | 1,000 | 25 | 100 of 100 | 0 | 2.2 / 3.0 s | distinct, no gaps |
+
+    Nothing failed at any load: requests wait for a database connection in the API rather than time out (the app role's 5 s statement timeout was never reached). But every write to one event's Deal Room takes the event's lock and loads **all its applications**, so it slows as the event fills: about 20 ms a write with a handful of applications, **about 100 ms with 1,000**, so **about 10 writes a second per event** once it is full. Applicants autosave every few seconds while typing, so with 1,000 applications in, **25 people typing at once already wait 2 to 3 seconds** a save. Waiting writes hold connections, so reads slow too (the form took 0.6 s at that point).
+
+    **Fixed 14 Nov 2026: autosave runs on its own application** (above, "Done for the applicant's autosave and upload"). The same runs, with 1,000 applications in:
+
+    | Applicants at once | Submitted | Errors | Autosave median / p95 | Attach an upload median / p95 | Whole run |
+    | --- | --- | --- | --- | --- | --- |
+    | 1 | 8 of 8 | 0 | **11 / 17 ms** (was 100 / 117) | 11 / 20 ms (was 108 / 137) | 2.7 s (was 4.2) |
+    | 25 | 100 of 100 | 0 | **315 / 941 ms** (was 2.2 / 3.0 s) | 415 ms / 1.1 s (was 1.0 / 2.1 s) | 22 s (was 39) |
+    | 150, all starting in the same second | 300 of 300 | 0 | 360 ms / 7.5 s | 344 ms / 6.1 s | 70 s |
+    | 150, with 3 s between saves | 300 of 300 | 0 | 207 ms / 3.4 s | 485 ms / 3.2 s | 85 s |
+
+    References came out distinct with no gaps every time.
+
+    **What is left:** starting an application and submitting still take the whole Deal Room, about 100 ms each with 1,000 in, so about 10 a second per event. Autosaves queue behind them while they wait, which is what the 150-at-once rows show: 150 people starting **in the same second** wait up to 13 s to start, and their saves' p95 follows. Spread over a minute, as even an email to every lead would be, that is far below 10 a second. If staging shows starts arriving faster, these two move next:
+    - **start:** the email's own applications, the invitation by its token, and the lead
+    - **submit:** the counter's row lock, and the message
+  - **Found and fixed by the testing:**
+    - The built API and worker kept uploads outside the repository (the default folder's path was relative to a file the build moves); a deletion at retention then found nothing and still recorded the file as deleted. The folder is found by looking for the repository now, and a deletion that finds no file is logged ("check STORAGE_DIR"). Production sets `STORAGE_DIR`, so it was never affected.
+    - The built commands (`dist/cli/*.js`) didn't read `.env.local` locally; the load test wasn't in the build.
+    - The worker scanned five uploads every 3 seconds, so a backlog (the worker down for a while, a burst of uploads) took minutes: 655 waiting took about 6 minutes. It now keeps scanning for up to 2.5 seconds a round while uploads wait: 655 in 10 seconds with the test scanner. Emails stay at 20 a round, so Zoho's sending limits aren't hit (check Algotech's Zoho plan's limits: 1,000 confirmations in an hour would be about 400 a minute).
+    - With ClamAV down, uploads waited for ever and `/health/queues` stayed green: each failed scan moved the file's next try a minute on, so it never looked overdue. A failed scan is now noted on the file, and the check reports uploads the scanner has failed on for over two minutes ("is clamd running?"). Checked: 503 within a minute of the scanner failing on files older than two minutes; back to 200 within a minute of the scanner returning, every file cleared.
+    - A backup whose encryption failed left an unencrypted dump behind and stopped before the uploads; the drill then passed that dump without a checksum. A failed run now removes everything it wrote; the drill fails a backup without its checksum, one that doesn't match, and a database dump without its uploads archive.
+    - The web app's production build failed without an API to call (prerendering the demo's Deal Room pages); it no longer calls the API while building, as those pages are the prototype's anyway.
+  - **Also checked:** an encrypted backup restored (database and uploads) and contains no readable dump; a corrupted dump is refused before restoring; backups older than 30 days are pruned and nothing else is; a file past its retention date loses its bytes within a minute and can't be opened ("deleted at its retention date"); uploads arriving under load are scanned within 2 seconds; the privacy notice is static HTML in the production build, readable at 375 px wide with no sideways scroll, and every contents link lands on its section.
+  - **Not covered:** a real ClamAV (none on this Mac: every scan used the test scanner), real SMTP under load (emails were printed), and production's hardware. The privacy notice says the Deal Room's lead can extend retention with a reason; that isn't built yet.
+  - **Still to do before 15 Dec, outside the code:** the production database with point-in-time recovery and the HA standby; ClamAV on the server; the backup timer and an off-server copy; uptime and error alerts wired to a person (deploy.md, The server itself); both restore drills on real backups; the load test on staging; the notice's four facts and counsel's review.
+- **Still open from that walk:** rate cards exist only in KES (a USD or TZS card is a decision); an event's currency is KES or USD only (no TZS or UGX); the new event form starts the city at Nairobi whatever the organiser's country.
+- **Not yet:**
+  - a live event can't be changed (OR-14), and organisers can't invite their own staff (OR-10)
+  - suspending an organiser or an event (PA-9), and reopening a verified KYC when its details change
+  - amounts processed and commission earned on the overview (PA-5), which wait for payments
+  - Algotech's real price list
+
+**Notes on M0.6's CI and the retention extension, 14 Nov 2026:**
+- **CI** (`.github/workflows/ci.yml`), on every push and pull request: PostgreSQL 15 as a service, provisioned by `scripts/db/setup-local.sh` as a developer's is (the four roles and their rights), both databases migrated, then `npm run typecheck`, `npm run lint`, `npm test` (the database suites included) and `npm run build`. Rehearsed step for step in a clean clone against a fresh PostgreSQL 15: all green, 376 tests, in about four minutes.
+  - Lint now passes with no errors: the four the prototype carried were `Date.now` and `Math.random` in click handlers the rule couldn't tell from rendering (now module helpers) and `useToday` setting state in an effect (now `useSyncExternalStore`, the prerendered page still getting no date).
+  - Still to do for M0.6: staging itself (a server, its two names and TLS), and a branch rule on GitHub requiring the check.
+- **The lead extends document retention** (PRD, Document retention), on the team's settings page:
+  - The settings say when the documents are deleted (the date, with its year) and how it's worked out; only the lead extends it, by 3 to 24 months, with a reason that goes in the changes.
+  - The rule (`dr/retention`) is the lead's alone, says why it refuses, and works after the Deal Room is archived.
+  - Every Deal Room document still kept moves to the new date in the same transaction; deleted ones stay deleted. On the walk-through database that included four uploads from before retention dates existed, which now have one.
+  - Every change to a Deal Room's settings is now audited (`dr_config`), the settings screen's saves included.
+  - Tested: 4 API tests (the settings' date, who may, the bounds, the move, the audit, archived) and in the browser on the walk-through event.
+
+**Notes on M1.7, M-Pesa first, built 14 Nov 2026:**
+- **Paying:** an approved seeker's status page shows the fee (USD 250 is KES 32,500 by M-Pesa) and a "Pay by M-Pesa" button with their number. The STK push puts the request on the phone; the page then shows "Check your phone" and updates by itself.
+- **As the spec says (Webhooks):**
+  - The shillings are locked on the payment row when the push starts.
+  - The callback address carries a random token, stored hashed; the callback is acknowledged whatever it says and kept as a hint, and settles nothing.
+  - The worker asks Daraja (STK push query). Paid, and the callback's amount, phone and receipt match: `dr/payFee` as the system, the payment's confirmation (pending to confirmed, once), the badge and the emails, all in one transaction.
+  - Cancelled or failed: marked failed, and the payer sees why and can send another. No answer after 15 minutes: given up.
+  - Paid with no callback, or a callback that doesn't match: held and logged for the team. Paid after a waiver: recorded, not applied, logged for a refund.
+  - A second request within two minutes sends nothing new; five an hour at most.
+- **M-Pesa's settings:** Daraja (sandbox or production) with the `MPESA_` keys and `PUBLIC_API_URL`; all of them or none. Without them, production doesn't offer M-Pesa, and local and staging get a test M-Pesa that pays three seconds after the push (a number ending 0001 cancels). Production refuses Daraja's sandbox.
+- **The lead's waiver** (on the Decision tab, with a reason) issues the badge at once; only the lead may.
+- **The reminder:** a rule of its own now (`dr/feeReminder`, the prototype's clock uses the same), sent by the worker once, `reminderDays` after the link; only while a payment method is live, so approvals made before payments open get it, with the link, as soon as they do.
+- **Tested:** 10 tests of the client against a stand-in Daraja (the token reused, the password and fields, paybill and till, the query's three answers, Daraja's errors as messages, the settings) and 10 end to end (nothing owed before approval, a bad number, the request once, the hashed token, the callback settling nothing, the worker settling the fee, the badge and the email once however often the callback comes, a cancel and a retry, a mismatch held, the waiver and who may give it, paid after a waiver, the one reminder). Walked in the browser on the walk-through event with the test M-Pesa: the lead approved Kilimo Fresh, Neema pressed Pay, and within ten seconds the page said paid with the receipt; the badge and the email followed.
+- **Open:**
+  - **Daraja:** Algotech's sandbox app's consumer key and secret to try the real sandbox (the shortcode 174379 and its passkey are public), and the production application (M0.1) with the paybill or till. The callback needs a public https address, so the sandbox is tried on staging.
+  - **Card (D4):** Paystack or Pesapal, whichever Algotech has; the payment module takes it as a second method.
+  - **SMS:** the rules already mark the payment messages "Email and SMS"; sending SMS waits for Africa's Talking's sender ID.
+  - The daily reconciliation against the M-Pesa statement, and refunds, are M2.5's.
+
+**Notes on M1.6, built 14 Nov 2026:**
+- **The reviewer's screen** (`/team/applications/[id]`) gains a **Decision** tab for seekers and a **Verification** tab for providers (capital, partner and challenge alike), ported from the prototype's, on the API.
+- **Decisions:**
+  - A reviewer without the decide right **recommends**; a decider (the lead, or a reviewer marked "may decide") **decides**, always with a reason, which the applicant reads.
+  - A conditional decision needs at least one condition, each with a due date no earlier than today; conditions are marked met one by one.
+  - Every decline, and any ask over the lead's threshold (USD 10 million by default), waits for a **second, different decider**. Until then nothing takes effect, nothing is sent, and the applicant sees no decision.
+  - A decision that takes effect emails the applicant; an approval asks for the fee (when the Deal Room charges one) and the badge waits for payment (M1.7), or issues the badge at once when the fee is 0.
+- **Readiness:** Deal Room Ready is refused, with the list, until every readiness criterion is scored, the decision-maker is confirmed and no condition is open; the applicant is then told.
+- **Verification:**
+  - Once submitted, the applicant uploads the three KYC documents (registration, beneficial owners, the signatory's ID: scanned like any upload) and signs the NDA online, from their status page.
+  - The team checks each document, enters the sanctions screening's result (a match blocks), confirms the decision-maker, and verifies or declines with a reason. Verifying needs all of it; the applicant is emailed and the badge is issued.
+  - After a verification or decline nothing more is uploaded or signed.
+- **The applicant's page** shows the decision in force (reason, conditions, fee due) or the verification steps, under "Application received". A request still open when a decision is made is closed for the applicant (the rules already refuse its answer).
+- **The badge, fixed in the rules:**
+  - It was issued on the demo's tier (`t_ca3_dr`) for every event, which a real event doesn't have: the first decision on a real event would have failed. Each event now gets its own Deal Room tier with its first badge (invitation only, free, in the event's currency), saved with the delegate.
+  - Its code was a hash of the application id with 9,000 possible values, and it is the badge table's key: two badges would soon have collided. It now comes from the server's random ids (`EXC-DR-` and eight characters). M2.1 still owns the badge's final form.
+  - The NDA's version is named after the event (`EAGC-NDA v1.2`), not the demo.
+- **The applicant's own name is now required to submit:** a badge is issued in that name, and the walk-through's partner had submitted without one (its badge has no name).
+- **KYC uploads, the NDA and autosave** run on their one application (the autosave's lock, 14 Nov).
+- **Tested:** 13 API tests (who may decide, recommendations, conditions and their dates, the second decider for a large ask and for a decline, readiness and its blockers, a provider from submission through KYC uploads, the NDA, the checks, a sanctions match, verification and its badge, the applicant's view) and 2 rules tests (the event's own tier, random codes). Walked in the browser on the walk-through database's real event: Savanna Freight submitted as a partner, uploaded its KYC and signed; the lead checked, screened, confirmed and verified it, and the event's tier and the badge appeared; the lead approved Kilimo Fresh on a condition, and Neema saw the decision at phone width.
+- **Open:**
+  - **The NDA's text.** The applicant accepts "the agreement" by name and version; Algotech must supply the agreement itself (a PDF linked from that card) before providers sign for real.
+  - The lead's fee waiver, and paying, are M1.7.
+  - The teaser, re-review after a material change and the matching profile are later milestones.
+
+**Notes on M1.4, done 12 Nov 2026:**
+- **Sending:** Zoho over SMTP (D7), from `Events <noreply@algotech.co.ke>`. Sign-in codes go straight out from the API; every other message goes through the outbox and the worker. `npm run mail:check` logs in without sending.
+- **The outbox is the queue:** a message is written in the same transaction as the change that causes it, as "queued". The worker claims batches with `FOR UPDATE SKIP LOCKED`, sends, and records "sent" with Zoho's message id. A failure is retried after 1, 5, 15, 60 and 240 minutes, then "failed"; a message with no one to send to fails at once. Commands only ever add messages; they never rewrite one the worker has sent.
+- **What gets an email:**
+  - Every message the rules already send: application received, information requested, the answer to a reviewer, decisions, meetings and so on.
+  - New ones the walk-through showed were missing: Algotech when KYC or an event is sent for checking; the owner when KYC is returned or verified and when an event is approved, sent back or rejected; a new Deal Room staff member, as their invitation.
+- **The email:** the message names the action and its date only (PRD Notifications); around it, a greeting by first name and one link to where it is acted on, written for who gets it: an applicant's to their event's apply page (with their invitation, if any), staff's to the workspace (an application's own page when the message is about one), an organiser's or Algotech's to the page the message names.
+- **Messages screen:** `/team/messages`, for everyone on the Deal Room team: each email, who it went to, and whether it went, failed or is being retried.
+- **Fixed on the way:** the rules addressed some messages, and every new application's owner, to the demo's own staff (`st_lead`, `st_ops1`); they now name the event's own lead and operations staff.
+- **Local safety:** away from production, real mail goes only to `MAIL_ALLOW`; everyone else's is printed in the console, so test addresses never bounce off the real sender (bounces hurt its reputation).
+- **Tested:** 6 tests (links and wording; sent once with two workers at once; retried, then given up; no recipient; a stuck message requeued) and onboarding's checks that each step queues its email; then a real login and one test email through Zoho, and the worker sending a request for information from the walk-through.
+- **Not yet:**
+  - Delivery reports: "sent" means Zoho accepted it; bounces and complaints aren't read back yet.
+  - SPF, DKIM and DMARC for algotech.co.ke must be published before production, or mail lands in spam.
+  - SMS (M1.7), an HTML version of the email, and a way for the organiser's or Algotech's own messages to be listed (they show only in the Deal Room's list when they name its event).
+
+**Notes on a new summit from nothing (M2.3's core, brought forward), 11 Nov 2026.** Built so a summit can be set up on real screens instead of the demo seed, then walked end to end on an empty database (`excursia_fresh`) to find the gaps.
+- **The flow, and who does what:**
+  1. The first Algotech admin is made from the command line (`db:admin`); no request can make one.
+  2. An organiser signs itself up at `/organisers/signup`: an emailed code proves the address, then the owner's account (password, then authenticator or D14's grace), the organiser and the owner's membership are made together.
+  3. KYC: business details, three documents (registration certificate, tax PIN certificate, signatory ID) and the data processing agreement, signed by typing the signatory's name. Sent once complete; read-only while Algotech checks it.
+  4. Algotech opens each document through a short link (audited) and verifies, or returns with a reason; a return opens KYC again.
+  5. The organiser drafts an event (it may ask for the Deal Room add-on and name its lead). A draft is the organiser's alone (OR-2); it can be submitted only once KYC is verified.
+  6. Algotech approves with terms (commission, fees, the add-on's price and desk staff), asks for changes, or rejects with a note. Approval with the add-on creates the Deal Room on the platform's standard settings (`dealroom/defaults.ts`), closed until the lead sets it up.
+  7. Algotech gives the Deal Room its staff accounts (DA-2): the staff record through the rules (`dr/staffAdd`) and the sign-in behind it, in one transaction. An applicant's email can't also be staff.
+  8. The organiser publishes the approved event.
+  9. The lead sets the missions, tracks, application window and days to answer a request (through `dr/config`). Applications open once the event is live and nothing is missing.
+- **Where it lives:** the rules in `@excursia/domain/core/onboarding` and `dealroom/defaults`; the API's `organisers` module (owner) and `platform` module (Algotech, decisions only with the authenticator confirmed); the screens under `/team` (the menu follows the person's roles: Algotech, the owner, the Deal Room team, its lead).
+- **Found by the walk-through and fixed:**
+  - Application references were hard-coded to the demo's `CA3-`. Each Deal Room now has its own prefix, from the event's short mark (`EAGC-CS-00001`). The first application on the walk-through database kept `CA3-CS-00001`.
+  - Algotech saw organisers' drafts; now it sees an event once it is sent.
+  - The lead landed on an empty review queue with nothing saying the Deal Room wasn't set up; the queue now says what is missing and links to the settings.
+  - The KYC form kept the PIN as typed rather than as saved; pages inside a Suspense boundary under `/team` rendered differently on the server and in the browser (a hydration error).
+- **Gaps still open:**
+  - ~~The public event pages read the prototype's local data, so a real, live event showed "Event not found".~~ **Fixed 12 Nov 2026:** a published event's page and its Deal Room page now come from the API (`GET /v1/public/events/:slug`, no session, no personal data, a minute's public caching), rendered on the web server so search engines and link previews see them, and kept a few minutes there. Drafts and events under review are not public. The demo's events keep the prototype's pages, with their tickets, programme and sponsors, until those move onto the API (Phase 2); a page with no API to ask falls back to the prototype's too. A real event's page shows what exists today: the dates, venue, organiser and the Deal Room (applying while it is open); "Registration opens soon" until tickets (M2.4). Its `register` and `exhibit` pages are still the prototype's.
+  - **No email** tells anyone about these steps: a staff member added to a Deal Room, KYC returned or verified, an event approved. They wait for the outbox and its worker (M1.4); until then people learn by looking.
+  - **Algotech's terms** are prefilled with the prototype's figures (5%, KES 120,000 licence, KES 450,000 add-on). The real price list is a decision to record.
+  - The owner can't invite their own team yet (finance, accreditation, organiser staff); Algotech can't change a Deal Room staff member's role or revoke them from the screen (the rules have `dr/staffSet` and `dr/staffRevoke`).
+  - The lead can't change the rubric, sectors, countries or the seeker fee from the screen (the standard ones apply; the fee is 0).
+  - An event has no tickets or registration yet (M2.4), and nothing stops two organisers signing up with the same registered name (Algotech sees it at KYC).
+  - Local only: `RULES_CLOCK` starts again from its set time whenever the API restarts, so times in a walk-through can run backwards.
+- **Tested:** 10 API tests (sign-up, refusals, KYC with return and verification, privacy between organisers and of drafts, approval with the add-on, staff accounts, the lead's settings, applications opening only then, the summit's own references) and 9 rule tests; then the walk-through above in two browsers, through to a request for information answered with its document.
+
+### Phase 2: Core platform and scanning (4 to 29 January 2027)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M2.1 | **Badges and delegates**: badge page and email, random badge codes, delegate edits | A paid participant gets a working badge by email and SMS **Built 16 Nov 2026 for the Deal Room:** the badge page, its email, the name and title corrected by the participant or the desk, reissue, revocation stamped; SMS waits for the sender ID, and other events' delegates for M2.4's registration. Notes below |
+| M2.2 | **Accreditation and scanning**: scanner devices and PIN sign-in with lockout, desk accreditation, zone and room doors, anti-passback through `Presence`, atomic capacity, PIN overrides, the offline queue with idempotent sync | 50 scans a minute on two devices with one offline: no duplicates and no over-capacity after sync; the prototype's demo PINs and the applications' invite tokens no longer saved in browser storage (found by the security pass, 11 Nov 2026) **The Deal Room desk built 16 Nov 2026:** enrolled devices, PIN sign-in with lockout, accreditation and daily arrivals, the offline badge list and queue, each scan recorded once. Zone and room doors, the one-entry-per-badge check, capacity and PIN overrides wait for zones, rooms and the programme on the server (M2.3); meeting room doors for M3.2. Notes below |
+| M2.3 | **Organisers and events**: KYC and DPA, the event builder, media uploaded straight to storage, approval by Algotech | An organiser builds and publishes an event on staging **Core brought forward and done 11 Nov 2026** (self sign-up, KYC, Algotech's checks, events from draft to live, the Deal Room's set-up); the event builder's tiers, sessions and media remain. Notes under Phase 1 |
+| M2.4 | **Registration and orders**: pricing, promo and status worked out on the server; M-Pesa and card checkout; refunds | A delegate registers and pays; a crafted request can't change the price |
+| M2.5 | **Money and comms**: commission, payouts, reconciliation; memberships, shifts, campaigns | A payout run matches the payments to the shilling |
+| M2.6 | **Visitor log**: moved from SQLite to PostgreSQL; IP taken only from `X-Real-IP`; `/adminwatch` behind staff sign-in with TOTP and an IP allow-list | Visits record and replay from PostgreSQL; `/adminwatch` refuses anyone without staff sign-in |
+
+**Notes on M2.1, the Deal Room badge, 16 Nov 2026:**
+
+- **The badge page:** `/e/<event>/badge`.
+  - The participant signs in with the email they applied with, as they did to apply. Participant sessions last 7 days idle and 30 days at most, so one sign-in before the summit covers it.
+  - Each of their applications that holds a badge shows:
+    - the event, its dates and venue
+    - the name, title and organisation
+    - the QR and the code, with whether the desk has accredited them yet
+    - "First stop: the Deal Room desk" until it has
+  - Print or save as PDF. The page works at phone width.
+  - A revoked badge shows as revoked, with no QR.
+  - API: `GET /v1/badges/:slug`, the holder's own only. Anyone else's comes back empty, and a staff account is refused.
+- **The email:** the messages that announce a badge link to the page. The outbox turns `/dr/<id>?badge=1` into `/e/<slug>/badge`. They are:
+  - payment received
+  - fee waived
+  - verified
+  - reissued
+  - an approval that settles at once (no fee): a new "Your Deal Room badge is ready"
+  
+  The email carries no code: the code is a door credential, so it stays on the signed-in page (PRD Notifications: no private data). The application's outcome card now says the badge is ready and links to it.
+- **The name and title on it** (`dr/badgeDetails`):
+  - The participant corrects them (`PATCH /v1/badges/:slug/:appId`) until the organiser locks profiles for printing (`profileLocked`, OS-10).
+  - The desk (the lead, operations, a coordinator) corrects them at any time (`PATCH …/applications/:appId/badge`).
+  - The organisation comes from the application. Each change is noted in the application's history and audited.
+- **Reissue** (`dr/reissueBadge`, `POST …/applications/:appId/badge/reissue`): the desk, with a reason.
+  - It gives a new code. The old code is deleted from the badge table in the same transaction, so a scanner no longer finds it.
+  - The history keeps the old code, and the participant is emailed.
+  - Operations and coordinators can reissue through the API. Their screen comes with the desk in M2.2; on the review page only the lead sees the Badge section (Decision tab for a business, Verification tab for a provider).
+- **Codes:** still `EXC-DR-` and eight characters from the server's random ids. They are hexadecimal, so there is no O or I to misread at a desk, and there are about 4 billion of them.
+  - Saving a new code never takes over another delegate's row. The insert only updates a row that already belongs to the same delegate; otherwise the command fails and nothing is written.
+- **Revocation is recorded:**
+  - Before, a revoked badge stayed in the badge table with no `revoked_at`, so a scanner reading the table would have let it in.
+  - Now a decision that revokes stamps `revoked_at` once, and one that qualifies again clears it.
+  - The demo seed loads revoked badges as revoked.
+- **Not yet:**
+  - SMS (the sender ID)
+  - a badge saved for offline use on the day (M3.5)
+  - the desk's own screen for operations and coordinators (M2.2)
+  - badges for other events' delegates (their registration is M2.4)
+- **Tested:**
+  - 8 rule tests: own edit, refusals, the print lock, revoked, reissue and who may, the badge emails' links.
+  - 5 API tests: the holder's view against the badge table, edits and their audit, the lock, a reissue removing the old code, a revocation stamped.
+  - The outbox link.
+  - In the browser on the walk-through database: Neema signed in at phone width, saw her badge (code matching the table), corrected her name, and found "Open my Deal Room badge" on her application. The lead saw the badge on the Decision tab and reissued it: the old code left the table, the new one went in, the email was queued and both changes were audited.
+
+**Notes on M2.2, the Deal Room desk, 16 Nov 2026:**
+
+- **Scope, decided with the user:** the Deal Room desk first.
+  - The doors need the event's zones, rooms, programme and scanning team, which are still only in the prototype. They come with M2.3's event builder.
+  - Meeting room doors come with M3.2's meetings.
+- **Devices** (`scanner_device`):
+  - Someone on the desk team (the lead, operations, a coordinator), signed in with password and authenticator, enrols the tablet or phone in front of them from Desk scanners in the workspace.
+  - The device gets a random secret in an HttpOnly cookie, sent only to `/v1/scan`, for 90 days. The table keeps its hash. PINs are taken only on an enrolled device.
+  - Retiring a device signs out whoever is on it at once.
+- **PINs** (`scanner_pin`):
+  - Each person sets their own six digits in the workspace. All-same digits and straight runs are refused, and the form explains why before anything is sent.
+  - Hashed with argon2id, like passwords.
+  - Five wrong PINs lock that person's PIN for 15 minutes; ten on one device lock the device for 15 minutes.
+  - The scanner lists only the desk team's names, never reviewers.
+- **The scanner's session:**
+  - A PIN sign-in makes a session for that event on that device (`session.scan_event_id`, `scan_device_id`).
+  - It lasts 12 hours at most and ends after an hour without use.
+  - Every route refuses it except scanning (`requireSession({ scanner: "only" })`), so a desk tablet left signed in opens no application, setting or document.
+- **The desk rule** (`domain core/desk.ts`): pure, so the server and an offline device decide alike.
+  - An unknown, foreign or revoked badge is refused.
+  - The first scan accredits.
+  - On an event day, the first scan records the day's arrival (`arrival`, one per participant per day; Deal Room PRD DO-7). It counts for that day's meetings and sessions once they're on the server (M3.2).
+  - Before the event, a scan accredits without an arrival (badge pickup). After the event, it is refused.
+  - A second scan on the same day changes nothing and says when they arrived.
+- **Scans** (`scan`): each is sent with an id the device made, so a retry or the offline queue records it once.
+  - A scan is one transaction: the event's lock taken shared, so it never interleaves with a Deal Room command writing delegates, and scans don't wait for each other. Then the delegate's row is locked, the verdict decided on what is stored, and the delegate, arrival and scan written together.
+  - Accreditation is audited (`desk/accredit`).
+  - The device's clock is kept if the scan is up to a day old and no more than 2 minutes ahead of the server; otherwise the server's time is used.
+  - A batch is decided in the order scanned and answered in the order sent.
+- **Offline:**
+  - The scanner keeps the event's badge list, checked every 15 seconds against its ETag (304 when unchanged).
+  - When the API doesn't answer within 4 seconds, the device decides from the list, queues the scan, and shows that it did.
+  - The queue goes when the connection returns, and anything the server then decides differently is listed.
+  - The badge list and the device's details are also kept in the browser's storage, so a reload while offline still scans. That is participants' names and badge codes, on an enrolled desk device only; signing out removes the list. Scans not yet sent stay until they are sent.
+- **Input:** a handheld scanner types the code and Enter into the box, which keeps focus. The camera reads QR codes where the browser can (`BarcodeDetector`: Chrome on Android); elsewhere the button doesn't show.
+- **Not yet:**
+  - zone and room doors, the one-entry-per-badge check, capacity and PIN overrides (with M2.3's zones, rooms and programme)
+  - meeting room doors and the "next meeting" line at the desk (M3.2)
+  - the live board of who is in (M3.4)
+  - the prototype's demo PINs and invite tokens in browser storage (they leave with the prototype's screens)
+  - the 50-scans-a-minute load test on staging
+- **Tested:**
+  - 4 rule tests.
+  - 10 API tests:
+    - PIN rules
+    - only the desk team enrols
+    - the device's list of names
+    - five wrong PINs lock, and another person still signs in
+    - a scanner's session refused elsewhere
+    - the badge list and its 304
+    - accredit and arrive, the same id again, a later scan
+    - unknown and revoked
+    - ten concurrent scans from two devices giving one arrival, and one id sent five times at once giving one scan
+    - the offline batch out of order, with a stale clock replaced
+    - retiring a device
+  - In the browser on the walk-through database, at phone width:
+    - The lead set a PIN (an obvious one was refused, with the reason), enrolled "Desk tablet 1", signed in with a wrong then the right PIN, and accredited Neema.
+    - With the API stopped, Savanna Freight's badge and an unknown code were decided on the device and queued ("2 to send"). After a reload, still offline, the scanner opened and decided from the kept list.
+    - With the API back, the queue synced on its own. The database held each scan once, flagged offline, with both accreditations audited.
+    - Signing out returned to the PIN pad and removed the list.
+
+### Phase 3: Deal Room summit operations (4 January to 10 February 2027)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M3.1 | **Matching and introductions**: candidates and fit, decisions, briefs, introductions and answers, intro expiry, consent per document, the access log, watermarked downloads | A pair is introduced and accepts; a document opens only under consent and is logged **Built 16 Nov 2026:** candidates with their fit, decisions with reasons, the brief, introductions with chosen documents, both answers, consent per document with withdrawal, the profile and stamped copies opened through two-minute links, every opening logged; then the business's teaser and its approval, the directory for verified counterparties, expressions of interest in the team's queue, view-only documents, and the email when an introduction expires unanswered. Notes below |
+| M3.2 | **Scheduling**: `DrBusy` with exclusion constraints, lapse release, caps under advisory locks, confirm and change, auto-propose as a job, .ics invites, reminders | The PRD's three 50-request bursts book no clash; auto-propose for 150 pairs finishes within 10 s **Built 17 Nov 2026:** the team's schedule with a slot picker, auto-propose, moves, cancellations and caps; each participant confirms, asks to move, answers a move and adds a meeting to its calendar; lapsed proposals release their slot and are told once; reminders a day and half an hour before. The bursts book 1, 4 and 6 of 50 with no clash; auto-propose drafts 150 pairs in about 1.7 s. Notes below |
+| M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server **Built 17 Nov 2026:** the team's Sessions page (plan, change, invite, cancel, attendance, outcomes) and sessions in each participant's schedule (accept or decline, with the reason when a meeting is in the way); every refusal says why; a session holds its room, host and whoever accepted in the database too. Door scans wait for the room doors (M2.2). Notes below |
+| M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds **Built 17 Nov 2026:** the team's Live board (phone-first: a sheet from the bottom; beside the board on a big screen), arrivals read from the desk's own table, start, outcome and refill with reasons, an outcome recorded once however often it is sent, the close-out, and the 19:00 report as a worker job. Phones poll every 3 seconds against the board's version (304 when nothing changed); a change on one phone shows on another at its next poll. Notes below |
+| M3.5 | **Offline on the day**: live board and scanners queue offline and sync with client ids; conflicts go to the lead; incidents are logged | A forced 10-minute outage loses nothing **Built 17 Nov 2026:** the live board keeps its last copy and a queue on each phone, and syncs it in one request when the server answers again; each record is recorded once, a resend is dropped, a disagreement waits for the lead; each outage is logged and reported to the lead; a page reloaded offline opens on what the phone kept. The desk scanners already queue and sync once (M2.2). Notes below |
+| M3.6 | **Every role, walked through**: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight | No role sees a screen or a record it shouldn't, and no link ends in a refusal **Built 17 Nov 2026, tested by the API; not yet walked in the browser:** each role's menu now holds only the screens the API lets it read, and each role lands on its main work. Two reads were open to the whole team and are now closed: the review queue and the Deal Room set-up. A read-only Overview, counts only, opens for every role, and is oversight's first screen until M4.3. Notes below |
+| M3.7 | **Freeze and rehearsal**: freeze Fri 22 Jan; rehearsal on staging with real phones Wed 10 Feb; printed backups; restore drill and failover to the standby server | **The summit runs 15 to 18 Feb 2027** |
+
+**Notes on M3.1, matching and introductions, 16 Nov 2026:**
+
+- **Scope, decided with the user:** the introduction loop first, then teasers, the directory and expressions of interest (below).
+- **The rules** (`domain dealroom/meetings.ts`), unchanged in what they allow, now say why they refuse:
+  - Approving a pair needs both sides open to matching, and the refusal names who isn't and why (`notMatchable`: re-review, not verified, not qualified, conditions open, not Deal Room Ready, fee unpaid).
+  - Deferring or rejecting needs a reason. A must-have miss or an exclusion hit needs the reviewer's note to approve.
+  - A pair rejected, declined or expired before comes back only with the lead's reason, logged as an exception.
+  - Once introduced, a pair's decision and brief no longer change. The introduction proposes only the seeker's own documents.
+  - A decline needs its reason. The seeker shares only documents the introduction proposed, chooses them when accepting, and may share or withdraw each one later. Each choice is a new consent entry with a higher version.
+  - The entry with the highest version decides a document's consent. Stored rows load in their ids' order, so "the last in the list" was arbitrary on the server: a withdrawal could come back. Found by the API tests; the mapper now also sorts by version.
+- **The team's side** (`/v1/matching/:eventId`, `/team/matching`):
+  - The lead, reviewers and coordinators match; operations is refused, and schedules the accepted pairs with M3.2.
+  - The board lists who is open to matching on each side, filtered by mission and name. Each participant's candidates show the fit field by field, in the lead's order.
+  - The pairs tab lists every pair by stage, opening on those approved and waiting for their introduction.
+  - The pair's page shows both parties and how they fit. It also has the brief, editable until sent, and the introduction with the documents to propose. Once sent, it shows each side's answer, the consent per document and every opening. The history comes last.
+  - Reads load the event's aggregate without the lock; every write runs through runCommand and is audited.
+- **The participant's side** (`/v1/introductions/:slug`, `/e/:slug/deal-room/introductions`):
+  - Signed in with the email they applied with, they see the introductions of their own applications only, as seeker or counterparty.
+  - The emails link here (`/dr/<id>?intros=1`, mapped by the outbox).
+  - The counterparty opens the seeker's full profile from the introduction, and each document once both have accepted and the seeker shares it. The seeker sees every opening of their file.
+  - The other side's answer is shown without its reason.
+- **Stamped copies** (`storage/stamp.ts`, pdf-lib):
+  - A PDF, or a PNG or JPEG put on a page of its own, opens as a copy carrying the viewer's name, organisation and the time four times across each page, sized to fit, plus a footer line. The original is never changed.
+  - Opening one runs the rules' `dr/access`, which checks and logs it. Then a signed two-minute link serves the copy, shown in the browser or downloaded. The link names the file, the stamp's words and its expiry, signed with a key derived from AUTH_SECRET.
+  - A damaged or password-protected file is refused with the reason before anything is logged. The walk-through's stand-in deck from M1.1 was such a file.
+  - Word, Excel and PowerPoint files can't be stamped, so they are downloaded as they are, and only where the seeker allows downloads.
+  - Files over 40 MB aren't stamped either.
+- **Then the rest of M3.1, the same day:**
+  - **The teaser** (`/e/:slug/deal-room/teaser`, CS-7):
+    - The business writes it once approved: a title, a summary of up to 1,200 characters, and whether its name shows or stays back until an introduction. A live preview shows the card as the directory will.
+    - The first one also completes the matching profile, which clears the "profile past its deadline" flag.
+    - A new or changed teaser leaves the directory until a reviewer approves it. The reviewer is emailed once each time it starts waiting, not on every edit while it waits.
+    - The rules refuse a teaser from a counterparty, or from a business not yet approved. The prototype's own profile screen still saves through the same action.
+  - **Approval** (the team's application page, Decision tab): a banner points to a waiting teaser. A reviewer or the lead approves it, and the business is emailed with a link to its teaser.
+  - **The directory** (`/e/:slug/deal-room/directory`, FP-5):
+    - It is for verified investors and partners. It shows the approved teasers of businesses open to matching, and filters by sector, country, ask band and pathway.
+    - An anonymous teaser carries no name. A shilling ask is banded in dollars at the review's rate.
+    - Anyone else gets the reason instead: a business, a counterparty not yet verified, or an email with no application here.
+  - **Expressions of interest** (FP-6, DR-10):
+    - "Express interest" creates a suggestion, never an introduction. The business's reviewer (or the lead) is emailed with a link to the team's Interest tab.
+    - The tab lists each waiting pair with its fit, and the same decide panel as the candidate list.
+    - The counterparty's card then reads: with the Deal Room team, the team is preparing an introduction, introduced (linked), or not taken forward.
+  - **View only:** on its teaser page, the business sets each document to view only (a stamped copy, never downloaded) or downloadable. Only the business can change it. A file that can't be stamped and is set to view only can't be opened, and the page says so in red.
+  - **Expiry:** every ten minutes the worker notes each introduction that expired unanswered (`dr/introLapse`, system only, once).
+    - Each side is emailed whether it was waiting on itself or on the other.
+    - The team is emailed a link to the pair.
+    - The pair's history records it.
+  - **Email links:**
+    - The team's links now open the pair itself or the Interest tab, not just matching.
+    - The business's teaser link opens its teaser page.
+  - **The application page** links a business to its teaser, and a verified counterparty to the directory.
+- **Not yet:** Oversight's read-only view of matching (M4.3).
+- **Tested:**
+  - 12 rule tests.
+  - 6 API tests:
+    - the board, and its refusals for operations and participants
+    - approve, brief and introduce: audited, and both sides emailed with the introductions link
+    - each side sees only its own; a stranger sees none and can't answer
+    - the profile opens with the introduction and is logged; a document waits for both answers
+    - both accept; the stamped copy is served inline, a changed link is refused
+    - the access log; a withdrawal closes the document at once; the team sees the same
+  - In the browser on the walk-through database, at phone width:
+    - Kilimo Fresh's readiness was scored and it was marked Deal Room Ready.
+    - The lead approved Kilimo Fresh with Savanna Freight, writing the note the three must-have misses required. The lead then edited the brief and introduced them with the pitch deck and the financial statements.
+    - Savanna Freight opened the profile and accepted. Kilimo Fresh accepted, sharing the deck only.
+    - Savanna Freight's deck was first refused as unreadable. That was the M1.1 stand-in, replaced with a real two-page PDF. Its stamped copy was checked by rendering it.
+    - The financial statements stayed closed with the reason. Kilimo Fresh saw each opening and withdrew the deck, and the lead's page showed it withdrawn with every opening.
+    - Found and fixed in the browser:
+      - a server error on an unreadable file, now refused with the reason on the page
+      - the stamp running off a landscape page
+      - an empty "; ." in drafted briefs when traction is missing
+      - cramped lists at phone width
+      - the pairs tab opening on an empty stage
+  - For the rest: 5 more rule tests and 3 more API tests:
+    - a teaser: written, waiting, approved once, out again on a change
+    - the refusals
+    - interest and the team's queue
+    - view only
+    - the expiry round, once
+  - In the browser at phone width, on two databases:
+    - **The walk-through database:** Kilimo Fresh wrote its teaser and set its pitch deck to view only. The lead approved the teaser from the banner. Savanna Freight found it in the directory, marked introduced.
+    - **The demo database:** Lakeside Distribution filtered the 39 teasers and expressed interest in Atlas Pay. The lead approved it from the Interest tab with a note for the sector miss, and Lakeside's card turned to "preparing an introduction".
+    - Fixed in the browser: the document rule cut off at phone width, and a cramped header on the Interest tab.
+
+**Notes on M3.2, scheduling, 17 Nov 2026:**
+
+- **The rules** (`domain dealroom/meetings.ts`): every scheduling refusal now says why, where before it was silent.
+  - A clash names what is in the way (the room and table, a party's meeting, a session, the hours). A cap names the party and the cap, and says a reason goes over it.
+  - A participant confirms, asks to move and answers only for its own side. The prototype's acting staff still act for either side.
+  - Confirming twice, confirming a lapsed proposal, a move with no reason, the same time or a time that isn't free, and answering your own request are each refused with their reason.
+  - An older move request with no time is accepted by moving the meeting, and the refusal says so.
+  - New, for the server's jobs only: `dr/meetingLapse` (a lapsed proposal told to both sides and operations, once) and `dr/remindMeeting` (a day before, then half an hour before by email and SMS, once each). A meeting moved to a new time gets its reminders again.
+  - Auto-propose checks the pair first without a room, so a busy time is skipped for every table at once. A DFI's meetings take the 30-minute slot. Party lookups in `slotProblems` use a map. 150 pairs take milliseconds in the rules.
+  - Meeting emails link to the participant's meetings (`/dr/<id>?meetings=1`) and say to add the meeting to a calendar, since emails carry no attachment.
+- **The database:**
+  - **Lapse release:** before any busy row is written, the save marks every unconfirmed proposal past its confirm-by time inactive, at the command's clock. Without it a lapsed proposal's rows stayed active until something rewrote them, and the exclusion constraint would have refused a booking the rules allowed.
+  - A write that still breaks the exclusion constraint (SQLSTATE 23P01) is refused with "That slot was just taken", and nothing is written.
+  - Caps hold under the event's advisory lock, as every write does.
+- **Rooms on the server:** the event's rooms aren't on the server yet (Phase 2), so the Deal Room's settings carry each meeting room's name, and `stateOf` builds the rooms from them. The reference file takes an optional `name` per room, and the demo seed has them. The local demo database was given the names directly.
+- **The team's side** (`/v1/meetings/:eventId`, `/team/meetings`, in the menu for the lead, operations and coordinators; reviewers are refused):
+  - **Ready to schedule:** each pair with a slot picker (a day, the free times with their table counts, the room and table, the 30-minute option, a reason when over a cap), and auto-propose for all.
+  - **Schedule:** day by day, a grid of rooms and tables on a wide screen and a list on a phone. Each meeting opens with who has confirmed, when it lapses, a move asked, its history, and Move, Cancel, Accept or Decline the move.
+  - **Changes:** the moves and unconfirmed proposals, moves first. **Caps:** each counterparty per day and in all, each seeker against the cap.
+  - Auto-propose runs in the request, as one command under the event's lock: 150 pairs in about 1.7 s, including the save.
+- **The participant's side** (`/v1/my-meetings/:slug`, `/e/:slug/deal-room/meetings`, linked from the other participant pages):
+  - Its own meetings only, with what to do: confirm by a date, waiting for them, asked to move, move agreed, confirmed, lapsed. A lapsed proposal the team has replaced is hidden.
+  - "Ask to move it" offers only the times when both sides and a table are free. The other side agrees or declines, then the team accepts.
+  - "Add to calendar" downloads an .ics file (Nairobi time, a 30-minute alarm) once both sides have confirmed.
+- **The worker:** once a minute, for events with meetings still ahead, one command per event notes the lapses and sends the reminders due, worked out again under the lock.
+- **Tested:**
+  - 10 rule tests: refusals with their reasons; confirming and moving one's own side; the lapse and the reminders, once each; auto-propose for 150 pairs with no clash.
+  - 10 API tests:
+    - the schedule and its refusals
+    - the slot picker
+    - a proposal: audited and emailed, with clashes refused
+    - each side confirming its own, and the calendar file
+    - a move from request to acceptance
+    - a cancellation's reason
+    - the worker's lapse and reminders, once each, with the released slot booked again
+    - the three 50-request bursts
+    - auto-propose for 150 pairs
+  - **The bursts** (one room and table at one time; Deal floor A's four tables; three times in two rooms) book 1, 4 and 6 of 50 over HTTP, exactly what the rules allow taken one by one, and the database holds no two overlapping active rows.
+  - **Not met yet:** the slowest answer in a burst takes 2.0 to 2.3 s against the 2 s target. The 50 requests queue on the event's lock, and each loads the whole aggregate. Loading less per booking is the fix, before the load tests.
+  - In the browser on the demo database, at phone width:
+    - Operations proposed Zambezi Irrigation and Turkana at 11:30 from the picker, then auto-proposed the other five ready pairs.
+    - Sahel Water confirmed its new meeting and asked to move its Lakeside meeting to 14:00. Lakeside agreed, and operations accepted the move.
+    - The calendar file was checked. The grid was checked at desktop width.
+  - Fixed in the browser:
+    - the calendar file's name, which the browser can't read across origins and the page now builds itself
+    - a request button too wide for a phone
+
+
+**Notes on M3.3, sessions, 17 Nov 2026:**
+
+- **The rules** (`domain dealroom/sessions.ts`): every session refusal now says why.
+  - These include the role, a format that needs a host, an answer for someone else or the same answer twice, a cancellation with no reason, attendance outside its window and an outcome for someone not marked present.
+  - **Closed a gap:** moving a session now checks everyone who accepted it, as well as the host, against their meetings and other sessions, and names who is in the way. Before, only the host was checked.
+  - The staff member running a session is emailed when a participant changes their answer, not on every first answer.
+- **The database:** a session that goes ahead holds its room (`room:<id>:0`), its host and everyone who accepted, from its start to its end, in `dr_busy`.
+  - These rows carry no buffer, since the rules check one session against another without one; a meeting's own rows carry the buffer.
+  - So the exclusion constraint covers sessions and meetings together, and is never stricter than the rules. A cancelled session holds nothing.
+- **Rooms:** the session rooms' names come from the settings (`sessionRoomNames`), as the meeting rooms' do. The local demo database was given them directly.
+- **The team** (`/v1/sessions/:eventId`, `/team/sessions`):
+  - **Who:** the lead, operations and coordinators plan, invite, move and cancel. Reviewers see the page and record outcomes. Oversight is refused until M4.3.
+  - **The page:** day by day, each session with its answers and, once under way, its attendance and outcomes left to record. A session opens on its people, with a large attendance tick on a phone and the outcome with its next step.
+  - **Inviting:** the invite list puts those on the session's track first, and says who would be busy then.
+- **The participant** (`/v1/my-meetings/:slug`, `/e/:slug/deal-room/meetings`): sessions join the meetings in one schedule, day by day, and the tab is now "Schedule".
+  - An invitation is accepted or declined in its row.
+  - When a meeting is in the way, the row says which, and offers only Decline.
+  - The tab's count includes invitations to answer.
+  - Session emails (`?tab=Programme`) open the schedule.
+- **Not yet:** attendance from the room doors' scanners (`dr/sessionArrive`) waits for the doors (M2.2); reminders before a session.
+- **Tested:**
+  - 4 rule tests on the refusals and the move check.
+  - A mapper test that each session holds its room, host and those who accepted.
+  - 6 API tests:
+    - the board and who may see it
+    - planning, with its refusals, audit and emails
+    - an invitation accepted from the schedule and held in the database
+    - a move refused onto a meeting
+    - a cancellation that frees the time
+    - attendance and outcomes on the day
+  - In the browser on the demo database:
+    - Operations invited Atlas Innovation Hub to a briefing; the list marked who was busy.
+    - At phone width, Baobab Logistics saw two invitations it can't accept for its meetings, and declined one. The count went from 2 to 1.
+    - Fixed in the browser:
+      - waiting items' dates wrapping after a comma
+      - an amber message under the contrast floor
+      - the day buttons stacking on a phone
+
+**Notes on M3.4, the live board, 17 Nov 2026:**
+
+- **Arrivals:** the board reads them from the desk's own `arrival` table, which the scanners write (M2.2), and from what a meeting recorded itself.
+  - A check-in counts for all of that day's meetings, so the scanners never write into meeting records.
+  - Late and no-show flags follow from these arrivals and the clock (`boardFlag`).
+- **Staying in step:** each phone asks every 3 seconds with the board's version (`ETag`). The server answers 304 from a fingerprint query alone when nothing changed, without loading the Deal Room.
+  - The fingerprint covers the day's meetings and sessions (how many, and the last change), the day's arrivals, the settings (for the evening report) and the minute (so time-based flags refresh).
+  - A phone in a pocket stops asking, and catches up when it is looked at.
+- **The rules** (`domain dealroom/meetings.ts`): starting, recording and refilling now say why they refuse.
+  - **Start:** from 15 minutes before; not twice.
+  - **Outcome:** from half an hour before; it needs its category, and a next action needs its owner.
+  - **An outcome already on record** is replaced only from the paper sheet, with the reason, logged as an exception.
+  - **Refill:** only a no-show's slot, and only for a pair waiting for one.
+  - **New:** `dr/dailyReport`, the system's, from 19:00, once a day; it is recorded in the settings (`dailyReports`).
+- **Recorded once:** an outcome carries the device's own id. A retry or a second tap with the same id changes nothing, which M3.5's offline queue relies on.
+- **The page** (`/team/live`, in the menu for the lead, operations, coordinators and reviewers; Oversight is refused until M4.3):
+  - **Board:** "Needs attention" first. Then each room and table as a row of the day's meetings, opened on the one happening now; a row a poll updates doesn't move under the thumb.
+  - **A meeting:** opens as a sheet from the bottom on a phone, beside the board on a big screen. It shows who has checked in, with Mark it under way, Held or No-show, the outcome, the next action with its owner and due date, notes (sensitive ones for the lead and owner only), the paper-sheet entry, and the pairs that can take a no-show's slot.
+  - **Close-out:** the paper's checklist for the day beside what the records show, and when the report went.
+  - **Freshness:** a line at the top says "Up to date", or that the server can't be reached.
+- **The 19:00 report:** the worker looks once a minute and sends each summit evening's report to the lead once, decided again under the lock. Its email link opens the Close-out tab for that day.
+- **Tested:**
+  - 5 rule tests: the refusals, the paper sheet, the refill and the report.
+  - 5 API tests:
+    - the board and who may see it
+    - two phones: a 304 when nothing changed, the other phone's next poll carrying an outcome, and a resend recorded once
+    - a desk check-in shown at the next poll
+    - the paper-sheet refusal and a refill
+    - the report, once
+  - **Two phones in the browser,** with the API's clock set to 16 Feb 10:40: operations, at phone width, recorded "Held, follow-up meeting" at 09:17:07. The coordinator's board in Chrome showed it as Held at the 09:17:12 check.
+  - **Found and fixed in the browser:**
+    - The screen-reader text in the sideways tile rows was positioned against the page, not the row. It made the page 1247 pixels wide on a phone, and put the bottom sheet off screen.
+    - The checked-in count read only the desk's table.
+    - A flex gap parted "Day 2" from its date on the day buttons, here and on Sessions.
+
+**Notes on M3.5, offline on the day, 17 Nov 2026:**
+
+- **On the phone** (`features/live/offline.ts`): the browser's storage keeps the last board, the outcomes recorded with no connection (each with its own id and the rules' time), when the connection went, and the phone's name.
+  - A failed poll notes when the connection went. The first poll that reaches the server again sends the queue in one sync.
+  - A blip under a minute with nothing recorded isn't reported.
+  - There are no effects: the poll writes a small store the page reads.
+  - Signing out clears the kept boards. Records not yet sent stay on the phone, as at the desk.
+- **Reloading offline:** a page reloaded with no connection opened on "Checking your sign-in…". The phone now keeps the last staff sign-in the server confirmed, for at most 12 hours, and uses it only when the server can't be reached.
+  - It unlocks nothing: every request still carries the real session, which the server checks.
+  - A participant's sign-in isn't kept, and signing out clears it.
+- **The rules** (`domain dealroom/meetings.ts`), for the server:
+  - `dr/syncOutcome` records an offline outcome at the phone's time, never later than now and never before half an hour before the start.
+  - A record whose id is already on file, or already waiting as a conflict, is a duplicate.
+  - A record for a meeting that already has a different one becomes a conflict. Both are kept, the record on file stands, and the lead chooses. A conflict is never settled by which phone reconnects first.
+  - `dr/resolveConflict` now says why it refuses, and applies a no-show from the phone as a no-show.
+  - `dr/logIncident` logs an outage with its tally and emails the lead.
+  - The prototype's own offline rules (`dr/offline`, `dr/sync`) are unchanged.
+- **The API** (`POST /v1/live/:eventId/sync`): each record is tried in turn, under the lock, and comes back as recorded, duplicate, conflict, or refused with the rule's reason. One refused record never stops the rest.
+  - `POST /v1/live/:eventId/conflicts/:id/resolve` is for the lead only.
+  - The conflicts are stored with the Deal Room's settings.
+- **The board:**
+  - **Offline:** "No connection since …", with how many records wait on the phone; a tile with one shows "On this phone".
+  - **Back online:** "Back online", with what the sync did and the reason for anything refused. If the server refuses the sync outright, the board keeps going and the records stay.
+  - **Conflicts:** "Two phones disagree", with both records side by side and the lead's two buttons.
+  - **Close-out:** the day's outages.
+- **Found and fixed in the browser:** the board's version didn't include who was asking. After another person signed in on the same phone, the server kept answering "nothing changed", and the phone kept the first person's board, with that person's permissions and sensitive notes. The version now includes the person.
+- **Tested:**
+  - 3 rule tests: recorded once at the phone's time, a conflict and the lead's choice, the incident.
+  - 2 API tests:
+    - a forced 10-minute outage on two phones: one record resent, one meeting recorded differently on each. Nothing is lost, and sending a queue again changes nothing.
+    - a refused record reported with its reason while the rest go
+  - The two-phones test now also checks that one person's version never answers another's poll.
+  - **In the browser, with the API stopped and started:**
+    - The phone kept its board through an offline reload, and queued a record.
+    - On reconnecting, operations' record synced first and the coordinator's became a conflict.
+    - The lead chose the coordinator's no-show.
+    - Close-out listed the outages.
+
+**Notes on M3.6, every role walked through, 17 Nov 2026:**
+
+- **What each role's menu holds** (`apps/web/src/features/auth/roles.ts`, `menuOf`, which the workspace's rail now uses):
+
+  | Role | Menu | First screen |
+  | --- | --- | --- |
+  | Lead | Overview, Review queue, Matching, Meetings, Sessions, Live board, Messages, Desk scanners, Deal Room settings | Review queue |
+  | Reviewer | Overview, Review queue, Matching, Sessions, Live board, Messages, Deal Room settings (read only) | Review queue |
+  | Coordinator | Overview, Matching, Meetings, Sessions, Live board, Messages, Desk scanners | Matching |
+  | Operations | Overview, Meetings, Sessions, Live board, Messages, Desk scanners | Meetings |
+  | Oversight | Overview, Messages | Overview |
+
+- **Found and fixed:**
+  - Every role saw "Review queue". Opening an application refused operations, coordinators and oversight, but the queue itself (`GET /v1/dealroom/:eventId/applications`) answered them, with every applicant's name. The queue now needs the right to review or assign, like the review.
+  - The Deal Room set-up (`GET /v1/dealroom/:eventId/settings`) answered the whole team. It is now the lead's and reviewers' only. Reviewers already read it, as the rubric and windows they work to, but had no way to reach it; it is in their menu now, read only.
+  - Oversight's first screen was the review queue, which refuses it. Operations' was the desk.
+  - The "Deal Room prototype" link showed to every staff member. It no longer shows in production builds.
+- **Overview** (`/team/overview`, `GET /v1/dealroom/:eventId/overview`): applications, participants, matching, meetings, sessions and follow-ups, as counts. There are no names, no records and no money, so every role reads it. A number links to the screen behind it only for a role that can open that screen.
+- **Emails to the team:** each one links to a screen its recipient can open. Links that go nowhere specific open `/team`, which sends each person to their own first screen.
+- **Tested:**
+  - `apps/api/tests/roles.test.ts` (18 tests): each of the five roles signs in, takes the web app's own menu and first screen, and opens every staff screen's main read. A screen in the menu answers; any other screen is refused. The overview holds no name or amount. Every email to the team opens a screen in its recipient's menu.
+  - The onboarding test now uses the overview, not the set-up, to check that a person removed from the team loses access at once.
+  - All 497 tests pass.
+- **Not done:** the walk in the browser, role by role, needs each role signed in on the browser pane.
+
+### Phase 4: After the summit (22 February to 19 March 2027)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M4.1 | **Pipeline and opportunities** from the summary columns; participant updates; outcomes in five tiers | The pipeline on production matches its records |
+| M4.2 | **Jobs**: weekly digests, monthly review, overdue actions, archive at the conversion end, document deletion at retention | Each job runs once and on time, visible in the job log |
+| M4.3 | **Reports**: every report and CSV from SQL over the summary columns, plus oversight's read-only role | Oversight reads every report without a refusal |
+| M4.4 | **Post-summit scope** as a contracted add-on, if decided (paper gap 17) | The setting exists and defaults to off |
+
+### Phase 5: Exhibition (from 22 March 2027)
+
+The Nairobi Brand & PR Summit in the seed (25 to 27 Nov 2026) is demo data only (D9), so no real exhibition is due before the Deal Room summit. The Exhibition stays on the prototype's local data until this phase.
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M5.0 | Exhibition rules made server-safe: the actor from `ctx`, no `as: "exhibitor"` bypass, refusal reasons | Exhibition's tests pass with the exhibitor acting only on its own company |
+| M5.1 | Halls, booths, floor plan; exhibitor applications and review | An organiser sells a stand on staging |
+| M5.2 | Holds, contracts, invoices, payments (M-Pesa, card, bank lines), reconciliation | A booking paid in two instalments reconciles |
+| M5.3 | Exhibitor portal: people, branding, equipment orders, requirements | An exhibitor completes the portal on a phone |
+| M5.4 | On-site: move-in, deliveries, contractors, show-day doors and occupancy, issues, dismantling, reports | A show day runs on staging with the scanners |
+
+### Phase 6: The apps' API (from 4 January 2027, if D10 says so)
+
+| # | Milestone | Done when |
+| --- | --- | --- |
+| M6.1 | The apps call the same Express API as the web app: bearer tokens for the apps beside the cookie, rate limits per device, an OpenAPI file generated from the contracts | An OpenAPI file lists every endpoint the apps use, and a test app signs in and books a meeting |
+| M6.2 | Push notifications through the outbox | A test device receives a meeting reminder |
+
+## Decisions
+
+| # | Decision | Status or recommendation | Why |
+| --- | --- | --- | --- |
+| D1 | Database | **Decided 11 Nov 2026: PostgreSQL** | Exclusion constraints, point-in-time recovery, JSONB for the aggregates |
+| D2 | Where it runs | **Decided 11 Nov 2026: behind nginx; revised the same day to two processes,** `next start` for the web app and Node for the Express API, on two subdomains (deploy.md). Still open: **managed PostgreSQL with HA and 30-day PITR** (recommended), or self-managed with pgBackRest or WAL-G and a replica on a second server | The PRD asks for 99.95% in summit week, RTO 1 hour, RPO 5 minutes; one server alone can't meet that |
+| D3 | Sign-in | **Our own sessions** as specified under the security model | The flows are specific (codes, scanner PINs, per-event roles); a library hides the rules |
+| D4 | Card payments | **Paystack** or **Pesapal**, whichever Algotech already has an account with | Both take cards in Kenya |
+| D5 | M-Pesa | **Daraja directly**; file the production application in week one | Approval takes one to two weeks |
+| D6 | Files | S3-compatible private bucket with versioning; **choose the region with the DPA in mind** | Storage outside Kenya needs documented safeguards |
+| D7 | Email and SMS | **Email decided 12 Nov 2026: Zoho, over SMTP**, from noreply@algotech.co.ke. SMS still to choose: **Africa's Talking** (register the sender ID now) | Sender ID approval takes one to two weeks |
+| D8 | Background jobs | **pg-boss** in a worker process | Jobs share the database's transactions; no extra infrastructure |
+| D9 | Exhibition timing | **Decided 11 Nov 2026: the Nairobi Brand & PR Summit is demo data only.** Exhibition follows the Deal Room, from 22 Mar 2027 | No real exhibition is due before February, so nothing moves ahead of 15 Dec |
+| D10 | The apps | Confirm whether the Flutter apps are needed for February, or the web on phones is enough | The web is now laid out for phones; the apps add store approval as a risk |
+| D11 | Team | Confirm the number of developers from Phase 1 | The phase windows assume at least two |
+| D12 | Content Security Policy | **Hash-based CSP with Next's experimental SRI**, or inline scripts allowed with strict other directives | A nonce-based CSP is incompatible with partial prerendering, which this app uses |
+| D14 | Staff MFA | **Decided 11 Nov 2026: required, with 7 days' grace.** A staff member may choose "set up later" for 7 days from their first sign-in; the session is marked as skipped, and the sign-in page reminds them. After that, the authenticator is required | Onboarding a team of reviewers shouldn't stall on phones and apps in week one; reviewers see applicants' financials, so the grace is short and ends on its own |
+| D13 | The backend process | **Decided 11 Nov 2026: Express, separate from Next.js, in an npm-workspaces monorepo**, with the API on its own subdomain | One API for the web app and the Flutter apps; the web app holds no database access or secrets; the rules and contracts stay shared |
+
+## Risks
+
+| Risk | What we do |
+| --- | --- |
+| Five weeks to 15 Dec | Day one carries apply, documents, the first half of review and email only; decisions follow on 22 Dec and fees on 8 Jan |
+| M-Pesa approval or the SMS sender ID run late | Filed in week one (M0.1); card and email carry the gate if either is late |
+| Rules drift between the prototype and the server | The server runs the same reducers; their tests run in CI |
+| Leaking data the prototype showed everyone | Services return per-viewer DTOs; `runCommand` checks ownership; M3.6 walks every role |
+| Summit-day connectivity | Offline queues with client ids, polling that recovers, printed backups |
+| One server fails in summit week | Managed PostgreSQL with HA, a warm standby server, a timed failover drill (M3.7) |
+| The aggregate becomes a bottleneck | Budgets are measured in the load tests; hot paths move to targeted commands |
+| Holidays (24 Dec to 1 Jan) | Nothing gated falls in that week |
+| Two processes deploy out of step | The API switches first, and its changes within a release are additive only; a web tab on the old bundle keeps working (deploy.md) |
+
+## How we work on it
+
+- One branch per milestone off `backend`, merged back by pull request. Each pull request:
+  - names its milestone
+  - adds tests for the rules it touches
+  - is checked in the browser on a phone and a laptop
+- Migrations are expand first, contract in the next release, and never edited after merge.
+- This file is updated as milestones close: each row gets the date it was done and its pull request.
