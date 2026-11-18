@@ -129,6 +129,11 @@ export function createDealRoomController(service: DealRoomService) {
       res.set("Cache-Control", "private, no-store").json(await service.messages(sessionOf(res), eventId));
     }) satisfies RequestHandler,
 
+    overview: (async (req, res) => {
+      const { eventId } = EventParams.parse(req.params);
+      res.set("Cache-Control", "private, no-store").json(await service.overview(sessionOf(res), eventId));
+    }) satisfies RequestHandler,
+
     team: (async (req, res) => {
       const { eventId } = EventParams.parse(req.params);
       res.set("Cache-Control", "private, no-store").json((await service.team(sessionOf(res), eventId)) satisfies TeamView);

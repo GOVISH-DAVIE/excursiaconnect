@@ -407,10 +407,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("a new summit from nothing", () 
     expect(changed.dealRoom!.staff.find((x) => x.id === reviewer.id)).toMatchObject({ role: "Coordinator", canDecide: false });
     const user = await db.user.findUniqueOrThrow({ where: { email: at("reviewer") } });
     expect((await db.membership.findFirstOrThrow({ where: { userId: user.id, eventId } })).role).toBe("dr_coordinator");
-    // removed: the Deal Room no longer answers them
-    expect((await call("GET", `/v1/dealroom/${eventId}/settings`, "reviewer")).status).toBe(200);
-    await call("POST", `/v1/admin/events/${eventId}/dealroom/staff/${reviewer.id}/remove`, "admin", {});
+    // as a coordinator they no longer read the set-up, but are still on the team; removed, the Deal Room no longer answers them
     expect((await call("GET", `/v1/dealroom/${eventId}/settings`, "reviewer")).status).toBe(403);
+    expect((await call("GET", `/v1/dealroom/${eventId}/overview`, "reviewer")).status).toBe(200);
+    await call("POST", `/v1/admin/events/${eventId}/dealroom/staff/${reviewer.id}/remove`, "admin", {});
+    expect((await call("GET", `/v1/dealroom/${eventId}/overview`, "reviewer")).status).toBe(403);
     expect(await db.membership.count({ where: { userId: user.id, eventId, revokedAt: null } })).toBe(0);
   });
 });

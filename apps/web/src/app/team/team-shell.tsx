@@ -9,29 +9,12 @@
 import Link from "next/link";
 import { useEffect, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Rail, type NavItem } from "@/components/ui";
+import { Rail } from "@/components/ui";
 import { useSession } from "@/features/auth/hooks/use-session";
 import { useSignOut } from "@/features/auth/hooks/use-sign-in";
 import { useDealRoomEvent } from "@/features/dealroom/hooks/use-deal-room-event";
 import { useTeam } from "@/features/dealroom/hooks/use-team";
-import { rolesOf } from "@/features/auth/roles";
-
-/** The menu, by what the person is: Algotech, an organiser's owner, the Deal Room's team (its lead sets it up). */
-function navFor(r: ReturnType<typeof rolesOf>): NavItem[] {
-  const nav: NavItem[] = [];
-  if (r.admin) nav.push({ href: "/team/admin", label: "Organisers and events" });
-  if (r.superAdmin) nav.push({ href: "/team/admin/team", label: "Algotech team" });
-  if (r.owner) nav.push({ href: "/team/organisation", label: "Organisation and KYC" }, { href: "/team/events", label: "Events" });
-  if (r.dealRoom) nav.push({ href: "/team/applications", label: "Review queue" });
-  if (r.matching) nav.push({ href: "/team/matching", label: "Matching" });
-  if (r.meetings) nav.push({ href: "/team/meetings", label: "Meetings" });
-  if (r.sessions) nav.push({ href: "/team/sessions", label: "Sessions" });
-  if (r.live) nav.push({ href: "/team/live", label: "Live board" });
-  if (r.dealRoom) nav.push({ href: "/team/messages", label: "Messages" });
-  if (r.desk) nav.push({ href: "/team/desk", label: "Desk scanners" });
-  if (r.lead) nav.push({ href: "/team/dealroom/settings", label: "Deal Room settings" });
-  return nav;
-}
+import { menuOf, rolesOf } from "@/features/auth/roles";
 
 const dueDay = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { timeZone: "Africa/Nairobi", day: "numeric", month: "short" });
 
@@ -69,7 +52,7 @@ export function TeamShell({ children }: { children: ReactNode }) {
           }}>
           {signOut.isPending ? "Signing out…" : "Sign out"}
         </button>
-        {roles.dealRoom && (
+        {roles.dealRoom && process.env.NODE_ENV !== "production" && (
           <Link href="/dealroom" className="rounded bg-white/10 px-2.5 py-1 hover:bg-white/20">
             Deal Room prototype
           </Link>
@@ -82,7 +65,7 @@ export function TeamShell({ children }: { children: ReactNode }) {
     <Rail
       persona={persona}
       who={!allowed ? "Checking your sign-in…" : me ? `${me.name}, ${me.role}` : s.user.name}
-      nav={navFor(roles)}
+      nav={menuOf(roles)}
       context={context}
       footer={<span className="text-ok">Live data</span>}
       drawer

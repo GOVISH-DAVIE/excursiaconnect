@@ -65,3 +65,18 @@ export const MessageRow = z.object({
   sentAt: z.string().nullable(),
 });
 export type MessageRow = z.infer<typeof MessageRow>;
+
+/**
+ * The Deal Room at a glance (M3.6): numbers only, for every role on the team, and Oversight's home until its
+ * reports come (M4.3). No names, no records, no documents and no money: conversion values stay with the lead.
+ */
+export const DealRoomOverview = z.object({
+  event: z.object({ id: z.string(), name: z.string(), now: z.string() }),
+  applications: z.object({ started: z.number(), submitted: z.number(), inReview: z.number(), infoRequested: z.number(), decided: z.number() }),
+  participants: z.object({ seekers: z.number(), approved: z.number(), ready: z.number(), providers: z.number(), verified: z.number(), verifiedCapital: z.number(), verifiedPartners: z.number(), challenges: z.number() }),
+  matching: z.object({ approved: z.number(), introduced: z.number(), accepted: z.number() }),
+  meetings: z.object({ proposed: z.number(), confirmed: z.number(), held: z.number(), noShow: z.number() }),
+  sessions: z.object({ planned: z.number(), held: z.number(), attended: z.number() }),
+  followUps: z.object({ open: z.number(), overdue: z.number() }),
+});
+export type DealRoomOverview = z.infer<typeof DealRoomOverview>;

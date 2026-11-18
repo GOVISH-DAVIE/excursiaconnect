@@ -830,7 +830,7 @@ Each milestone from here on builds its feature the same way, as in [architecture
 | M3.3 | **Sessions**: planning, invitations, answers, attendance from the doors and the coordinator, outcomes; sessions and meetings never overlap | The session rules' tests pass on the server **Built 17 Nov 2026:** the team's Sessions page (plan, change, invite, cancel, attendance, outcomes) and sessions in each participant's schedule (accept or decline, with the reason when a meeting is in the way); every refusal says why; a session holds its room, host and whoever accepted in the database too. Door scans wait for the room doors (M2.2). Notes below |
 | M3.4 | **Live board and desk**: 3-second polling with a version, arrivals, outcomes, refills, the daily close-out, the 19:00 report | Two staff phones agree within 5 seconds **Built 17 Nov 2026:** the team's Live board (phone-first: a sheet from the bottom; beside the board on a big screen), arrivals read from the desk's own table, start, outcome and refill with reasons, an outcome recorded once however often it is sent, the close-out, and the 19:00 report as a worker job. Phones poll every 3 seconds against the board's version (304 when nothing changed); a change on one phone shows on another at its next poll. Notes below |
 | M3.5 | **Offline on the day**: live board and scanners queue offline and sync with client ids; conflicts go to the lead; incidents are logged | A forced 10-minute outage loses nothing **Built 17 Nov 2026:** the live board keeps its last copy and a queue on each phone, and syncs it in one request when the server answers again; each record is recorded once, a resend is dropped, a disagreement waits for the lead; each outage is logged and reported to the lead; a page reloaded offline opens on what the phone kept. The desk scanners already queue and sync once (M2.2). Notes below |
-| M3.6 | **Every role, walked through**: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight | No role sees a screen or a record it shouldn't, and no link ends in a refusal |
+| M3.6 | **Every role, walked through**: Bouer's lead and reviewers, Excursia's coordinator and operations, Momentum's oversight | No role sees a screen or a record it shouldn't, and no link ends in a refusal **Built 17 Nov 2026, tested by the API; not yet walked in the browser:** each role's menu now holds only the screens the API lets it read, and each role lands on its main work. Two reads were open to the whole team and are now closed: the review queue and the Deal Room set-up. A read-only Overview, counts only, opens for every role, and is oversight's first screen until M4.3. Notes below |
 | M3.7 | **Freeze and rehearsal**: freeze Fri 22 Jan; rehearsal on staging with real phones Wed 10 Feb; printed backups; restore drill and failover to the standby server | **The summit runs 15 to 18 Feb 2027** |
 
 **Notes on M3.1, matching and introductions, 16 Nov 2026:**
@@ -1075,6 +1075,31 @@ Each milestone from here on builds its feature the same way, as in [architecture
     - On reconnecting, operations' record synced first and the coordinator's became a conflict.
     - The lead chose the coordinator's no-show.
     - Close-out listed the outages.
+
+**Notes on M3.6, every role walked through, 17 Nov 2026:**
+
+- **What each role's menu holds** (`apps/web/src/features/auth/roles.ts`, `menuOf`, which the workspace's rail now uses):
+
+  | Role | Menu | First screen |
+  | --- | --- | --- |
+  | Lead | Overview, Review queue, Matching, Meetings, Sessions, Live board, Messages, Desk scanners, Deal Room settings | Review queue |
+  | Reviewer | Overview, Review queue, Matching, Sessions, Live board, Messages, Deal Room settings (read only) | Review queue |
+  | Coordinator | Overview, Matching, Meetings, Sessions, Live board, Messages, Desk scanners | Matching |
+  | Operations | Overview, Meetings, Sessions, Live board, Messages, Desk scanners | Meetings |
+  | Oversight | Overview, Messages | Overview |
+
+- **Found and fixed:**
+  - Every role saw "Review queue". Opening an application refused operations, coordinators and oversight, but the queue itself (`GET /v1/dealroom/:eventId/applications`) answered them, with every applicant's name. The queue now needs the right to review or assign, like the review.
+  - The Deal Room set-up (`GET /v1/dealroom/:eventId/settings`) answered the whole team. It is now the lead's and reviewers' only. Reviewers already read it, as the rubric and windows they work to, but had no way to reach it; it is in their menu now, read only.
+  - Oversight's first screen was the review queue, which refuses it. Operations' was the desk.
+  - The "Deal Room prototype" link showed to every staff member. It no longer shows in production builds.
+- **Overview** (`/team/overview`, `GET /v1/dealroom/:eventId/overview`): applications, participants, matching, meetings, sessions and follow-ups, as counts. There are no names, no records and no money, so every role reads it. A number links to the screen behind it only for a role that can open that screen.
+- **Emails to the team:** each one links to a screen its recipient can open. Links that go nowhere specific open `/team`, which sends each person to their own first screen.
+- **Tested:**
+  - `apps/api/tests/roles.test.ts` (18 tests): each of the five roles signs in, takes the web app's own menu and first screen, and opens every staff screen's main read. A screen in the menu answers; any other screen is refused. The overview holds no name or amount. Every email to the team opens a screen in its recipient's menu.
+  - The onboarding test now uses the overview, not the set-up, to check that a person removed from the team loses access at once.
+  - All 497 tests pass.
+- **Not done:** the walk in the browser, role by role, needs each role signed in on the browser pane.
 
 ### Phase 4: After the summit (22 February to 19 March 2027)
 

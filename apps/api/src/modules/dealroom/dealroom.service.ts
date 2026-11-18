@@ -2,11 +2,12 @@
  * The Deal Room team's use cases. Deny by default: the signed-in person must be on this event's Deal Room team; the
  * rules then check their role. Every change goes through runCommand (dealroom.commands.ts).
  */
-import type { ApplicationSummary, AssignReviewerInput, MessageRow, StaffMember, TeamView } from "@excursia/contracts/dealroom";
+import type { ApplicationSummary, AssignReviewerInput, DealRoomOverview, MessageRow, StaffMember, TeamView } from "@excursia/contracts/dealroom";
 import type { CheckKycInput, DecideInput, DocumentLink, ReadinessInput, RecommendInput, RequestInfoInput, ReviewView, RfiExpiryInput, SanctionsInput, ScoreInput, VerifyInput, WaiveFeeInput } from "@excursia/contracts/review";
 import type { Action } from "@excursia/domain/core/reducer";
 import { nairobiNow, type Actor } from "@excursia/domain/ctx";
-import { decisionOf, drCan, roleOf } from "@excursia/domain/dealroom/logic";
+import { bothAccepted, decisionOf, drCan, funnel, oppOpen, oppOverdue, roleOf } from "@excursia/domain/dealroom/logic";
+import { stateOf } from "./dealroom.commands";
 import { dealRoomGaps } from "@excursia/domain/dealroom/defaults";
 import type { DealRoomSettings, DealRoomSettingsInput, ExtendRetentionInput } from "@excursia/contracts/onboarding";
 import { retentionDate } from "@excursia/domain/dealroom/apply";
@@ -61,6 +62,12 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
     const row = await repo.staffForUser(session.user.id, eventId);
     if (!row) throw new HttpError("forbidden", "You're not on this event's Deal Room team.");
     return { actor: { kind: "staff", id: row.id }, staff: row.record as unknown as DrStaff };
+  }
+
+  /** The person, if their role has any of these rights; refused with the reason otherwise. */
+  function drCanAny<T extends { staff: DrStaff }>(s: T, rights: Parameters<typeof drCan>[1][], what: string): T {
+    if (!rights.some((r) => drCan(s.staff, r))) throw new HttpError("forbidden", `Your role, ${s.staff.role}, ${what}.`);
+    return s;
   }
 
   /** Reviewers and the people who assign them: the roles that open applications. */
@@ -265,7 +272,8 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
 
     /** The Deal Room's settings: everyone on the team reads them; the lead changes them. */
     async settings(session: Resolved, eventId: string): Promise<DealRoomSettings> {
-      const { staff } = await staffActor(session, eventId);
+      // the lead sets it up; reviewers read it, as the rubric and windows they work to (M3.6); the rest of the team doesn't
+      const { staff } = drCanAny(await staffActor(session, eventId), ["configure", "review", "assign"], "doesn't read the Deal Room's set-up");
       const row = await repo.settings(eventId);
       if (!row) throw new HttpError("not_found", "This event has no Deal Room.");
       const cfg = (row.record as unknown as DrConfigRecord).config;
@@ -330,6 +338,36 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
       return this.settings(session, eventId);
     },
 
+    /** The Deal Room at a glance, for anyone on the team: counts only (see the contract). */
+    async overview(session: Resolved, eventId: string): Promise<DealRoomOverview> {
+      await staffActor(session, eventId);
+      const stored = await repo.load(eventId);
+      if (!stored) throw new HttpError("not_found", "This event has no Deal Room.");
+      const at = nairobiNow(now());
+      const state = stateOf(eventId, stored, at);
+      const dr = state.dealRoom;
+      const f = funnel(dr, eventId);
+      const event = state.events.find((e) => e.id === eventId);
+      const matches = dr.matches.filter((m) => m.eventId === eventId);
+      const meetings = dr.meetings.filter((m) => m.eventId === eventId);
+      const sessions = dr.sessions.filter((x) => x.eventId === eventId && !x.cancelled);
+      const opps = dr.opportunities.filter((o) => o.eventId === eventId);
+      return {
+        event: { id: eventId, name: event?.name ?? eventId, now: at },
+        applications: { started: f.started, submitted: f.submitted, inReview: f.inReview, infoRequested: f.infoRequested, decided: f.decided },
+        participants: { seekers: f.seekers, approved: f.qualifiedSeekers, ready: f.ready, providers: f.providers, verified: f.verified, verifiedCapital: f.verifiedCapital, verifiedPartners: f.verifiedPartners, challenges: f.challenges },
+        matching: { approved: matches.filter((m) => m.decision === "Approved").length, introduced: matches.filter((m) => !!m.intro).length, accepted: matches.filter(bothAccepted).length },
+        meetings: {
+          proposed: meetings.filter((m) => m.status === "Proposed" || m.status === "Change requested").length,
+          confirmed: meetings.filter((m) => m.status === "Confirmed" || m.status === "In progress").length,
+          held: meetings.filter((m) => m.status === "Held").length,
+          noShow: meetings.filter((m) => m.status === "No-show").length,
+        },
+        sessions: { planned: sessions.filter((x) => x.start > at).length, held: sessions.filter((x) => x.end <= at).length, attended: sessions.reduce((n, x) => n + x.attended.length, 0) },
+        followUps: { open: opps.filter(oppOpen).length, overdue: opps.filter((o) => oppOverdue(o, at)).length },
+      };
+    },
+
     /** What the Deal Room has sent, and whether it went (M1.4). Everyone on the team reads it. */
     async messages(session: Resolved, eventId: string): Promise<MessageRow[]> {
       await staffActor(session, eventId);
@@ -352,7 +390,8 @@ export function createDealRoomService({ repo, commands, storage, now, allowUnsca
     },
 
     async applications(session: Resolved, eventId: string, query: { status?: string; assignee?: string }): Promise<ApplicationSummary[]> {
-      const { staff } = await staffActor(session, eventId);
+      // the queue names every applicant: only the roles that open applications read it (M3.6)
+      const { staff } = await reviewer(session, eventId);
       const assigneeId = query.assignee === "me" ? staff.id : query.assignee === "none" ? null : query.assignee;
       return (await repo.listApplications(eventId, { status: query.status, assigneeId })).map(toSummary);
     },

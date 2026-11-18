@@ -1,6 +1,6 @@
 /** The Deal Room's calls to the API: the only file in the web app that knows these paths. */
 import { z } from "zod";
-import { ApplicationSummary, MessageRow, TeamView, type AssignReviewerInput } from "@excursia/contracts/dealroom";
+import { ApplicationSummary, DealRoomOverview, MessageRow, TeamView, type AssignReviewerInput } from "@excursia/contracts/dealroom";
 import {
   DocumentLink, ReviewView, type CheckKycInput, type DecideInput, type ReadinessInput, type RecommendInput, type RequestInfoInput, type RfiExpiryInput, type SanctionsInput,
   type ScoreInput, type VerifyInput, type WaiveFeeInput,
@@ -33,6 +33,7 @@ export const dealRoomApi = {
   verify: (eventId: string, appId: string, input: VerifyInput) => http.post(`${one(eventId, appId)}/verification`, { body: input, schema: ReviewView }),
   waiveFee: (eventId: string, appId: string, input: WaiveFeeInput) => http.post(`${one(eventId, appId)}/fee/waive`, { body: input, schema: ReviewView }),
   documentLink: (eventId: string, appId: string, docId: string) => http.get(`/v1/dealroom/${eventId}/applications/${appId}/documents/${docId}`, { schema: DocumentLink }),
+  overview: (eventId: string) => http.get(`/v1/dealroom/${eventId}/overview`, { schema: DealRoomOverview }),
   messages: (eventId: string) => http.get(`/v1/dealroom/${eventId}/messages`, { schema: z.array(MessageRow) }),
   assignReviewer: (eventId: string, input: AssignReviewerInput) =>
     http.post(`/v1/dealroom/${eventId}/applications/assign`, { body: input, schema: z.array(ApplicationSummary) }),

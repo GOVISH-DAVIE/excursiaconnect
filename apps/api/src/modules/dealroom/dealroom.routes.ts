@@ -11,6 +11,8 @@ export function dealRoomRoutes(c: DealRoomController): Router {
   r.get("/:eventId/team", requireSession({ staff: true }), c.team);
   r.get("/:eventId/settings", requireSession({ staff: true }), c.settings);
   r.get("/:eventId/messages", requireSession({ staff: true }), c.messages);
+  // the Deal Room at a glance, for anyone on the team (M3.6)
+  r.get("/:eventId/overview", requireSession({ staff: true }), c.overview);
   r.put("/:eventId/settings", requireSession({ staff: true }), c.saveSettings);
   r.post("/:eventId/settings/retention", requireSession({ staff: true }), c.extendRetention);
   r.get("/:eventId/applications", requireSession({ staff: true }), c.applications);
